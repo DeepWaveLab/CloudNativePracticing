@@ -1,0 +1,2994 @@
+
+<!doctype html>
+<html lang="zh-TW" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="雲原生實作課程 —— GPU 排程 runbook、踩雷解法與反思">
+      
+      
+      
+        <link rel="canonical" href="https://deepwavelab.github.io/CloudNativePracticing/runbook/sprint2-day1-bpftrace-basics/">
+      
+      
+        <link rel="prev" href="../sprint2-day0-ebpf-concepts/">
+      
+      
+        <link rel="next" href="../sprint2-day2-bpftrace-kubernetes/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Day 1 · bpftrace 三支經典工具 - Cloud Native Lab Course</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/terminal.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#day-1-bpftrace-bt" class="md-skip">
+          跳轉到
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="頁首">
+    <a href="../.." title="Cloud Native Lab Course" class="md-header__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Cloud Native Lab Course
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Day 1 · bpftrace 三支經典工具
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換深色模式"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="切換深色模式" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換淺色模式"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="切換淺色模式" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜尋" placeholder="搜尋" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="搜尋">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="分享" aria-label="分享" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="清除" aria-label="清除" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜尋引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="標籤" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  首頁
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint1-day0-azure-aks-foundation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 1 · GPU 排程三部曲
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../sprint2-day0-ebpf-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 2 · eBPF 與執行期安全
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="導覽列" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Cloud Native Lab Course" class="md-nav__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Cloud Native Lab Course
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首頁
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    首頁
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day0-azure-aks-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 環境建置與成本紀律
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day1-kai-queue-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · KAI 安裝與 Queue 基礎
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day2-gang-scheduling-preemption/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Gang Scheduling 與搶占
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day3-hami-memory-isolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · HAMi 安裝與 VRAM 硬隔離
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day4-hami-kai-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · HAMi 進階與 KAI 整合
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day5-hami-webui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · HAMi-WebUI 觀測介面
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day6-dra-simulated-devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · DRA 概念與模擬裝置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day7-dra-aks-real-gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · DRA 真卡實測
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day8-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 綜合:三者分工決策表
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day0-ebpf-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · eBPF 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · bpftrace 三支經典工具
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · bpftrace 三支經典工具
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#bt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        .bt 腳本的結構
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=".bt 腳本的結構">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#begin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BEGIN:程式掛上去之前跑一次
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        探針型別加目標:冒號分隔,可以一次掛多個
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        動作區塊與 map:跨探針傳遞狀態
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#filter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        filter:探針與動作之間的判斷式
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        END:收尾
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        本章環境與步驟
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-bpftrace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1:喚醒環境並確認 bpftrace 的版本與來源
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2execsnoopopensnooptcpconnect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2:execsnoop、opensnoop、tcpconnect 各驗一次
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 2:execsnoop、opensnoop、tcpconnect 各驗一次">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#execsnoop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        execsnoop:新行程的執行
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#opensnoop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        opensnoop:檔案開啟
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tcpconnect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tcpconnect:對外連線
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        三支工具的共同盲點
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3:自寫腳本,追出指定目錄的寫入者
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 3:自寫腳本,追出指定目錄的寫入者">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        path() 在編譯階段就被擋下
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dentry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        從 dentry 鏈自己組出路徑
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        兩個寫入者,一份輸出
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-kernel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4:一座叢集、兩顆 kernel、同一支腳本
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 4:一座叢集、兩顆 kernel、同一支腳本">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        比對兩邊載進核心的位元碼
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        這組數字的適用範圍
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5bcc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5:bcc 的實測對照
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 5:bcc 的實測對照">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        安裝的體積與時間
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        在容器裡執行的前置條件
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        啟動延遲與輸出差異
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6:收尾——先量再刪
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        誠實的差距
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收 checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷記錄
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="地雷記錄">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 1:叢集停機期間 API server 的 DNS 紀錄會消失,工作站把那個 NXDOMAIN 快取起來
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 2:同名的 execsnoop,兩個實作對失敗的 exec 預設行為相反
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 3:path() 被 bpftrace 全域關掉,錯誤訊息卻推給「你的 kernel 版本」
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 4:mount --bind /proc/1/root/… 綁到的是容器自己的目錄
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 5:kill -INT 停不掉正在編譯的 execsnoop-bpfcc,它會變成孤兒繼續跑
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 6:bcc 要 kernel headers 是執行期需求,不是安裝期需求
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 7:「bcc 要編譯器、bpftrace 不用」是錯的——兩邊都依賴 LLVM
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的東西
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_14" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_15" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day2-bpftrace-kubernetes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · 把核心事件接回 Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day3-falco-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Falco 安裝與出廠規則
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day4-falco-custom-rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · 自訂規則、誤報調校與告警路由
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day5-tetragon-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Tetragon 與 TracingPolicy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day6-tetragon-enforcement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · 從偵測到攔截
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day7-cilium-kubeproxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Cilium 與 kube-proxy replacement
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day8-cilium-network-policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · CiliumNetworkPolicy(L3/L4 → L7)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day9-hubble/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Hubble 可觀測性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 綜合:四套工具的分工
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#bt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        .bt 腳本的結構
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label=".bt 腳本的結構">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#begin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BEGIN:程式掛上去之前跑一次
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        探針型別加目標:冒號分隔,可以一次掛多個
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        動作區塊與 map:跨探針傳遞狀態
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#filter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        filter:探針與動作之間的判斷式
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#end" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        END:收尾
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        本章環境與步驟
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-bpftrace" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1:喚醒環境並確認 bpftrace 的版本與來源
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2execsnoopopensnooptcpconnect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2:execsnoop、opensnoop、tcpconnect 各驗一次
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 2:execsnoop、opensnoop、tcpconnect 各驗一次">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#execsnoop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        execsnoop:新行程的執行
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#opensnoop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        opensnoop:檔案開啟
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tcpconnect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tcpconnect:對外連線
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        三支工具的共同盲點
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3:自寫腳本,追出指定目錄的寫入者
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 3:自寫腳本,追出指定目錄的寫入者">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        path() 在編譯階段就被擋下
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dentry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        從 dentry 鏈自己組出路徑
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        兩個寫入者,一份輸出
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-kernel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4:一座叢集、兩顆 kernel、同一支腳本
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 4:一座叢集、兩顆 kernel、同一支腳本">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        比對兩邊載進核心的位元碼
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        這組數字的適用範圍
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5bcc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5:bcc 的實測對照
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 5:bcc 的實測對照">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        安裝的體積與時間
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        在容器裡執行的前置條件
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        啟動延遲與輸出差異
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6:收尾——先量再刪
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        誠實的差距
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收 checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷記錄
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="地雷記錄">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 1:叢集停機期間 API server 的 DNS 紀錄會消失,工作站把那個 NXDOMAIN 快取起來
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 2:同名的 execsnoop,兩個實作對失敗的 exec 預設行為相反
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 3:path() 被 bpftrace 全域關掉,錯誤訊息卻推給「你的 kernel 版本」
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 4:mount --bind /proc/1/root/… 綁到的是容器自己的目錄
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 5:kill -INT 停不掉正在編譯的 execsnoop-bpfcc,它會變成孤兒繼續跑
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 6:bcc 要 kernel headers 是執行期需求,不是安裝期需求
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 7:「bcc 要編譯器、bpftrace 不用」是錯的——兩邊都依賴 LLVM
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的東西
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_14" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_15" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="day-1-bpftrace-bt">Day 1: bpftrace 三支經典工具與第一支自寫的 <code>.bt</code> 腳本——語法結構、各工具的限制,與追出目錄的寫入者<a class="headerlink" href="#day-1-bpftrace-bt" title="Permanent link">&para;</a></h1>
+<p><img align="right" alt="bpftrace 官方標誌" src="../../assets/logos/bpftrace-logo.svg#only-light" width="150" />
+<img align="right" alt="bpftrace 官方標誌" src="../../assets/logos/bpftrace-logo-dark.svg#only-dark" width="150" /></p>
+<blockquote>
+<p><a href="../sprint2-day0-ebpf-concepts/">Day 0</a> 把環境釘好了:特權容器裡的 bpftrace 列得出 133,022 個掛載點,核心自帶的 BTF 也驗過在。但掛載點多不等於問得出答案。今天要問三個具體問題——這台機器剛剛執行了什麼、誰開了哪些檔案、這顆容器連去哪裡——三支現成工具各自只答得出一半,而且每一半的邊界都是量出來的,不是抄來的。剩下那一半自己寫:本章最後那支腳本會在同一份輸出裡指名容器內與節點上兩個寫入者,而它之所以不能用最直覺的寫法,是因為 bpftrace 把還原路徑的那個函式關掉了。</p>
+</blockquote>
+<div class="admonition abstract">
+<p class="admonition-title">你在課程的哪裡</p>
+<ul>
+<li><strong>Day 0</strong>:eBPF 的概念與環境就緒——特權 DaemonSet、容器內自己裝的 bpftrace、核心自帶的 BTF,以及「在 A 容器追得到 B 容器」的第一次驗證。</li>
+<li><strong>今天</strong>:跑三支經典工具並量出各自的邊界、拆解一支 <code>.bt</code> 腳本的語法、自己寫一支「誰在寫這個目錄」。驗收:自寫腳本在同一份輸出裡指名容器內與節點上兩個寫入者的 PID、comm 與路徑。</li>
+<li><strong>Day 2</strong>:核心看得到一切,卻不知道事件屬於哪一顆 pod——把事件接回 Kubernetes 物件。</li>
+</ul>
+</div>
+<h2 id="bt"><code>.bt</code> 腳本的結構<a class="headerlink" href="#bt" title="Permanent link">&para;</a></h2>
+<p>bpftrace 的語言骨架是跟 awk 借的。awk 的 <code>BEGIN {} /pattern/ {action} END {}</code> 換成 bpftrace 就是「掛在哪裡 / 什麼條件下 / 做什麼」,三段式,不多也不少。所以讀一支 <code>.bt</code> 之前,先看清楚一個事件從發生到印出來要經過哪幾層:</p>
+<pre class="mermaid"><code>flowchart TB
+    A["目標容器&lt;br/&gt;發出 openat() 之類的事件"] --&gt; B["核心掛載點&lt;br/&gt;tracepoint / kprobe / kfunc"]
+    B --&gt; C["filter:在核心裡求值&lt;br/&gt;不符合就不送資料"]
+    C --&gt; D["動作區塊:在核心裡執行&lt;br/&gt;printf 或寫進 map"]
+    D --&gt; E["追蹤容器裡的 bpftrace&lt;br/&gt;讀回 map、輸出"]</code></pre>
+<p>中間那兩層是 eBPF 追蹤便宜的原因:條件判斷與聚合都發生在核心裡,不符合條件的事件連一個位元組都不會送到使用者空間。</p>
+<p>以下以 <code>/usr/sbin/opensnoop.bt</code> 為例,它 46 行裡把每一個語法元素都用到一次,而且步驟 2 就會實際跑它。<strong>每一段都是那支腳本的原文。</strong></p>
+<h3 id="begin"><code>BEGIN</code>:程式掛上去之前跑一次<a class="headerlink" href="#begin" title="Permanent link">&para;</a></h3>
+<div class="language-awk highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nb">BEGIN</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="p">{</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="kr">printf</span><span class="p">(</span><span class="s2">&quot;Tracing open syscalls... Hit Ctrl-C to end.\n&quot;</span><span class="p">);</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="kr">printf</span><span class="p">(</span><span class="s2">&quot;%-6s %-16s %4s %3s %s\n&quot;</span><span class="p">,</span> <span class="s2">&quot;PID&quot;</span><span class="p">,</span> <span class="s2">&quot;COMM&quot;</span><span class="p">,</span> <span class="s2">&quot;FD&quot;</span><span class="p">,</span> <span class="s2">&quot;ERR&quot;</span><span class="p">,</span> <span class="s2">&quot;PATH&quot;</span><span class="p">);</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="p">}</span>
+</span></code></pre></div>
+<p><code>BEGIN</code> 不是探針,它在所有探針掛上之前執行一次,慣例用途就是印表頭與初始化;對應的 <code>END</code> 在收工時跑一次。</p>
+<h3 id="_1">探針型別加目標:冒號分隔,可以一次掛多個<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h3>
+<div class="language-awk highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nx">tracepoint</span><span class="o">:</span><span class="nx">syscalls</span><span class="o">:</span><span class="nx">sys_enter_open</span><span class="p">,</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nx">tracepoint</span><span class="o">:</span><span class="nx">syscalls</span><span class="o">:</span><span class="nx">sys_enter_openat</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="p">{</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="err">@</span><span class="nx">filename</span><span class="p">[</span><span class="nx">tid</span><span class="p">]</span> <span class="o">=</span> <span class="nx">args</span><span class="p">.</span><span class="nx">filename</span><span class="p">;</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="p">}</span>
+</span></code></pre></div>
+<p><code>tracepoint</code> 是<strong>探針型別</strong>,代表掛在核心靜態定義的追蹤點上;同一個位置也可以寫 <code>kprobe:</code>(動態掛核心函式)、<code>kfunc:</code>(BTF 型別化的函式進入點)、<code>uprobe:</code>(使用者空間函式)。冒號後面的 <code>syscalls:sys_enter_openat</code> 是<strong>目標</strong>——tracepoint 的目標是「類別:名稱」,<code>kprobe</code> 的目標就是函式名(<code>kprobe:tcp_connect</code>)。</p>
+<p>逗號把同一個動作區塊掛到多個探針上,這裡一次處理 <code>open</code> 與 <code>openat</code> 兩個 syscall。至於 <code>args.filename</code>,那是這個 tracepoint 的參數;tracepoint 的參數格式由核心自己公布在 <code>/sys/kernel/debug/tracing/events/…/format</code>,跨核心版本相對穩定,這是官方工具偏好 tracepoint 勝於 kprobe 的原因。</p>
+<h3 id="map">動作區塊與 map:跨探針傳遞狀態<a class="headerlink" href="#map" title="Permanent link">&para;</a></h3>
+<p><code>@filename[tid] = args.filename;</code> 這一行就是 <strong>map</strong>。</p>
+<p><code>@</code> 開頭的是 map:全域、活在核心裡的雜湊表、能被使用者空間讀回來;<code>$</code> 開頭的是區域變數,只活在這一次探針執行裡。<code>[tid]</code> 是 key,用執行緒 id 當 key 是 bpftrace 最常見的慣用法——<strong>把「進入時知道的東西」寄放起來,等「離開時」再取出來</strong>。原因就寫在這支腳本的形狀裡:<code>sys_enter_openat</code> 知道檔名但不知道結果,<code>sys_exit_openat</code> 知道結果但拿不到檔名。</p>
+<p>沒有宣告、沒有型別、沒有大小:bpftrace 從第一次賦值推導型別並自動建 map。</p>
+<p>這是 map 的「暫存」用法。另一種用法是聚合,步驟 3 自寫的腳本用的就是 <code>@bytes[comm, pid] = sum(args.count);</code>——<code>sum()</code> 是聚合函式,同族還有 <code>count()</code>、<code>avg()</code>、<code>hist()</code>、<code>lhist()</code>,key 可以是多個欄位組成的 tuple。聚合在核心裡累加,使用者空間只在最後拿一次結果,這是 bpftrace 統計百萬級事件不會塞爆管線的原因。</p>
+<h3 id="filter">filter:探針與動作之間的判斷式<a class="headerlink" href="#filter" title="Permanent link">&para;</a></h3>
+<div class="language-awk highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nx">tracepoint</span><span class="o">:</span><span class="nx">syscalls</span><span class="o">:</span><span class="nx">sys_exit_open</span><span class="p">,</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nx">tracepoint</span><span class="o">:</span><span class="nx">syscalls</span><span class="o">:</span><span class="nx">sys_exit_openat</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="sr">/@filename[tid]/</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="p">{</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="o">$</span><span class="nx">ret</span> <span class="o">=</span> <span class="nx">args</span><span class="p">.</span><span class="nx">ret</span><span class="p">;</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="o">$</span><span class="nx">fd</span> <span class="o">=</span> <span class="o">$</span><span class="nx">ret</span> <span class="o">&gt;=</span> <span class="mi">0</span> <span class="o">?</span> <span class="o">$</span><span class="nx">ret</span> <span class="o">:</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="o">$</span><span class="nx">errno</span> <span class="o">=</span> <span class="o">$</span><span class="nx">ret</span> <span class="o">&gt;=</span> <span class="mi">0</span> <span class="o">?</span> <span class="mi">0</span> <span class="o">:</span> <span class="o">-</span> <span class="o">$</span><span class="nx">ret</span><span class="p">;</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="kr">printf</span><span class="p">(</span><span class="s2">&quot;%-6d %-16s %4d %3d %s\n&quot;</span><span class="p">,</span> <span class="nx">pid</span><span class="p">,</span> <span class="nx">comm</span><span class="p">,</span> <span class="o">$</span><span class="nx">fd</span><span class="p">,</span> <span class="o">$</span><span class="nx">errno</span><span class="p">,</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>        <span class="nx">str</span><span class="p">(</span><span class="err">@</span><span class="nx">filename</span><span class="p">[</span><span class="nx">tid</span><span class="p">]));</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    <span class="kr">delete</span><span class="p">(</span><span class="err">@</span><span class="nx">filename</span><span class="p">[</span><span class="nx">tid</span><span class="p">]);</span>
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="p">}</span>
+</span></code></pre></div>
+<p><code>/…/</code> 是 filter(官方文件叫 predicate),在動作區塊之前求值,為假就整個事件跳過。這裡的條件 <code>/@filename[tid]/</code> 讀作「這個 tid 有寄放過檔名嗎」——沒有進入紀錄的離開事件直接丟掉,避免追蹤剛啟動時只抓到後半段的孤兒事件。</p>
+<p>其餘幾樣一次看完:<code>$ret</code>、<code>$fd</code>、<code>$errno</code> 是區域變數,三元運算子照 C 的寫法;<code>str()</code> 把核心裡的指標讀成字串(底層是 <code>bpf_probe_read_str</code>),所以 map 存的是指標,印的時候才解參考;<code>delete()</code> 把用完的 key 拿掉,不刪的話 map 會一路長大,而 map 有容量上限。</p>
+<h3 id="end"><code>END</code>:收尾<a class="headerlink" href="#end" title="Permanent link">&para;</a></h3>
+<p>腳本的最後一段只有 <code>END { clear(@filename); }</code>。<code>clear()</code> 清掉整個 map,這一步不是為了釋放核心記憶體(程式一結束核心就收回了),而是為了不要在收工時把整張 map 印出來——bpftrace 預設會在結束時把所有還活著的 map dump 出來,而 <code>@filename</code> 是內部用的暫存,印出來只是雜訊。</p>
+<h3 id="_2">本章環境與步驟<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h3>
+<p>環境沿用 Day 0 蓋好的 AKS <code>&lt;cluster&gt;</code>(K8s 1.35.6):<code>ebpf</code> pool 兩台 <code>Standard_D2as_v5</code> spot(kernel 6.8.0-1062-azure),另外借 system pool 上那台 kernel 6.8.0-1059-azure 的節點當對照。工作負載一律丟在 <code>ebpf-lab</code> namespace,追蹤跑在特權 pod <code>ebpf-lab-przdr</code>,被追蹤的動作發生在同一顆節點的 <code>trace-target</code>。</p>
+<p>六個步驟:確認 bpftrace 的版本與來源 → 三支經典工具各驗一次 → 自己寫一支腳本(本日驗收) → 同一支腳本丟到兩顆不同 kernel 上比對位元碼 → bcc 的實測對照 → 收尾歸零。</p>
+<h2 id="_3">步驟<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<h3 id="1-bpftrace">步驟 1:喚醒環境並確認 bpftrace 的版本與來源<a class="headerlink" href="#1-bpftrace" title="Permanent link">&para;</a></h3>
+<p>叢集在前一天收工時停掉了,開工第一件事是 <code>az aks start</code>(本次 4 分 36 秒),再把 <code>ebpf</code> pool 從 0 <code>az aks nodepool scale</code> 回 2(2 分 09 秒)。<code>az</code> 一路順暢,但接下來的 <code>kubectl</code> 會連不上,而且錯誤訊息會把你指向完全錯的方向,診斷與正解見<a href="#mine-1">地雷 1</a>。繞過之後三顆節點都在:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>nodes<span class="w"> </span>-o<span class="w"> </span>custom-columns<span class="o">=</span><span class="s1">&#39;NODE:…,KERNEL:…,IMAGE:…&#39;</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">NODE                             KERNEL             IMAGE</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="go">aks-ebpf-80832270-vmss000002     6.8.0-1062-azure   AKSUbuntu-2404gen2containerd-202607.20.0</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="go">aks-ebpf-80832270-vmss000003     6.8.0-1062-azure   AKSUbuntu-2404gen2containerd-202607.20.0</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="go">aks-system-35459509-vmss000002   6.8.0-1059-azure   AKSUbuntu-2404gen2containerd-202607.09.0</span>
+</span></code></pre></div>
+<p>Day 0 記過的那組 kernel 落差原封不動地回來了,重開機沒有把 system pool 追平——步驟 4 就靠這個落差。順帶一個小提醒:<code>az aks stop</code> 再 <code>start</code> 之後,三台的 VMSS 實例編號全部換過,節點名字不是穩定識別。</p>
+<p>DaemonSet 逐字重用 Day 0 的檔案,<code>trace-target</code> 多掛一個 hostPath 監看目錄(步驟 3 要用)——容器內的掛載路徑刻意跟節點路徑寫成同一個:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># 02-target-pod.yaml:Day 0 那份的 containers[0] 與 spec 各補一段</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">    </span><span class="nt">volumeMounts</span><span class="p">:</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">watch</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">      </span><span class="nt">mountPath</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/var/log/day1-watch</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w"> </span><span class="w w-Error"> </span><span class="nt">volumes</span><span class="p">:</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">watch</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">    </span><span class="nt">hostPath</span><span class="p">:</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">      </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/var/log/day1-watch</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">      </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">DirectoryOrCreate</span>
+</span></code></pre></div>
+<p>另外在 system pool 上多放一顆特權 pod(步驟 4 要用),要求量刻意壓到最低——那台只有 2 vCPU,還住著 Sprint 1 留下的常駐元件:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span><span class="m">05</span>-ebpf-lab-system.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="s">kind: Pod</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="s">metadata:</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="s">  name: ebpf-lab-system</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="s">  namespace: ebpf-lab</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="s">  labels:</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="s">    app: ebpf-lab-system</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="s">spec:</span>
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="s">  hostPID: true</span>
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="s">  nodeSelector:</span>
+</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="s">    kubernetes.azure.com/agentpool: system</span>
+</span><span id="__span-5-13"><a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="s">  containers:</span>
+</span><span id="__span-5-14"><a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="s">  - name: probe</span>
+</span><span id="__span-5-15"><a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="s">    image: mcr.microsoft.com/mirror/docker/library/ubuntu:24.04</span>
+</span><span id="__span-5-16"><a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="s">    command: [&quot;sleep&quot;, &quot;infinity&quot;]</span>
+</span><span id="__span-5-17"><a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a><span class="s">    securityContext:</span>
+</span><span id="__span-5-18"><a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a><span class="s">      privileged: true</span>
+</span><span id="__span-5-19"><a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a><span class="s">    resources:</span>
+</span><span id="__span-5-20"><a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a><span class="s">      requests:</span>
+</span><span id="__span-5-21"><a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a><span class="s">        cpu: 10m</span>
+</span><span id="__span-5-22"><a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a><span class="s">        memory: 64Mi</span>
+</span><span id="__span-5-23"><a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a><span class="s">    volumeMounts:</span>
+</span><span id="__span-5-24"><a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a><span class="s">    - name: sys</span>
+</span><span id="__span-5-25"><a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a><span class="s">      mountPath: /sys</span>
+</span><span id="__span-5-26"><a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a><span class="s">    - name: debugfs</span>
+</span><span id="__span-5-27"><a id="__codelineno-5-27" name="__codelineno-5-27" href="#__codelineno-5-27"></a><span class="s">      mountPath: /sys/kernel/debug</span>
+</span><span id="__span-5-28"><a id="__codelineno-5-28" name="__codelineno-5-28" href="#__codelineno-5-28"></a><span class="s">    - name: watch</span>
+</span><span id="__span-5-29"><a id="__codelineno-5-29" name="__codelineno-5-29" href="#__codelineno-5-29"></a><span class="s">      mountPath: /var/log/day1-watch</span>
+</span><span id="__span-5-30"><a id="__codelineno-5-30" name="__codelineno-5-30" href="#__codelineno-5-30"></a><span class="s">  volumes:</span>
+</span><span id="__span-5-31"><a id="__codelineno-5-31" name="__codelineno-5-31" href="#__codelineno-5-31"></a><span class="s">  - name: sys</span>
+</span><span id="__span-5-32"><a id="__codelineno-5-32" name="__codelineno-5-32" href="#__codelineno-5-32"></a><span class="s">    hostPath:</span>
+</span><span id="__span-5-33"><a id="__codelineno-5-33" name="__codelineno-5-33" href="#__codelineno-5-33"></a><span class="s">      path: /sys</span>
+</span><span id="__span-5-34"><a id="__codelineno-5-34" name="__codelineno-5-34" href="#__codelineno-5-34"></a><span class="s">      type: Directory</span>
+</span><span id="__span-5-35"><a id="__codelineno-5-35" name="__codelineno-5-35" href="#__codelineno-5-35"></a><span class="s">  - name: debugfs</span>
+</span><span id="__span-5-36"><a id="__codelineno-5-36" name="__codelineno-5-36" href="#__codelineno-5-36"></a><span class="s">    hostPath:</span>
+</span><span id="__span-5-37"><a id="__codelineno-5-37" name="__codelineno-5-37" href="#__codelineno-5-37"></a><span class="s">      path: /sys/kernel/debug</span>
+</span><span id="__span-5-38"><a id="__codelineno-5-38" name="__codelineno-5-38" href="#__codelineno-5-38"></a><span class="s">      type: Directory</span>
+</span><span id="__span-5-39"><a id="__codelineno-5-39" name="__codelineno-5-39" href="#__codelineno-5-39"></a><span class="s">  - name: watch</span>
+</span><span id="__span-5-40"><a id="__codelineno-5-40" name="__codelineno-5-40" href="#__codelineno-5-40"></a><span class="s">    hostPath:</span>
+</span><span id="__span-5-41"><a id="__codelineno-5-41" name="__codelineno-5-41" href="#__codelineno-5-41"></a><span class="s">      path: /var/log/day1-watch</span>
+</span><span id="__span-5-42"><a id="__codelineno-5-42" name="__codelineno-5-42" href="#__codelineno-5-42"></a><span class="s">      type: DirectoryOrCreate</span>
+</span><span id="__span-5-43"><a id="__codelineno-5-43" name="__codelineno-5-43" href="#__codelineno-5-43"></a><span class="s">EOF</span>
+</span></code></pre></div>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-o<span class="w"> </span>wide
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="go">NAME              READY   STATUS    AGE   NODE</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="go">ebpf-lab-548l5    1/1     Running   19s   aks-ebpf-80832270-vmss000002</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="go">ebpf-lab-przdr    1/1     Running   19s   aks-ebpf-80832270-vmss000003</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="go">ebpf-lab-system   1/1     Running   19s   aks-system-35459509-vmss000002</span>
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="go">trace-target      1/1     Running   19s   aks-ebpf-80832270-vmss000003</span>
+</span></code></pre></div>
+<p>19 秒四顆全部 Running。裝完 bpftrace(兩顆 pod 並行 23 秒,含 <code>apt-get update</code>)之後,開工的第一件事是確認手上這支是哪一支:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>ebpf-lab-przdr<span class="w"> </span>--<span class="w"> </span>which<span class="w"> </span>-a<span class="w"> </span>bpftrace
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="go">/usr/bin/bpftrace</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="go">/bin/bpftrace                         ← 同一個檔案(/bin 是 /usr/bin 的 symlink)</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>ebpf-lab-przdr<span class="w"> </span>--<span class="w"> </span>bpftrace<span class="w"> </span>--version
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="go">bpftrace v0.20.2</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>ebpf-lab-przdr<span class="w"> </span>--<span class="w"> </span>bpftrace<span class="w"> </span>-l<span class="w"> </span><span class="p">|</span><span class="w"> </span>wc<span class="w"> </span>-l
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="go">133022                                ← 與 Day 0 量到的數字相同</span>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>ebpf-lab-przdr<span class="w"> </span>--<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="w">    </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">1</span><span class="w"> </span>-m<span class="w"> </span>--<span class="w"> </span>bash<span class="w"> </span>-lc<span class="w"> </span><span class="s1">&#39;which -a bpftrace; /usr/local/bin/bpftrace --version&#39;</span>
+</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="go">/usr/local/bin/bpftrace</span>
+</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="go">bpftrace v0.9.4                       ← 節點上那支,還在</span>
+</span></code></pre></div>
+<p>Day 0 記過節點內建一支 2019 年的 v0.9.4,而且它在 PATH 裡排在前面。這件事每天開工都要複驗一次,因為它不會壞掉,只會少東西。容器裡的 PATH 摸不到節點那支,所以「一律在容器裡自己裝」這條紀律本身就是防呆;但只要用 <code>nsenter</code> 或 <code>chroot</code> 進節點除錯,v0.9.4 立刻又是預設值。</p>
+<h3 id="2execsnoopopensnooptcpconnect">步驟 2:execsnoop、opensnoop、tcpconnect 各驗一次<a class="headerlink" href="#2execsnoopopensnooptcpconnect" title="Permanent link">&para;</a></h3>
+<p>Ubuntu 的 bpftrace 套件把 Brendan Gregg 那套工具直接裝進 <code>/usr/sbin</code>,<code>dpkg -L bpftrace | grep -c '\.bt$'</code> 數出 <strong>39 支</strong>現成的 <code>.bt</code>。今天挑三支,驗法一律相同:追蹤跑在 <code>ebpf-lab-przdr</code>,動作發生在 <code>trace-target</code>,而且動作要有一個節點上不可能有第二份的名字。</p>
+<h4 id="execsnoop"><code>execsnoop</code>:新行程的執行<a class="headerlink" href="#execsnoop" title="Permanent link">&para;</a></h4>
+<p>被追蹤的那一段刻意把四種情況一次做完——正常執行、20 個參數、不存在的檔案、shell 內建指令:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># MARK=d1x-122216, run inside trace-target</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;#!/bin/bash\necho hello-from-target\n&#39;</span><span class="w"> </span>&gt;<span class="w"> </span>/tmp/<span class="nv">$MARK</span>.sh
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>chmod<span class="w"> </span>+x<span class="w"> </span>/tmp/<span class="nv">$MARK</span>.sh
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>/tmp/<span class="nv">$MARK</span>.sh
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>/tmp/<span class="nv">$MARK</span>.sh<span class="w"> </span>a01<span class="w"> </span>a02<span class="w"> </span>…<span class="w"> </span>a20
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>/tmp/<span class="nv">$MARK</span>-does-not-exist
+</span></code></pre></div>
+<p>22 秒共 337 行,其中屬於這一段的:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="go">04:22:25.829588 13685   9942    /usr/bin/runc --root /run/containerd/runc/k8s.io … exec … af6ba13cacfa…</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="go">04:22:25.835088 13694   13685   /usr/bin/runc init</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="go">04:22:25.841195 13698   13685   bash -c</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="go">printf &#39;#!/bin/bash\necho hello-from-target\n&#39; &gt; /tmp/d1x-122216.sh</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="go">chmod +x /tmp/d1x-122216.sh</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="go">/tmp/d1x-122216.sh</span>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="go">/tmp/d1x-122216.sh a01 a02 … a20</span>
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="go">/tmp/d1x-122216-does-not-exist 2&gt;/dev/null; echo &quot;failed-exec rc=$?&quot;</span>
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>
+</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="go">04:22:25.848495 13704   13698   chmod +x /tmp/d1x-122216.sh</span>
+</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="go">04:22:25.849329 13705   13698   /tmp/d1x-122216.sh</span>
+</span><span id="__span-9-12"><a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="go">04:22:25.850823 13706   13698   /tmp/d1x-122216.sh a01 a02 a03 a04 a05 a06 a07 a08 a09 a10 a11 a12 a13 a14 a15</span>
+</span><span id="__span-9-13"><a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="go">04:22:25.852292 13707   13698   /tmp/d1x-122216-does-not-exist</span>
+</span></code></pre></div>
+<p>欄位是 <code>TIME</code>(到微秒)、<code>PID</code>、<code>PPID</code>、<code>ARGS</code>。<code>PPID</code> 從 <code>curtask</code> 走 <code>real_parent</code> 拿,所以 <code>runc exec → bash -c → 各個子指令</code> 的父子鏈連得起來(13685 → 13698 → 13704/13705/13706/13707)。</p>
+<p>同一份輸出演完四個邊界:</p>
+<ol>
+<li><strong>分不出成功與失敗</strong>。最後一行 <code>/tmp/d1x-122216-does-not-exist</code> 印得跟成功的一模一樣,但那次 exec 的 rc 是 127。腳本第 8 行的註解自己承認了:<code>Note that the return value is not currently traced, so the exec() may have failed.</code></li>
+<li><strong>argv 會被截斷</strong>。傳了 20 個參數,輸出停在 <code>a15</code>——<code>join()</code> 只吐 argv[0] 加 15 個,第 16 個以後直接消失,而且沒有任何截斷標記。</li>
+<li><strong>一個事件不等於一行</strong>。<code>bash -c</code> 那筆的 argv 裡有換行,<code>join()</code> 原樣吐出,於是一個事件變成 6 行。任何 <code>wc -l</code>、任何逐行解析的收集器都會在這裡算錯。</li>
+<li><strong>看不到 shell 內建指令</strong>。<code>printf '…' &gt; /tmp/…</code> 沒有出現在輸出裡,因為 <code>printf</code> 是 bash 內建,根本沒有 execve。「這台機器上跑過什麼」用 execsnoop 只答得出「開了哪些新行程」。</li>
+</ol>
+<p>還有一件事:整份輸出裡唯一出現容器識別碼的字串是 <code>runc --root … exec … af6ba13cacfa…</code>,而那是 runc 自己的命令列參數,不是 execsnoop 提供的欄位。</p>
+<h4 id="opensnoop"><code>opensnoop</code>:檔案開啟<a class="headerlink" href="#opensnoop" title="Permanent link">&para;</a></h4>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># MARK=d1o-122309, run inside trace-target</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;day1 opensnoop payload&#39;</span><span class="w"> </span>&gt;<span class="w"> </span>/tmp/<span class="nv">$MARK</span>.txt
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>cat<span class="w"> </span>/tmp/<span class="nv">$MARK</span>.txt
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>cat<span class="w"> </span>/tmp/<span class="nv">$MARK</span>-missing.txt
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="nb">cd</span><span class="w"> </span>/tmp<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>cat<span class="w"> </span>./<span class="nv">$MARK</span>.txt
+</span></code></pre></div>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="go">PID    COMM               FD ERR PATH</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="go">14885  bash                3   0 /tmp/d1o-122309.txt</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="go">14891  cat                 3   0 /tmp/d1o-122309.txt</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="go">14892  cat                -1   2 /tmp/d1o-122309-missing.txt</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="go">14893  cat                 3   0 ./d1o-122309.txt</span>
+</span></code></pre></div>
+<p>第一行的 comm 是 <code>bash</code> 不是 <code>echo</code>:重導向由 shell 自己做,開檔的是 shell。第三行 <code>FD=-1 ERR=2</code>(ENOENT)說明 opensnoop 分得出成功與失敗,因為它掛了 <code>sys_enter_*</code> 與 <code>sys_exit_*</code> 兩端——這正是 execsnoop 沒做的事。</p>
+<p>第四行才是它的邊界:<code>./d1o-122309.txt</code>。<strong>它給你的是使用者傳進 <code>openat()</code> 的那個字串,不是解析後的絕對路徑。</strong> 同一個檔案,換個工作目錄就換一個字串;要判斷「有沒有人碰某個目錄」,光靠 opensnoop 會漏掉所有用相對路徑進來的存取。</p>
+<h4 id="tcpconnect"><code>tcpconnect</code>:對外連線<a class="headerlink" href="#tcpconnect" title="Permanent link">&para;</a></h4>
+<p>為了讓事件的歸屬無可爭議,這次連 <code>comm</code> 都造一個唯一的:把 <code>/bin/bash</code> 複製成 <code>d1t-122357</code> 再用它連線,並且刻意加一筆一定被拒絕的連線與一次 DNS 查詢。</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="go">TIME     PID      COMM             SADDR            SPORT  DADDR         DPORT</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="go">04:24:07 15852    d1t-122357       10.244.1.238     36088  1.1.1.1       80</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="go">04:24:07 15853    d1t-122357       127.0.0.1        56778  127.0.0.1     9</span>
+</span></code></pre></div>
+<p>第二行是被拒絕的連線,照樣有一行。腳本第 10 行寫明了:<code>All connection attempts are traced, even if they ultimately fail.</code>——<code>kprobe:tcp_connect</code> 掛在送出 SYN 之前,握手成不成功它不知道;要區分就得再掛一支追 <code>tcp_set_state</code> 或回傳值。</p>
+<p>它的邊界在整份 97 行輸出裡:<strong>符合 DNS(port 53)的行數是 0</strong>。<code>getent ahostsv4</code> 的查詢走 UDP,而 <code>tcpconnect</code> 只掛 <code>tcp_connect</code>。「這個 pod 連去哪裡」如果只看 tcpconnect,所有 DNS 查詢、所有 QUIC 流量都不存在。倒是 <code>SADDR</code> 那欄的 <code>10.244.1.238</code> 剛好就是 <code>trace-target</code> 的 pod IP——三支工具裡唯一能反推到 pod 的欄位,但那是網路命名空間的副產品,不是工具提供的身分。</p>
+<h4 id="_4">三支工具的共同盲點<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th></th>
+<th><code>execsnoop</code></th>
+<th><code>opensnoop</code></th>
+<th><code>tcpconnect</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>掛載點</td>
+<td><code>tracepoint:syscalls:sys_enter_exec*</code></td>
+<td><code>sys_enter/exit_open(at)</code></td>
+<td><code>kprobe:tcp_connect</code></td>
+</tr>
+<tr>
+<td>分得出成功／失敗</td>
+<td>否</td>
+<td>是(<code>ERR</code> 欄)</td>
+<td>否</td>
+</tr>
+<tr>
+<td>一個事件一行</td>
+<td>否</td>
+<td>是</td>
+<td>是</td>
+</tr>
+<tr>
+<td>22 秒閒置節點的事件數</td>
+<td>337</td>
+<td>24,350</td>
+<td>97</td>
+</tr>
+<tr>
+<td>容器／pod 身分</td>
+<td>無</td>
+<td>無</td>
+<td>只有 pod IP</td>
+</tr>
+</tbody>
+</table>
+<p>三支的「目標值可不可信」各有各的走樣,沒辦法擺進同一欄比:execsnoop 的 argv 截在第 16 個參數;opensnoop 給的是原樣字串,相對路徑不還原;tcpconnect 的 IP 可信,但只涵蓋 TCP。</p>
+<p>事件密度那一列值得單獨記住:同樣 22 秒、同一台幾乎閒置的 2 vCPU 節點,開檔比執行行程密集約 70 倍(約 1,100 筆/秒),這決定了哪一種追蹤可以整天開著、哪一種只能臨場開。至於最後一列——<strong>沒有一支工具說得出「這是哪個 pod」</strong>——那不是三支工具寫得不好,是它們掛的位置比容器更低一層。要把事件接回 Kubernetes 物件,得自己補 cgroup id 或 namespace 的對應,那是 Day 2 的題目。</p>
+<h3 id="3">步驟 3:自寫腳本,追出指定目錄的寫入者<a class="headerlink" href="#3" title="Permanent link">&para;</a></h3>
+<p>本日驗收的要求是自寫腳本抓得到指定目錄的寫入者 PID 與 comm。這裡再加碼兩項:路徑也要印出來,而且容器內與節點上兩種寫入都要指名。監看目標選 <code>/var/log/day1-watch</code>,用 hostPath 掛進 <code>trace-target</code>,容器內外刻意用同一個路徑。</p>
+<h4 id="path"><code>path()</code> 在編譯階段就被擋下<a class="headerlink" href="#path" title="Permanent link">&para;</a></h4>
+<p>最直覺的寫法是掛 <code>vfs_write</code>,再用 <code>path()</code> 把 <code>struct file</code> 還原成路徑:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>ebpf-lab-przdr<span class="w"> </span>--<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">    </span>bpftrace<span class="w"> </span>-e<span class="w"> </span><span class="s1">&#39;kfunc:vmlinux:vfs_write { printf(&quot;%d %s %s\n&quot;, pid, comm, path(args.file-&gt;f_path)); exit(); }&#39;</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="go">stdin:1:59-82: ERROR: BPF_FUNC_d_path not available for your kernel version</span>
+</span></code></pre></div>
+<p>訊息說「你的 kernel 版本沒有」,但核心的說法不一樣,兩邊直接衝突,診斷見<a href="#mine-3">地雷 3</a>。實務上的正解不是等它修好,而是自己把路徑組出來——而那個寫法順便把一件事演給你看。</p>
+<h4 id="dentry">從 dentry 鏈自己組出路徑<a class="headerlink" href="#dentry" title="Permanent link">&para;</a></h4>
+<p>核心裡沒有「路徑字串」這種東西,只有一條 dentry 鏈:每個 dentry 有自己的名字與 parent 指標,一路指到掛載點根部。<code>path()</code> 做的事就是把這條鏈走完再組成字串。既然它被關掉,就自己走:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>whowrites.bt<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="s">#!/usr/bin/env bpftrace</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="s">/*</span>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="s"> * whowrites.bt - who is writing into a watched directory?</span>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="s"> *</span>
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="s"> * Prints PID, comm and the path for every write whose immediate parent</span>
+</span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="s"> * directory is WATCHDIR. Reconstructs the path by walking the dentry chain</span>
+</span><span id="__span-14-8"><a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="s"> * instead of calling path(): bpftrace 0.20.2 reports `dpath: no` and refuses</span>
+</span><span id="__span-14-9"><a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="s"> * path() everywhere, even though the kernel exports bpf_d_path.</span>
+</span><span id="__span-14-10"><a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="s"> */</span>
+</span><span id="__span-14-11"><a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a>
+</span><span id="__span-14-12"><a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a><span class="s">#define WATCHDIR &quot;day1-watch&quot;</span>
+</span><span id="__span-14-13"><a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a><span class="s">#define WATCHLEN 11</span>
+</span><span id="__span-14-14"><a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a>
+</span><span id="__span-14-15"><a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a><span class="s">BEGIN</span>
+</span><span id="__span-14-16"><a id="__codelineno-14-16" name="__codelineno-14-16" href="#__codelineno-14-16"></a><span class="s">{</span>
+</span><span id="__span-14-17"><a id="__codelineno-14-17" name="__codelineno-14-17" href="#__codelineno-14-17"></a><span class="s">    printf(&quot;watching writes into .../%s\n&quot;, WATCHDIR);</span>
+</span><span id="__span-14-18"><a id="__codelineno-14-18" name="__codelineno-14-18" href="#__codelineno-14-18"></a><span class="s">    printf(&quot;%-9s %-7s %-16s %-8s %s\n&quot;, &quot;TIME&quot;, &quot;PID&quot;, &quot;COMM&quot;, &quot;BYTES&quot;, &quot;PATH&quot;);</span>
+</span><span id="__span-14-19"><a id="__codelineno-14-19" name="__codelineno-14-19" href="#__codelineno-14-19"></a><span class="s">}</span>
+</span><span id="__span-14-20"><a id="__codelineno-14-20" name="__codelineno-14-20" href="#__codelineno-14-20"></a>
+</span><span id="__span-14-21"><a id="__codelineno-14-21" name="__codelineno-14-21" href="#__codelineno-14-21"></a><span class="s">kfunc:vmlinux:vfs_write</span>
+</span><span id="__span-14-22"><a id="__codelineno-14-22" name="__codelineno-14-22" href="#__codelineno-14-22"></a><span class="s">/strncmp(str(args.file-&gt;f_path.dentry-&gt;d_parent-&gt;d_name.name), WATCHDIR, WATCHLEN) == 0/</span>
+</span><span id="__span-14-23"><a id="__codelineno-14-23" name="__codelineno-14-23" href="#__codelineno-14-23"></a><span class="s">{</span>
+</span><span id="__span-14-24"><a id="__codelineno-14-24" name="__codelineno-14-24" href="#__codelineno-14-24"></a><span class="s">    $d = args.file-&gt;f_path.dentry;</span>
+</span><span id="__span-14-25"><a id="__codelineno-14-25" name="__codelineno-14-25" href="#__codelineno-14-25"></a><span class="s">    time(&quot;%H:%M:%S &quot;);</span>
+</span><span id="__span-14-26"><a id="__codelineno-14-26" name="__codelineno-14-26" href="#__codelineno-14-26"></a><span class="s">    printf(&quot;%-7d %-16s %-8d /%s/%s/%s/%s\n&quot;, pid, comm, args.count,</span>
+</span><span id="__span-14-27"><a id="__codelineno-14-27" name="__codelineno-14-27" href="#__codelineno-14-27"></a><span class="s">        str($d-&gt;d_parent-&gt;d_parent-&gt;d_parent-&gt;d_name.name),</span>
+</span><span id="__span-14-28"><a id="__codelineno-14-28" name="__codelineno-14-28" href="#__codelineno-14-28"></a><span class="s">        str($d-&gt;d_parent-&gt;d_parent-&gt;d_name.name),</span>
+</span><span id="__span-14-29"><a id="__codelineno-14-29" name="__codelineno-14-29" href="#__codelineno-14-29"></a><span class="s">        str($d-&gt;d_parent-&gt;d_name.name),</span>
+</span><span id="__span-14-30"><a id="__codelineno-14-30" name="__codelineno-14-30" href="#__codelineno-14-30"></a><span class="s">        str($d-&gt;d_name.name));</span>
+</span><span id="__span-14-31"><a id="__codelineno-14-31" name="__codelineno-14-31" href="#__codelineno-14-31"></a><span class="s">    @bytes[comm, pid] = sum(args.count);</span>
+</span><span id="__span-14-32"><a id="__codelineno-14-32" name="__codelineno-14-32" href="#__codelineno-14-32"></a><span class="s">}</span>
+</span><span id="__span-14-33"><a id="__codelineno-14-33" name="__codelineno-14-33" href="#__codelineno-14-33"></a>
+</span><span id="__span-14-34"><a id="__codelineno-14-34" name="__codelineno-14-34" href="#__codelineno-14-34"></a><span class="s">END</span>
+</span><span id="__span-14-35"><a id="__codelineno-14-35" name="__codelineno-14-35" href="#__codelineno-14-35"></a><span class="s">{</span>
+</span><span id="__span-14-36"><a id="__codelineno-14-36" name="__codelineno-14-36" href="#__codelineno-14-36"></a><span class="s">    printf(&quot;\n-- bytes written per (comm, pid) --\n&quot;);</span>
+</span><span id="__span-14-37"><a id="__codelineno-14-37" name="__codelineno-14-37" href="#__codelineno-14-37"></a><span class="s">}</span>
+</span><span id="__span-14-38"><a id="__codelineno-14-38" name="__codelineno-14-38" href="#__codelineno-14-38"></a><span class="s">EOF</span>
+</span></code></pre></div>
+<p>三個設計決定,每一個都對應前面拆解過的一個語法元素:</p>
+<ul>
+<li><strong>filter 只比對直屬父目錄的名字</strong>。<code>WATCHDIR</code> 是 <code>day1-watch</code>、<code>WATCHLEN</code> 是 11(含結尾的 NUL),所以是精確比對而非前綴比對。過濾在核心裡做,不符合的寫入連送都不送。</li>
+<li><strong>用 <code>kfunc:</code> 而不是 <code>kprobe:</code></strong>。<code>kfunc</code> 走 BTF,參數有型別,可以直接寫 <code>args.file-&gt;f_path.dentry</code>;同樣的事用 <code>kprobe</code> 得自己寫 <code>((struct file *)arg0)</code>,還要先 <code>#include</code> 對的標頭檔。Day 0 量到的那批「舊版少掉的掛載點」,實際價值就在這裡。</li>
+<li><strong>聚合用 <code>@bytes[comm, pid] = sum(args.count)</code></strong>,key 是 <code>(comm, pid)</code> 組成的 tuple。</li>
+</ul>
+<h4 id="_5">兩個寫入者,一份輸出<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h4>
+<p>一邊從 <code>trace-target</code> 容器裡寫,一邊用 <code>nsenter</code> 進節點的 mount namespace 寫,兩邊都先把 <code>dd</code> 複製成唯一的名字:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># (a) inside trace-target</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>cp<span class="w"> </span>/bin/dd<span class="w"> </span>/tmp/d1w-pod-122627
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>/tmp/d1w-pod-122627<span class="w"> </span><span class="k">if</span><span class="o">=</span>/dev/zero<span class="w"> </span><span class="nv">of</span><span class="o">=</span>/var/log/day1-watch/from-pod.bin<span class="w"> </span><span class="nv">bs</span><span class="o">=</span><span class="m">4096</span><span class="w"> </span><span class="nv">count</span><span class="o">=</span><span class="m">1</span>
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;plain shell redirect from pod&#39;</span><span class="w"> </span>&gt;<span class="w"> </span>/var/log/day1-watch/from-pod.txt
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>
+</span><span id="__span-15-6"><a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="c1"># (b) on the node itself</span>
+</span><span id="__span-15-7"><a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">1</span><span class="w"> </span>-m<span class="w"> </span>--<span class="w"> </span>bash<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;cp /bin/dd /tmp/d1w-nod-122627;</span>
+</span><span id="__span-15-8"><a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="s1">  /tmp/d1w-nod-122627 if=/dev/zero of=/var/log/day1-watch/from-node.bin bs=8192 count=1&#39;</span>
+</span></code></pre></div>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="go">watching writes into .../day1-watch</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="go">TIME      PID     COMM             BYTES    PATH</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="go">04:26:37 19878   d1w-pod-122627   4096     /var/log/day1-watch/from-pod.bin</span>
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="go">04:26:37 19871   bash             30       /var/log/day1-watch/from-pod.txt</span>
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="go">04:26:37 19899   d1w-nod-122627   8192     /var/log/day1-watch/from-node.bin</span>
+</span><span id="__span-16-6"><a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>
+</span><span id="__span-16-7"><a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="go">-- bytes written per (comm, pid) --</span>
+</span><span id="__span-16-8"><a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="go">@bytes[bash, 19871]: 30</span>
+</span><span id="__span-16-9"><a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="go">@bytes[d1w-pod-122627, 19878]: 4096</span>
+</span><span id="__span-16-10"><a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="go">@bytes[d1w-nod-122627, 19899]: 8192</span>
+</span></code></pre></div>
+<p>PID、comm、路徑三項齊全,容器內(19878)與節點上(19899)兩個寫入者都被指名,位元組數也對得上——<code>echo</code> 那行的 30 bytes 就是那句字串加換行。</p>
+<p>兩件小事先講完:中間那一行的 comm 是 <code>bash</code> 不是 <code>echo</code>,跟 opensnoop 那邊是同一個道理;<code>@bytes</code> 的 tuple key 在收工時自己印了出來,那是聚合式 map 的預設行為,也解釋了 <code>opensnoop.bt</code> 為什麼要在 <code>END</code> 裡 <code>clear()</code>。</p>
+<p>真正重要的是第三件:<strong>兩個寫入者的路徑字串一模一樣</strong>。節點上的 <code>/var/log/day1-watch</code> 與容器裡的 <code>/var/log/day1-watch</code> 走的是同一條 dentry 鏈,所以輸出裡沒有任何欄位分得出「這是從容器裡寫的」還是「這是從節點上寫的」。這跟三支經典工具的盲點是同一件事的另一面:eBPF 給你的是核心的視角,容器身分要自己接。就算 hostPath 在容器裡掛在別的路徑,dentry 鏈仍然是節點的那一條——真正該記住的是,路徑是檔案系統的視角,不是行程的視角。</p>
+<h3 id="4-kernel">步驟 4:一座叢集、兩顆 kernel、同一支腳本<a class="headerlink" href="#4-kernel" title="Permanent link">&para;</a></h3>
+<p><code>ebpf</code> pool 是 kernel 6.8.0-1062,system pool 是 6.8.0-1059,兩份 BTF 的大小與 md5 都不同。把<strong>同一個 md5 的 <code>.bt</code> 檔案</strong>丟到兩顆節點上跑:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th><code>ebpf</code> pool</th>
+<th><code>system</code> pool</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>kernel</td>
+<td>6.8.0-1062-azure</td>
+<td>6.8.0-1059-azure</td>
+</tr>
+<tr>
+<td>node image</td>
+<td>202607.20.0</td>
+<td>202607.09.0</td>
+</tr>
+<tr>
+<td><code>/sys/kernel/btf/vmlinux</code></td>
+<td>6,035,000 bytes</td>
+<td>6,033,733 bytes</td>
+</tr>
+<tr>
+<td>BTF md5</td>
+<td><code>6f631a7b…f423c</code></td>
+<td><code>d504cbf3…39924</code></td>
+</tr>
+<tr>
+<td>bpftrace</td>
+<td>v0.20.2</td>
+<td>v0.20.2</td>
+</tr>
+<tr>
+<td>腳本 md5</td>
+<td><code>e398f627…7182</code></td>
+<td><code>e398f627…7182</code></td>
+</tr>
+<tr>
+<td>載入結果</td>
+<td>成功掛上,抓到寫入</td>
+<td>成功掛上,抓到寫入</td>
+</tr>
+</tbody>
+</table>
+<p>兩邊各自抓到自己節點上的寫入:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="gp gp-VirtualEnv">(ebpf pool,寫入來自 trace-target)</span>
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="go">04:28:37 23237   d1c-tgt-122825   2048     /var/log/day1-watch/core2-pod.bin</span>
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>
+</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="gp gp-VirtualEnv">(system pool,寫入來自該節點上的 pod)</span>
+</span><span id="__span-17-5"><a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="go">04:28:37 26707   d1c-sys-122825   2048     /var/log/day1-watch/core2-sys.bin</span>
+</span></code></pre></div>
+<p>同一份腳本、一個字元沒改、兩顆節點都沒裝 kernel headers。(bpftrace 其實在每顆節點上各自編譯了一次,只是編譯的輸入是本機 BTF 而不是 headers——這個區別在本節末尾展開。)</p>
+<h4 id="_6">比對兩邊載進核心的位元碼<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h4>
+<p>「能跑」只是及格。真正的問題是核心手上那份程式一不一樣,所以趁兩邊都掛著的時候,用節點的 bpftool 量:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="gp gp-VirtualEnv">(ebpf pool)</span>                                <span class="go">(system pool)</span>
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="go">842: tracing  name vfs_write               652: tracing  name vfs_write</span>
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="go">     tag 069eb0688ab16f62  gpl                  tag 069eb0688ab16f62  gpl</span>
+</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="go">     xlated 2584B  jited 1739B                  xlated 2584B  jited 1739B</span>
+</span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="go">     map_ids 105,106,104                        map_ids 121,122,120</span>
+</span><span id="__span-18-6"><a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="go">     btf_id 109                                 btf_id 87</span>
+</span></code></pre></div>
+<p><code>tag</code> 完全相同。BPF 的 tag 是核心對指令串算出來的雜湊(計算時會把 map fd 的立即值遮掉),所以兩顆不同 kernel 上載入的是同一串指令;xlated 2584B、jited 1739B 也分毫不差。</p>
+<p>再把兩邊完整的 xlated dump 拉回來逐行比對,各 318 行,只有 14 行不同:</p>
+<div class="language-diff highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="w"> </span> 48: (18) r1 = map[id:109]        →   48: (18) r1 = map[id:125]
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="w"> </span> 54: (85) call bpf_ringbuf_output#340416  →  #340176
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="w"> </span> 73: (85) call bpf_get_current_pid_tgid#249424  →  #249184
+</span><span id="__span-19-4"><a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="w"> </span>303: (18) r1 = map[id:108]        →  303: (18) r1 = map[id:124]
+</span><span id="__span-19-5"><a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="w"> </span>307: (85) call htab_percpu_map_lookup_elem#295936  →  #295696
+</span></code></pre></div>
+<p>14 行全部落在兩類。一類是 map id,那是這一次載入時核心配給的編號,跟程式邏輯無關。另一類是 helper 呼叫偏移,每一組差<strong>剛好 240</strong>——兩顆 kernel 是不同的建置,helper 函式在核心映像裡的位址整體位移了 240 bytes,核心在載入時自己把呼叫目標改掉了。其餘 304 行的 opcode 與運算元完全一致。</p>
+<h4 id="_7">這組數字的適用範圍<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h4>
+<p>證明了:一份未修改的 <code>.bt</code>,在同一座叢集的兩顆不同 kernel(不同 BTF)上都跑得起來,產生的位元碼指令串完全相同,差異只有載入時由核心填的位址與編號。舊做法(bcc 加 kernel headers)要在兩顆節點上各自準備一份與該 kernel 相符的 headers,少一份就編不出來;這裡兩顆節點都不需要 headers,型別全部來自核心自帶的 BTF。</p>
+<p>沒證明的部分必須講清楚,否則兩個很像的概念會被混為一談:<strong>這不等於 libbpf 那種「一份編好的 <code>.o</code> 檔搬到別的 kernel 直接載入」的 CO-RE。bpftrace 是在每顆節點上對著該節點的 BTF 重新編譯一次的</strong>,它的可攜性在原始碼層,不是目的檔層。今天兩邊位元碼會一模一樣,是因為腳本用到的那幾個結構欄位(<code>struct file</code> 的 <code>f_path</code>、<code>dentry</code> 的 <code>d_parent</code> 與 <code>d_name</code>、<code>vfs_write</code> 的參數)在兩顆 kernel 的 BTF 裡偏移相同;如果其中一顆改了欄位順序,同一份原始碼一樣會跑,但位元碼就會不同——那才是 BTF 驅動編譯的真正價值。</p>
+<h3 id="5bcc">步驟 5:bcc 的實測對照<a class="headerlink" href="#5bcc" title="Permanent link">&para;</a></h3>
+<p>課程選 bpftrace 不選 bcc,常見的理由是「bcc 依賴 kernel headers 編譯,雲端節點裝不了」與「bcc 要編譯器、bpftrace 不用」。兩句都在這座叢集上被推翻,所以理由得換成量得出來的那幾項。</p>
+<h4 id="_8">安裝的體積與時間<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h4>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="gp">$ </span>apt-get<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>bpfcc-tools
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="go">1 upgraded, 22 newly installed, 0 to remove</span>
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="go">Need to get 13.9 MB of archives.</span>
+</span><span id="__span-20-4"><a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="go">  完成(9.2 秒)</span>
+</span></code></pre></div>
+<p>9.2 秒、13.9 MB,比預期便宜太多。回頭查那 22 個套件是什麼,答案改掉了原本的結論:新裝的絕大多數是 Python 3 執行環境,而 LLVM 18(約 120 MB)早就在了,是 bpftrace 自己裝進來的。完整證據與這句話該怎麼改寫,見<a href="#mine-7">地雷 7</a>。</p>
+<h4 id="_9">在容器裡執行的前置條件<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h4>
+<p>先不作弊,乾淨的容器裡直接跑:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="gp">$ </span>execsnoop-bpfcc
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="go">sh: 1: modprobe: not found</span>
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="go">chdir(/lib/modules/6.8.0-1062-azure/build): No such file or directory</span>
+</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="go">Unable to find kernel headers. Try rebuilding kernel with CONFIG_IKHEADERS=m (module)</span>
+</span><span id="__span-21-5"><a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="go">or installing the kernel development package for your running kernel version.</span>
+</span><span id="__span-21-6"><a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="go">Exception: Failed to compile BPF module &lt;text&gt;</span>
+</span></code></pre></div>
+<p>失敗順序把它的假設全講出來了:先試 <code>modprobe kheaders</code>(容器裡沒有 modprobe),再試 <code>/lib/modules/$(uname -r)/build</code>(容器的檔案系統裡沒有),然後放棄。節點上明明有 <code>/usr/src/linux-headers-6.8.0-1062-azure</code>,把它接進容器的第一次嘗試踩了<a href="#mine-4">地雷 4</a>;改用 symlink 之後就跑得起來:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="gp">$ </span>ln<span class="w"> </span>-sfn<span class="w"> </span>/proc/1/root/usr/src/linux-headers-<span class="nv">$KV</span><span class="w"> </span>/lib/modules/<span class="nv">$KV</span>/build
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="gp">$ </span>execsnoop-bpfcc
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="go">PCOMM            PID     PPID    RET ARGS</span>
+</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="go">date             29421   978       0 /usr/bin/date +%s</span>
+</span><span id="__span-22-5"><a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="go">flock            29422   978       0 /usr/bin/flock -e 10</span>
+</span></code></pre></div>
+<p>那 headers 究竟是安裝期需求還是執行期需求?把 symlink 移開再試一次就知道,答案改寫了整個維運結論,見<a href="#mine-6">地雷 6</a>。</p>
+<h4 id="_10">啟動延遲與輸出差異<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h4>
+<p>兩支同名工具,量到第一個位元組落地為止(兩邊都要先編譯、過 verifier、掛上探針才會有輸出,所以是對等比較):</p>
+<table>
+<thead>
+<tr>
+<th>回合</th>
+<th><code>execsnoop.bt</code>(bpftrace)</th>
+<th><code>execsnoop-bpfcc</code>(bcc)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>148 ms</td>
+<td>2,622 ms</td>
+</tr>
+<tr>
+<td>2</td>
+<td>158 ms</td>
+<td>2,182 ms</td>
+</tr>
+<tr>
+<td>3</td>
+<td>157 ms</td>
+<td>2,110 ms</td>
+</tr>
+<tr>
+<td>中位數</td>
+<td>157 ms</td>
+<td>2,182 ms</td>
+</tr>
+</tbody>
+</table>
+<p>約 14 倍。對「臨場診斷」這個用途,這個差距是體感等級的:出事的時候你會連下十次不同的 one-liner,bpftrace 是按下去就有,bcc 是每次等兩秒。</p>
+<p>同一段動作(唯一命名的腳本加一個必定失敗的 exec),bcc 版的輸出:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="go">PCOMM            PID     PPID    RET ARGS</span>
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="go">bash             39632   9925      0 /usr/bin/bash -c \nprintf &#39;#!/bin/bash\necho bcc-side\n&#39; &gt; /tmp/d1b-123744.sh; chmod +x /tmp/d1b-123744.sh\n/tmp/d1b-123744.sh\n/tmp/d1b-123744-does</span>
+</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="go">chmod            39638   39632     0 /usr/bin/chmod +x /tmp/d1b-123744.sh</span>
+</span><span id="__span-23-4"><a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="go">d1b-123744.sh    39639   39632     0 /tmp/d1b-123744.sh</span>
+</span></code></pre></div>
+<p>多了一個 <code>RET</code> 欄,換行被跳脫成 <code>\n</code> 所以一個事件永遠是一行——這兩項都比 bpftrace 版好用。但失敗的那個 exec 整行不見了,而那個差異會讓兩份清單導出相反的結論,見<a href="#mine-2">地雷 2</a>。</p>
+<p>把三輪量測收成一張表:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>bpftrace</th>
+<th>bcc</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>型別來源</td>
+<td><code>/sys/kernel/btf/vmlinux</code></td>
+<td>kernel headers</td>
+</tr>
+<tr>
+<td>是否需要編譯器</td>
+<td>需要(<code>Depends: libllvm18</code>)</td>
+<td>需要(<code>Depends: libllvm18</code>)</td>
+</tr>
+<tr>
+<td>乾淨映像的安裝體積</td>
+<td>約 190 MB(含 LLVM 18)</td>
+<td>約 190 MB(含 LLVM 18)</td>
+</tr>
+<tr>
+<td>啟動時間(中位數)</td>
+<td>157 ms</td>
+<td>2,182 ms</td>
+</tr>
+<tr>
+<td>失敗的 exec</td>
+<td>全印</td>
+<td>預設全藏</td>
+</tr>
+<tr>
+<td>在容器裡能不能直接跑</td>
+<td>能</td>
+<td>不能</td>
+</tr>
+</tbody>
+</table>
+<p>型別來源那一列是三項差別裡影響最深的:BTF 由核心自己提供,永遠跟執行中的 kernel 同版;kernel headers 是外掛的套件,節點升級 kernel 而 headers 沒跟上時,所有 bcc 工具會在下一次啟動時集體失效。課程該用的理由是這三列,不是「bcc 編不動」——它在 2026-08 的 AKS 上編得動。</p>
+<h3 id="6">步驟 6:收尾——先量再刪<a class="headerlink" href="#6" title="Permanent link">&para;</a></h3>
+<p>Day 0 記過一件事:BPF 程式跟著 fd 走,不跟著終端機走。今天多了一個 bcc 版本的實例(<a href="#mine-5">地雷 5</a>),所以殘留檢查要在刪除之前做:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="go">--- ebpf-lab-przdr (vmss000003, kernel 6.8.0-1062) ---</span>
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="go">bpftrace 行程=0  bcc 行程=0  prog 總數=53  tracing=1  tracepoint=0  kprobe=0</span>
+</span><span id="__span-24-3"><a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="go">--- ebpf-lab-548l5 (vmss000002, kernel 6.8.0-1062) ---</span>
+</span><span id="__span-24-4"><a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="go">bpftrace 行程=0  bcc 行程=0  prog 總數=48  tracing=1  tracepoint=0  kprobe=0</span>
+</span><span id="__span-24-5"><a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="go">--- ebpf-lab-system (system pool, kernel 6.8.0-1059) ---</span>
+</span><span id="__span-24-6"><a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a><span class="go">bpftrace 行程=0  bcc 行程=0  prog 總數=135 tracing=1  tracepoint=0  kprobe=0</span>
+</span></code></pre></div>
+<p>那個 <code>tracing=1</code> 要交代清楚,否則會被當成殘留:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>ebpf-lab-przdr<span class="w"> </span>--<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-25-2"><a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="w">    </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">1</span><span class="w"> </span>-m<span class="w"> </span>--<span class="w"> </span>bpftool<span class="w"> </span>prog<span class="w"> </span>list<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s1">&#39; tracing &#39;</span>
+</span><span id="__span-25-3"><a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="go">2: tracing  name hid_tail_call  tag 7cc47bbf07148bfe  gpl   ← prog id 2,開機就在</span>
+</span></code></pre></div>
+<p>是核心自帶的 <code>hid_tail_call</code>,兩顆 kernel 上都是同一個 tag。同一份清單 <code>grep -c vfs_write</code> 的結果是 0,今天載入的程式一個不剩。</p>
+<p>還有一個量測細節值得記住:<code>ebpf</code> pool 的基線在一天內從 52 漂到 53,漂進來的那一個是 <code>cgroup_device</code>,而節點上光這一類就有 46 個,容器起落就會增減。<strong>「prog 總數回到開工時的數字」不是可靠的驗收條件,要看的是「自己掛的那一類程式歸零」。</strong></p>
+<p>接著刪 namespace(45 秒)、把 <code>ebpf</code> pool 縮回 0(1 分 10 秒)並用 <code>nodepool list</code>、<code>nodepool show</code>、<code>kubectl get nodes</code> 三重驗證,最後停掉整座叢集(2 分 04 秒),三個 pool 的定義都保留給 Day 2。節點側的 hostPath 目錄不會跟著 pool 縮容消失,要自己 <code>rm -rf /var/log/day1-watch</code>。</p>
+<p><code>ebpf</code> pool 從下達 scale 到確認歸零共存活 26 分 14 秒(0.437 hr),spot 單價 US$0.0207/hr/台,本日兩台合計 <strong>US$0.0181</strong>,約新台幣 0.58 元;同規格隨需價是 US$0.112/hr/台。</p>
+<h2 id="_11">誠實的差距<a class="headerlink" href="#_11" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong><code>path()</code> 為什麼被關掉,本課只到推測為止。</strong> 章內對核心允許清單的解釋是合理的推論,<strong>沒有直接量到</strong>;能確定的只有「擋下來的是 bpftrace 自己的能力偵測,不是核心」。</li>
+<li><strong><code>SIGINT</code> 停不掉編譯中的 bcc 工具,根因也是推論。</strong> 對直譯器訊號處理的解釋沒有進一步驗證,只有「行程會變成孤兒繼續跑」這個現象是實測的。</li>
+<li><strong>三支工具都只在單一節點、單一容器的情境下測過。</strong> 多節點、跨命名空間、高事件率下的行為(尤其是 map 上限與事件遺失)本章沒有碰。</li>
+<li><strong>沒有 pod 身分這件事不是缺陷,是分工。</strong> 它是 <a href="../sprint2-day2-bpftrace-kubernetes/">Day 2</a> 的題目,不是這一章沒做完。</li>
+</ul>
+<h2 id="checkpoint">驗收 checkpoint<a class="headerlink" href="#checkpoint" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>檢查項</th>
+<th>指令</th>
+<th>期待結果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>用到的是容器裡那支 bpftrace</td>
+<td><code>kubectl -n ebpf-lab exec ebpf-lab-przdr -- bpftrace --version</code> 與 <code>bpftrace -l \| wc -l</code></td>
+<td><code>v0.20.2</code> 與 <code>133022</code>(節點上那支仍是 v0.9.4)</td>
+</tr>
+<tr>
+<td>execsnoop 抓得到失敗的 exec</td>
+<td>在輸出裡找 <code>-does-not-exist</code></td>
+<td>有一行,而且跟成功的長得一樣</td>
+</tr>
+<tr>
+<td>opensnoop 分得出成功與失敗</td>
+<td>看不存在檔案那一筆的 <code>FD</code>／<code>ERR</code></td>
+<td><code>-1</code> 與 <code>2</code>(ENOENT)</td>
+</tr>
+<tr>
+<td>tcpconnect 看不到 DNS</td>
+<td>對整份輸出數 port 53 的行數</td>
+<td><code>0</code></td>
+</tr>
+<tr>
+<td><strong>本日驗收:自寫腳本指名兩個寫入者</strong></td>
+<td><code>whowrites.bt</code> 的輸出</td>
+<td>容器內 PID 19878／4096 bytes、節點上 PID 19899／8192 bytes,路徑都還原成 <code>/var/log/day1-watch/…</code></td>
+</tr>
+<tr>
+<td>同一支腳本在兩顆 kernel 上等價</td>
+<td>兩邊 <code>bpftool prog show</code> 的 <code>tag</code> 與 xlated 大小</td>
+<td><code>069eb0688ab16f62</code>、2584B,318 行 dump 只差 14 行</td>
+</tr>
+<tr>
+<td>收工無殘留</td>
+<td><code>bpftool prog list \| grep -c vfs_write</code></td>
+<td><code>0</code>(<code>tracing=1</code> 是核心自帶的 <code>hid_tail_call</code>)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_12">地雷記錄<a class="headerlink" href="#_12" title="Permanent link">&para;</a></h2>
+<h3 id="mine-1">地雷 1:叢集停機期間 API server 的 DNS 紀錄會消失,工作站把那個 NXDOMAIN 快取起來<a class="headerlink" href="#mine-1" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:<code>az aks start</code> 完成、<code>az aks show</code> 回報 <code>Running</code>,<code>kubectl</code> 卻一直說 <code>no such host</code>。同一個名字用 <code>nslookup</code> 與 <code>dig</code> 查都解得到,<code>dscacheutil</code> 與 Python 的 <code>socket.getaddrinfo()</code> 都解不到,<code>curl</code> 的 <code>%{http_code}</code> 是 000。等 5 分鐘、關掉 sandbox 重試、換 <code>GODEBUG=netdns=cgo</code>,三次都一樣。</p>
+<p><strong>根因</strong>:AKS 停機時會撤掉 API server FQDN 的 A 紀錄。工作站在停機期間只要有任何一支程式問過那個名字(例如上一輪收工前的 <code>kubectl</code>),macOS 的 mDNSResponder 就會把「查無此名」記下來。叢集起來之後 A 紀錄回來了,TTL 只有 60 秒,但<strong>負向快取不吃那個 TTL</strong>。難查的地方在於兩類工具走不同的解析路徑:<code>nslookup</code> 與 <code>dig</code> 自己組封包直接問 DNS 伺服器,繞過系統解析器,所以永遠回報解析成功;<code>kubectl</code>、<code>curl</code>、Python 走 <code>getaddrinfo()</code>,讀到的是快取,所以永遠回報找不到主機。於是排除方向會集中在叢集狀態、kubeconfig 與網路,唯獨不會懷疑自己的工作站。</p>
+<p><strong>修法</strong>:不用 sudo 的正解是繞過名字解析,而不是繞過 TLS 驗證。</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="nv">IP</span><span class="o">=</span><span class="k">$(</span>dig<span class="w"> </span>+short<span class="w"> </span>&lt;api-fqdn&gt;<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-1<span class="k">)</span>
+</span><span id="__span-26-2"><a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a>kubectl<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-26-3"><a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="w">  </span>--server<span class="w"> </span><span class="s2">&quot;https://</span><span class="nv">$IP</span><span class="s2">:443&quot;</span><span class="w"> </span>--tls-server-name<span class="w"> </span>&lt;api-fqdn&gt;<span class="w"> </span>get<span class="w"> </span>nodes
+</span></code></pre></div>
+<p><code>--tls-server-name</code> 讓 SNI 與憑證驗證仍然用 FQDN,只有連線目標換成 IP,安全性一點都沒放掉。要根治就是 <code>sudo killall -HUP mDNSResponder</code>,但那需要 sudo。</p>
+<p><strong>教訓</strong>:這條跟 eBPF 無關,卻直接來自本課程的成本紀律——每天收工停叢集、隔天開叢集,等於每天替自己種一次這顆雷。</p>
+<h3 id="mine-2">地雷 2:同名的 execsnoop,兩個實作對失敗的 exec 預設行為相反<a class="headerlink" href="#mine-2" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:同一段動作(執行一個不存在的檔案),bpftrace 版的 <code>execsnoop.bt</code> 印出一行,bcc 版的 <code>execsnoop-bpfcc</code> 什麼都沒有。兩份輸出擺在一起,會以為其中一支漏抓了事件。</p>
+<p><strong>根因</strong>:<code>execsnoop.bt</code> 掛的是 <code>sys_enter_exec*</code>,拿不到回傳值,所以成功與失敗印得一模一樣(rc=127 的那一次照樣有一行)。<code>execsnoop-bpfcc</code> 掛了進入與離開兩端,拿得到回傳值,於是預設只印成功的,失敗的要加 <code>-x</code> 才看得到。</p>
+<p><strong>修法</strong>:bcc 版要看失敗的 exec 就加 <code>-x</code>(<code>--fails</code>);bpftrace 版要區分成敗,得自己再掛一支追離開端。教材與監控規格裡示範 execsnoop 時,一定要指名是哪一個實作。</p>
+<p><strong>教訓</strong>:兩份「這台機器跑過什麼」的清單,在「有人嘗試執行但失敗了」這一類事件上結論完全相反——而那一類事件正是入侵偵測最在意的(打錯路徑的攻擊工具、被權限擋下的提權嘗試)。</p>
+<h3 id="mine-3">地雷 3:<code>path()</code> 被 bpftrace 全域關掉,錯誤訊息卻推給「你的 kernel 版本」<a class="headerlink" href="#mine-3" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:任何用到 <code>path()</code> 的腳本在編譯階段就被擋掉,訊息是 <code>ERROR: BPF_FUNC_d_path not available for your kernel version</code>。換成核心允許清單內的掛載點(<code>security_file_permission</code>)再試,一模一樣。</p>
+<p><strong>根因</strong>:兩邊的說法直接衝突。<code>bpftool feature probe kernel</code> 列得出 <code>bpf_d_path</code>(kernel 6.8,這個 helper 從 5.10 就在),但 <code>bpftrace --info</code> 的能力表寫著 <code>dpath: no</code>:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="gp">$ </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">1</span><span class="w"> </span>-m<span class="w"> </span>--<span class="w"> </span>bpftool<span class="w"> </span>feature<span class="w"> </span>probe<span class="w"> </span>kernel<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-i<span class="w"> </span>d_path
+</span><span id="__span-27-2"><a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="go">    - bpf_d_path                                ← 核心說有</span>
+</span><span id="__span-27-3"><a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a>
+</span><span id="__span-27-4"><a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="gp">$ </span>bpftrace<span class="w"> </span>--info<span class="w"> </span><span class="p">|</span><span class="w"> </span>sed<span class="w"> </span>-n<span class="w"> </span><span class="s1">&#39;/Kernel helpers/,/^$/p&#39;</span>
+</span><span id="__span-27-5"><a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a><span class="go">  dpath: no                                     ← bpftrace 說沒有</span>
+</span></code></pre></div>
+<p>也就是說,擋下來的是 bpftrace 自己的能力偵測,不是核心。至於偵測為什麼失敗,最可能的解釋是 <code>bpf_d_path</code> 有核心允許清單(<code>btf_allowlist_d_path</code>,只有 <code>vfs_truncate</code>、<code>dentry_open</code>、<code>security_file_permission</code> 等少數函式可以呼叫),而 bpftrace 的偵測程式沒有掛在清單內的函式上,載入失敗就被記成「helper 不存在」——<strong>這一層本課沒有直接量到,標記為推測</strong>。</p>
+<p><strong>修法</strong>:不要等它修好,也不要去升級 kernel(換成 6.12 也一樣)。路徑自己從 dentry 鏈走出來,見步驟 3 的腳本。錯誤訊息指名的元件不一定是有問題的元件,兩個獨立的能力探測給出相反答案時,先確認是誰在做判斷。</p>
+<h3 id="mine-4">地雷 4:<code>mount --bind /proc/1/root/…</code> 綁到的是容器自己的目錄<a class="headerlink" href="#mine-4" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:特權容器加上 <code>hostPID: true</code> 之後,<code>ls /proc/1/root/lib/modules/…</code> 明明讀得到節點上的東西,<code>mount --bind /proc/1/root/lib/modules /lib/modules</code> 也回報成功、<code>mount</code> 列表確實多一筆,但掛進去之後 <code>ls /lib/modules/</code> 是空的。</p>
+<p><strong>根因</strong>:<code>mount --bind</code> 不是由核心解析那條路徑。util-linux 的 <code>mount</code> 會先對來源做 <code>realpath()</code>,而 <code>/proc/1/root</code> 是一個 magic symlink,<code>readlink</code> 出來就是 <code>/</code>。於是 <code>/proc/1/root/lib/modules</code> 被正規化成 <code>/lib/modules</code>——容器自己的那一個。指令回報成功、掛載列表也多了一筆,只有 <code>ls</code> 是空的才看得出綁錯。</p>
+<p><strong>修法</strong>:臨時除錯改用 symlink(<code>ln -sfn /proc/1/root/usr/src/linux-headers-$KV /lib/modules/$KV/build</code>),核心解析 symlink 時不會做 <code>realpath</code> 那一步;要寫進 manifest 就老實用 hostPath 把 <code>/lib/modules</code> 與 <code>/usr/src</code> 掛進來。</p>
+<h3 id="mine-5">地雷 5:<code>kill -INT</code> 停不掉正在編譯的 <code>execsnoop-bpfcc</code>,它會變成孤兒繼續跑<a class="headerlink" href="#mine-5" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:量啟動延遲的腳本在偵測到第一個位元組之後送 <code>SIGINT</code>,bpftrace 每次都正常結束,<code>execsnoop-bpfcc</code> 卻繼續寫輸出;<code>ps -eo pid,etime,args</code> 抓到 <code>30868  04:04  /usr/bin/python3 /usr/sbin/execsnoop-bpfcc</code>,訊號送出去四分鐘後還在跑。</p>
+<p><strong>根因(推測)</strong>:合理的解釋是 CPython 的訊號處理。<code>SIGINT</code> 只會設一個旗標,要等直譯器回到位元組碼邊界才丟 <code>KeyboardInterrupt</code>,而那時它正卡在 <code>libbcc</code> 的 clang 編譯裡——那是一次 ctypes 呼叫,兩秒起跳。本課沒有進一步驗證這條推論。</p>
+<p><strong>修法</strong>:收工紀律因此不同,bpftrace 可以 <code>SIGINT</code>,bcc 工具要準備好 <code>SIGKILL</code>。另外 <code>pkill -9 -f "execsnoop-bpfcc"</code> 會把自己那一行 <code>bash -c</code> 也殺掉(pattern 出現在自己的命令列裡),整個 <code>kubectl exec</code> 回 137;要嘛寫成 <code>pkill -f "[e]xecsnoop-bpfcc"</code>,要嘛就別用 <code>-f</code>。</p>
+<h3 id="mine-6">地雷 6:bcc 要 kernel headers 是執行期需求,不是安裝期需求<a class="headerlink" href="#mine-6" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:同一支已經裝好、剛剛才跑成功的 <code>execsnoop-bpfcc</code>,只要把 <code>/lib/modules/$(uname -r)/build</code> 移開就立刻再度失敗,移回去又立刻正常。</p>
+<p><strong>根因</strong>:bcc 的工具每次啟動都把內嵌的 C 原始碼重新編譯一次,headers 是那一刻才讀的。安裝時它一個 header 都不需要。</p>
+<p><strong>修法</strong>:把 headers 當執行期相依管理——節點做 kernel 升級時,headers 套件必須同一批換到新版本。營運上的後果很具體:headers 沒跟上時,所有 bcc 工具會在下一次啟動時集體失效,而且不是安裝失敗,是本來好好的東西突然不能跑。bpftrace 沒有這個問題,它讀的是核心自己就地提供的 <code>/sys/kernel/btf/vmlinux</code>,永遠跟執行中的 kernel 同版。</p>
+<h3 id="mine-7">地雷 7:「bcc 要編譯器、bpftrace 不用」是錯的——兩邊都依賴 LLVM<a class="headerlink" href="#mine-7" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:在已經裝了 bpftrace 的容器裡加裝 bcc,只多下載 13.9 MB、9.2 秒完成,跟「bcc 很重」的說法對不上。</p>
+<p><strong>根因</strong>:<code>apt-cache depends</code> 兩行並排就結束了這個爭論:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-28-1"><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="gp">$ </span>apt-cache<span class="w"> </span>depends<span class="w"> </span>bpftrace<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-iE<span class="w"> </span><span class="s1">&#39;llvm|clang&#39;</span>
+</span><span id="__span-28-2"><a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="go">  Depends: libclang1-18</span>
+</span><span id="__span-28-3"><a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="go">  Depends: libllvm18</span>
+</span><span id="__span-28-4"><a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a><span class="gp">$ </span>apt-cache<span class="w"> </span>depends<span class="w"> </span>libbpfcc<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-iE<span class="w"> </span><span class="s1">&#39;llvm|clang&#39;</span>
+</span><span id="__span-28-5"><a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a><span class="go">  Depends: libclang-cpp18</span>
+</span><span id="__span-28-6"><a id="__codelineno-28-6" name="__codelineno-28-6" href="#__codelineno-28-6"></a><span class="go">  Depends: libllvm18</span>
+</span></code></pre></div>
+<p>兩支工具都在執行期把原始碼編成 BPF 位元碼,bpftrace 只是把編譯器藏在單一執行檔背後而已。而 13.9 MB 這個數字之所以小,正是因為 bpftrace 已經先把 LLVM 18(<code>dpkg-query</code> 顯示安裝後約 120 MB)拖進來了;在一個乾淨的 <code>ubuntu:24.04</code> 裡,bcc 那一整疊接近 190 MB。</p>
+<p><strong>修法</strong>:選型理由改用量得出來的三項——型別來源(BTF 或 kernel headers)、啟動時間(157 ms 或 2,182 ms)、同名工具的預設行為差異(見<a href="#mine-2">地雷 2</a>)。一句經得起複誦、卻經不起 <code>apt-cache depends</code> 的說法,比沒有說法更危險。</p>
+<h2 id="_13">帶得走的東西<a class="headerlink" href="#_13" title="Permanent link">&para;</a></h2>
+<ul>
+<li>每一支追蹤工具的答案都有形狀,而形狀由掛載點決定。掛在 <code>sys_enter</code> 就分不出成敗,掛 <code>tcp_connect</code> 就看不到 UDP,掛 execve 就看不到 shell 內建指令。看到輸出之前先問「它掛在哪」,比看完輸出再猜可靠。</li>
+<li>核心裡沒有路徑字串,只有一條 dentry 鏈。<code>path()</code> 這類 helper 是把鏈走完的便利品,不是路徑的來源;便利品被關掉時,鏈還在那裡可以自己走。</li>
+<li>同一個檔案在容器裡與在節點上,eBPF 給的是同一條路徑。核心視角沒有容器這個概念,任何「這是哪顆 pod」的答案都得從別的地方接上來。</li>
+<li>事件密度是選型參數。同一台閒置節點上開檔比執行行程多 70 倍,「整天開著」與「臨場開」是兩種不同的工具設計,選錯的代價是把節點的 CPU 餵給自己的追蹤器。</li>
+<li>可攜性有兩層,別混著講。原始碼層的可攜(同一份 <code>.bt</code> 在每顆節點對著自己的 BTF 重編)與目的檔層的可攜(一份 <code>.o</code> 搬著走)產生的結果可以一模一樣,但適用場景差很遠。同理,選型理由要能用一行指令驗證才算數——「依賴編譯器」「裝不起來」這類說法,<code>apt-cache depends</code> 一查就知道成不成立。</li>
+</ul>
+<h2 id="_14">延伸閱讀<a class="headerlink" href="#_14" title="Permanent link">&para;</a></h2>
+<p>想往下深挖,從這幾份開始:</p>
+<ul>
+<li><strong><a href="https://github.com/bpftrace/bpftrace/blob/v0.20.2/docs/reference_guide.md">bpftrace v0.20.2 參考手冊</a></strong> —— 本課程用的版本自帶的語法權威:探針型別、filter、map 與聚合函式、<code>str()</code> 與 <code>path()</code> 的定義都在這裡,對應本章的腳本解剖段。</li>
+<li><strong><a href="https://www.brendangregg.com/blog/2019-08-19/bpftrace.html">bpftrace 的完整入門(Brendan Gregg,2019)</a></strong> —— 這套工具作者的第一手介紹,含 one-liner 教學與隨附工具導覽,末段對 bpftrace 與 bcc 的分工判斷可以跟本章步驟 5 的量測對照著讀。</li>
+<li><strong><a href="https://github.com/iovisor/bcc/blob/master/docs/tutorial.md">bcc 官方教學</a></strong> —— bcc 那一族工具的定位與逐支輸出範例(<code>execsnoop</code>、<code>opensnoop</code>、<code>tcpconnect</code> 都在前幾節),可以跟本章步驟 5 量到的啟動時間與預設行為差異對照著看。</li>
+<li><strong><a href="https://nakryiko.com/posts/bpf-portability-and-co-re/">BPF CO-RE:編譯一次,到處執行(Andrii Nakryiko,2020)</a></strong> —— libbpf 作者解釋 BTF 與 CO-RE 如何取代 bcc 的執行期編譯,是本章步驟 4 那條「原始碼層可攜不等於目的檔層可攜」界線的另一端。</li>
+</ul>
+<h2 id="_15">下一步<a class="headerlink" href="#_15" title="Permanent link">&para;</a></h2>
+<p>今天量到的每一個限制都還在工具層,補得回來——argv 截斷可以換工具,DNS 看不到可以多掛一支探針。只有一件事補不回來:三支經典工具加上自寫的那支,沒有任何一個欄位說得出事件屬於哪一顆 pod,而自寫腳本裡容器內外寫入者的路徑字串完全相同,原因也擺在那裡了——核心不知道 Kubernetes 是什麼。Day 2 就從這個缺口接下去:cgroup id 與各種 namespace 在核心裡長什麼樣、怎麼從一個事件反查回 pod,以及這條對應在節點上要付出多少維護成本。</p>
+<hr />
+<div class="admonition quote">
+<p>bpftrace 標誌為 bpftrace 專案之官方資產,此處作社群教學用途。</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到頂端
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="頁腳" >
+        
+          
+          <a href="../sprint2-day0-ebpf-concepts/" class="md-footer__link md-footer__link--prev" aria-label="上一頁: Day 0 · eBPF 是什麼">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                上一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 0 · eBPF 是什麼
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../sprint2-day2-bpftrace-kubernetes/" class="md-footer__link md-footer__link--next" aria-label="下一頁: Day 2 · 把核心事件接回 Kubernetes">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                下一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 2 · 把核心事件接回 Kubernetes
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      KAI Scheduler、HAMi、Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,作社群教學用途
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.code.annotate", "content.code.select", "content.tabs.link", "search.suggest", "search.highlight", "search.share"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u8907\u88fd", "clipboard.copy": "\u8907\u88fd", "search.result.more.one": "\u6b64\u9801\u5c1a\u6709 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.more.other": "\u6b64\u9801\u5c1a\u6709 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.none": "\u6c92\u6709\u7b26\u5408\u7684\u9805\u76ee", "search.result.one": "\u627e\u5230 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.other": "\u627e\u5230 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.placeholder": "\u6253\u5b57\u9032\u884c\u641c\u5c0b", "search.result.term.missing": "\u7f3a\u5c11\u5b57\u8a5e", "select.version": "\u9078\u64c7\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

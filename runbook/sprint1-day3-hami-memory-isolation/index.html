@@ -1,0 +1,2515 @@
+
+<!doctype html>
+<html lang="zh-TW" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="雲原生實作課程 —— GPU 排程 runbook、踩雷解法與反思">
+      
+      
+      
+        <link rel="canonical" href="https://deepwavelab.github.io/CloudNativePracticing/runbook/sprint1-day3-hami-memory-isolation/">
+      
+      
+        <link rel="prev" href="../sprint1-day2-gang-scheduling-preemption/">
+      
+      
+        <link rel="next" href="../sprint1-day4-hami-kai-integration/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Day 3 · HAMi 安裝與 VRAM 硬隔離 - Cloud Native Lab Course</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/terminal.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#day-3-hami-t4-vram" class="md-skip">
+          跳轉到
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="頁首">
+    <a href="../.." title="Cloud Native Lab Course" class="md-header__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Cloud Native Lab Course
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Day 3 · HAMi 安裝與 VRAM 硬隔離
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換深色模式"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="切換深色模式" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換淺色模式"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="切換淺色模式" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜尋" placeholder="搜尋" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="搜尋">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="分享" aria-label="分享" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="清除" aria-label="清除" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜尋引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="標籤" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  首頁
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../sprint1-day0-azure-aks-foundation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 1 · GPU 排程三部曲
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint2-day0-ebpf-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 2 · eBPF 與執行期安全
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="導覽列" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Cloud Native Lab Course" class="md-nav__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Cloud Native Lab Course
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首頁
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    首頁
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day0-azure-aks-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 環境建置與成本紀律
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day1-kai-queue-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · KAI 安裝與 Queue 基礎
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day2-gang-scheduling-preemption/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Gang Scheduling 與搶占
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · HAMi 安裝與 VRAM 硬隔離
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · HAMi 安裝與 VRAM 硬隔離
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        原理與架構
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="原理與架構">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        送出一顆 pod 之後,四個地方會動
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        今天要走的路
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-device-plugin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1:把舊的 device plugin 拆掉——卡還在,資源不見了
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-hami-pool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2:把 HAMi 要的節點標籤補在 pool 層級
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-hami-v290-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3:安裝 HAMi v2.9.0——整套只有三顆 pod
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-t4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4:把一張 T4 切給多個容器
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 4:把一張 T4 切給多個容器">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#4-gb-16-gb" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        容器裡看到的是 4 GB,不是 16 GB
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pod-spec" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        這個限制塞在哪裡(pod spec 裡完全看不到)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        VRAM 不夠時,排程階段就擋下來
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hami" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        不指定節點時,HAMi 會把一張卡疊滿再換下一張
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5:超額配置只炸自己
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 5:超額配置只炸自己">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#hog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        hog 的死法有兩層,兩層都要看
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        撞的是自己的配額,不是卡的容量
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        鄰居毫髮無傷
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-pod-kai-hami-vram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6:把 pod 指名交給 KAI 排,卻要 HAMi 的 VRAM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7gpu-operator-day-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 7:GPU Operator 到底需不需要(結清 Day 1 的懸案)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 8:收尾
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收 checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷記錄
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="地雷記錄">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 1:device plugin 拆掉了,capacity 還在說這台機器有卡
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 2:nvidia.com/gpumem 不是節點資源,kubectl describe node 查不到 VRAM 餘額
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 3:HAMi 管的容器一定要有 glibc——busybox/alpine 直接 exit 127
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 4:HAMi 的 webhook 只接 default-scheduler 的 pod,已指名別的排程器就整顆放生
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的東西
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day4-hami-kai-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · HAMi 進階與 KAI 整合
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day5-hami-webui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · HAMi-WebUI 觀測介面
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day6-dra-simulated-devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · DRA 概念與模擬裝置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day7-dra-aks-real-gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · DRA 真卡實測
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day8-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 綜合:三者分工決策表
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day0-ebpf-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · eBPF 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day1-bpftrace-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · bpftrace 三支經典工具
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day2-bpftrace-kubernetes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · 把核心事件接回 Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day3-falco-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Falco 安裝與出廠規則
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day4-falco-custom-rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · 自訂規則、誤報調校與告警路由
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day5-tetragon-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Tetragon 與 TracingPolicy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day6-tetragon-enforcement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · 從偵測到攔截
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day7-cilium-kubeproxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Cilium 與 kube-proxy replacement
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day8-cilium-network-policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · CiliumNetworkPolicy(L3/L4 → L7)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day9-hubble/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Hubble 可觀測性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 綜合:四套工具的分工
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        原理與架構
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="原理與架構">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        送出一顆 pod 之後,四個地方會動
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        今天要走的路
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-device-plugin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1:把舊的 device plugin 拆掉——卡還在,資源不見了
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-hami-pool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2:把 HAMi 要的節點標籤補在 pool 層級
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-hami-v290-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3:安裝 HAMi v2.9.0——整套只有三顆 pod
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-t4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4:把一張 T4 切給多個容器
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 4:把一張 T4 切給多個容器">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#4-gb-16-gb" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        容器裡看到的是 4 GB,不是 16 GB
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pod-spec" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        這個限制塞在哪裡(pod spec 裡完全看不到)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#vram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        VRAM 不夠時,排程階段就擋下來
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hami" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        不指定節點時,HAMi 會把一張卡疊滿再換下一張
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5:超額配置只炸自己
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 5:超額配置只炸自己">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#hog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        hog 的死法有兩層,兩層都要看
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        撞的是自己的配額,不是卡的容量
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        鄰居毫髮無傷
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-pod-kai-hami-vram" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6:把 pod 指名交給 KAI 排,卻要 HAMi 的 VRAM
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7gpu-operator-day-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 7:GPU Operator 到底需不需要(結清 Day 1 的懸案)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 8:收尾
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收 checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷記錄
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="地雷記錄">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 1:device plugin 拆掉了,capacity 還在說這台機器有卡
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 2:nvidia.com/gpumem 不是節點資源,kubectl describe node 查不到 VRAM 餘額
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 3:HAMi 管的容器一定要有 glibc——busybox/alpine 直接 exit 127
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 4:HAMi 的 webhook 只接 default-scheduler 的 pod,已指名別的排程器就整顆放生
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的東西
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="day-3-hami-t4-vram">Day 3: 安裝 HAMi——把一張 T4 切給多個容器的 VRAM 配額與硬隔離<a class="headerlink" href="#day-3-hami-t4-vram" title="Permanent link">&para;</a></h1>
+<p><img align="right" alt="HAMi 官方標誌" src="../../assets/logos/hami-icon-color.svg" width="100" /></p>
+<blockquote>
+<p>Kubernetes 預設把 GPU 當一整顆蛋糕發放:要嘛整顆給你,要嘛不給,就算你只想要一片。前兩天送上叢集的每一顆 pod 都是這樣拿卡的——<code>nvidia.com/gpu: 1</code> 換一張 16 GB 的 T4,即使裡面跑的推論服務只用得到 2 GB,剩下的 14 GB 也一起鎖在它名下。今天把 device plugin 換掉,讓同一張 T4 同時服務多個容器,並且回答兩個問題:容器裡的 <code>nvidia-smi</code> 會看到多少 VRAM?宣告了 4 GB 配額、程式卻硬要吃 8 GB,擋不擋得住?路上有四顆雷,第一顆在拆掉舊 device plugin 的當下就會踩到——明明已經卸載乾淨,<code>kubectl describe node</code> 卻還在說這台機器上有一張卡可以用。</p>
+</blockquote>
+<div class="admonition abstract">
+<p class="admonition-title">你在課程的哪裡</p>
+<ul>
+<li><strong>Day 0–2</strong>:排程層(誰先拿到卡)走完了,但卡還是整張整張發。</li>
+<li><strong>今天</strong>:HAMi 接管 device plugin,把一張 T4 切給多個容器。驗收:容器內只看得到 4096 MiB,超配的 OOM 只炸在自己容器裡。</li>
+<li><strong>Day 4</strong>:放置策略,以及把 HAMi 的隔離接到 KAI 上。</li>
+</ul>
+</div>
+<h2 id="_1">原理與架構<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<p><code>nvidia.com/gpu</code> 是一個整數型的 extended resource:device plugin 回報幾張,節點就宣告幾張,pod 要幾張就整張整張地拿。這個設計對訓練工作剛剛好,一份訓練通常吃得下整張卡;對推論服務就很浪費,一個 2 GB 的模型佔著 16 GB 的 T4,利用率個位數,而後面還排著等卡的人。</p>
+<p>要讓多個容器共用一張卡,兩件事得同時成立,少一件都不算數。</p>
+<p><strong>第一件是排程層看得懂 VRAM 。</strong> 節點必須有辦法宣告「這張卡還能接幾個租戶、還剩多少 VRAM 」,排程器也要能拿 VRAM 當過濾條件。否則排程器只會數張數:四顆各要 4 GB 的 pod 塞進同一張 16 GB 卡,它算得出來,第五顆進來時就爆了。</p>
+<p><strong>第二件是執行層真的擋得住。</strong> 只在排程階段記帳沒有用。容器跑起來之後,CUDA 程式看到的是整張實體卡,而 PyTorch、TensorFlow、vLLM 這類框架的記憶體規劃全部拿「卡的總容量」乘一個比例——看到 16 GB 就照 16 GB 規劃。配額若只存在排程器的帳本裡,第一個吃過頭的容器就會把鄰居擠死。</p>
+<p>今天安裝的 <strong>HAMi</strong>(Heterogeneous AI Computing Virtualization Middleware,本課程用 chart / appVersion <code>2.9.0</code>)兩件都做。它自帶 device plugin,把一張實體卡宣告成多份 <code>nvidia.com/gpu</code>,並額外提供 <code>nvidia.com/gpumem</code>( VRAM ,MiB)與 <code>nvidia.com/gpucores</code>(算力,百分比)兩種配額;容器啟動時,它在容器內掛一個 <code>libvgpu.so</code> 攔截所有 CUDA 與 NVML 呼叫,配置量超過配額就直接回 out of memory。專案 2024 年 8 月進 CNCF sandbox,2026 年 7 月升格 incubating(截至 2026-08)。</p>
+<h3 id="pod">送出一顆 pod 之後,四個地方會動<a class="headerlink" href="#pod" title="Permanent link">&para;</a></h3>
+<pre class="mermaid"><code>flowchart TB
+    POD["Pod&lt;br/&gt;nvidia.com/gpu: 1&lt;br/&gt;nvidia.com/gpumem: 4096"] --&gt; WH["vgpu.hami.io mutating webhook&lt;br/&gt;改寫 schedulerName"]
+    WH --&gt; SCHED["hami-scheduler pod&lt;br/&gt;kube-scheduler + vgpu-scheduler-extender"]
+    SCHED --&gt; DP["hami-device-plugin pod&lt;br/&gt;device-plugin + vgpu-monitor"]
+    DP --&gt; LIB["容器內 /etc/ld.so.preload&lt;br/&gt;libvgpu.so 攔 CUDA / NVML 呼叫"]</code></pre>
+<p>中間兩格值得先停一下。<strong>HAMi 的排程器不是自己寫的排程器</strong>,而是一顆標準的 <code>kube-scheduler</code> 外掛一個 extender:一般的 filter/score 照走內建邏輯,遇到 GPU 相關的資源才把決定權交給 extender。Day 1 的 KAI 走的是另一條路,七個元件、自己實作整套排程迴圈與佇列體系。兩種做法今天都在同一個叢集上跑著,步驟 6 會讓它們正面撞一次。</p>
+<h3 id="_2">今天要走的路<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h3>
+<p>環境沿用 Day 0 蓋的 AKS <code>&lt;cluster&gt;</code>(K8s v1.35.6)、<code>gpuspot</code> pool 兩台 <code>Standard_NC4as_T4_v3</code>(各一張 16 GB T4,spot),Day 1 裝的 KAI Scheduler v0.16.8 保留但前五步不參與。五段路:<strong>換手</strong>(拆掉 nvidia-device-plugin,看 GPU 資源怎麼消失)、<strong>安裝</strong>(補節點標籤、裝 HAMi)、<strong>切分</strong>(把一張 T4 分給多個容器,比對容器內外看到的數字)、<strong>隔離</strong>(讓其中一顆硬吃到爆,看鄰居有沒有事)、<strong>邊界</strong>(把 pod 指名交給 KAI 排,卻要 HAMi 的 VRAM )。workload 全部丟在 <code>hami-lab</code> namespace。</p>
+<h2 id="_3">步驟<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<h3 id="1-device-plugin">步驟 1:把舊的 device plugin 拆掉——卡還在,資源不見了<a class="headerlink" href="#1-device-plugin" title="Permanent link">&para;</a></h3>
+<p>Day 0 到 Day 2 全程靠 helm release <code>nvdp</code> 提供 <code>nvidia.com/gpu</code>。HAMi 要自己接管這個資源名稱,兩套 device plugin 不能同時管同一張卡,所以第一件事是卸載舊的,順便驗證一件平常沒機會確認的事:device plugin 這一層能不能熱抽換。</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">$ </span>helm<span class="w"> </span>uninstall<span class="w"> </span>nvdp<span class="w"> </span>-n<span class="w"> </span>nvidia-device-plugin
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="go">release &quot;nvdp&quot; uninstalled</span>
+</span></code></pre></div>
+<p>每 10 秒查一次兩台 GPU 節點的 <code>allocatable</code>:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>[11:08:31] uninstall 指令返回
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>[11:08:37] [{&quot;n&quot;:&quot;vmss000009&quot;,&quot;gpu&quot;:&quot;0&quot;},{&quot;n&quot;:&quot;vmss00000a&quot;,&quot;gpu&quot;:&quot;1&quot;}]
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>[11:08:47] [{&quot;n&quot;:&quot;vmss000009&quot;,&quot;gpu&quot;:&quot;0&quot;},{&quot;n&quot;:&quot;vmss00000a&quot;,&quot;gpu&quot;:&quot;0&quot;}]
+</span></code></pre></div>
+<p>6 秒第一台歸零,16 秒內兩台都歸零。kubelet 對 device plugin 斷線的反應很快,不必重啟節點;namespace 裡的物件也被 helm 清得乾淨:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>nvidia-device-plugin<span class="w"> </span>get<span class="w"> </span>all
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">No resources found in nvidia-device-plugin namespace.</span>
+</span></code></pre></div>
+<p>同一台節點的另一個欄位,講的卻是另一套說法:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>nodes<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="err">&#39;</span>.items<span class="o">[]</span><span class="p">|</span><span class="k">select</span><span class="o">(</span>.metadata.name<span class="p">|</span>test<span class="o">(</span><span class="s2">&quot;gpuspot&quot;</span><span class="o">))</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">    |{name:.metadata.name, capacity:(.status.capacity|with_entries(select(.key|test(&quot;nvidia&quot;)))),</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="go">      allocatable:(.status.allocatable|with_entries(select(.key|test(&quot;nvidia&quot;))))}&#39;</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="go">{</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="go">  &quot;name&quot;: &quot;aks-gpuspot-21249019-vmss000009&quot;,</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="go">  &quot;capacity&quot;:    { &quot;nvidia.com/gpu&quot;: &quot;1&quot; },</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="go">  &quot;allocatable&quot;: { &quot;nvidia.com/gpu&quot;: &quot;0&quot; }</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="go">}</span>
+</span></code></pre></div>
+<p>(另一台輸出完全相同。)<code>capacity</code> 還寫著 1,診斷與判讀方式見<a href="#mine-1">地雷 1</a>。排程器站在哪一邊,丟一顆 <code>limits: {nvidia.com/gpu: 1}</code> 的 busybox 探針進去就知道:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>NAME          READY   STATUS    RESTARTS   AGE
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>nogpu-probe   0/1     Pending   0          13s
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>Events:
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>  Warning  FailedScheduling  13s  default-scheduler
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>  0/3 nodes are available: 1 node(s) didn&#39;t match Pod&#39;s node affinity/selector,
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>  2 Insufficient nvidia.com/gpu. no new claims to deallocate,
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>  preemption: 0/3 nodes are available: 3 Preemption is not helpful for scheduling.
+</span></code></pre></div>
+<p>訊息是 <code>Insufficient nvidia.com/gpu</code>,而不是「沒有這種資源」——資源鍵還在、值是 0,排程器只認 <code>allocatable</code>。叢集現在的狀態是:有 GPU 硬體、有 AKS 受管的驅動、沒有任何 device plugin。HAMi 可以乾淨地接上去。</p>
+<h3 id="2-hami-pool">步驟 2:把 HAMi 要的節點標籤補在 pool 層級<a class="headerlink" href="#2-hami-pool" title="Permanent link">&para;</a></h3>
+<p>HAMi 的 device plugin DaemonSet 預設帶 <code>nvidiaNodeSelector: {gpu: "on"}</code>(chart values 寫死),官方文件教的也是 <code>kubectl label nodes &lt;node&gt; gpu=on</code>。這條在 AKS 上不能照抄:<a href="../sprint1-day0-azure-aks-foundation/#mine-1">Day 0 地雷 1</a> 已經記過一次,spot 節點會被回收重建、pool 縮到 0 再拉回來也是全新 VM,節點層級的標籤活不過任何一次重建。標籤下在 pool 層級,而 <code>--labels</code> 是整組取代,既有的兩顆一定要一起帶上:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>update<span class="w"> </span>-g<span class="w"> </span>&lt;resource-group&gt;<span class="w"> </span>--cluster-name<span class="w"> </span>&lt;cluster&gt;<span class="w"> </span>-n<span class="w"> </span>gpuspot<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">    </span>--subscription<span class="w"> </span>&lt;subscription-id&gt;<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span>--labels<span class="w"> </span><span class="nv">pool</span><span class="o">=</span>gpu<span class="w"> </span><span class="s2">&quot;nvidia.com/gpu.present=true&quot;</span><span class="w"> </span><span class="nv">gpu</span><span class="o">=</span>on
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="go">{ &quot;count&quot;: 2, &quot;state&quot;: &quot;Succeeded&quot;,</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="go">  &quot;labels&quot;: { &quot;gpu&quot;: &quot;on&quot;, &quot;kubernetes.azure.com/scalesetpriority&quot;: &quot;spot&quot;,</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="go">              &quot;nvidia.com/gpu.present&quot;: &quot;true&quot;, &quot;pool&quot;: &quot;gpu&quot; } }</span>
+</span></code></pre></div>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>NAME                              GPU   POOL   PRESENT
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>aks-gpuspot-21249019-vmss000009   on    gpu    true
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>aks-gpuspot-21249019-vmss00000a   on    gpu    true
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a># 節點沒有被重建:creationTimestamp 仍是 2026-08-04T03:06:55Z,預熱用的 pod 也還活著
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>image-prepuller-p4294   1/1   Running   0   3m45s
+</span></code></pre></div>
+<p>38 秒完成,節點沒有重建,上面跑著的 pod 不受影響。改 pool 標籤不等於換節點,這讓「補一個標籤」從一次停機變成一次線上操作。回傳值裡多出來的 <code>kubernetes.azure.com/scalesetpriority=spot</code> 是 AKS 自己掛的系統標籤,不用也不能寫進 <code>--labels</code>,整組取代不會把它洗掉。輸出裡那組 <code>image-prepuller</code> 是一個不要 GPU 的 DaemonSet,趁開機空檔把幾 GB 的 <code>pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime</code> 預先拉到兩台節點上,後面每顆測試 pod 都是秒開。</p>
+<h3 id="3-hami-v290-pod">步驟 3:安裝 HAMi v2.9.0——整套只有三顆 pod<a class="headerlink" href="#3-hami-v290-pod" title="Permanent link">&para;</a></h3>
+<p>安裝值只改三件事,其餘沿用 chart 預設:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span><span class="m">01</span>-hami-values.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="s">devicePlugin:</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="s">  # without this the DaemonSet never lands on the spot-tainted GPU nodes</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="s">  tolerations:</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="s">    - key: kubernetes.azure.com/scalesetpriority</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="s">      operator: Equal</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="s">      value: spot</span>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="s">      effect: NoSchedule</span>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="s">scheduler:</span>
+</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="s">  # pin the control plane to the system pool</span>
+</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="s">  nodeSelector:</span>
+</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="s">    agentpool: system</span>
+</span><span id="__span-7-14"><a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="s">  patch:</span>
+</span><span id="__span-7-15"><a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="s">    nodeSelector:</span>
+</span><span id="__span-7-16"><a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="s">      agentpool: system</span>
+</span><span id="__span-7-17"><a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="s">EOF</span>
+</span></code></pre></div>
+<p>保留預設的兩個值等一下會直接看到效果:<code>deviceSplitCount: 10</code>(每張實體卡切成 10 份)與 <code>deviceMemoryScaling: 1</code>(不超賣 VRAM )。</p>
+<p>還有一個預設值要先驗。chart 的 kube-scheduler 映像 tag 是留空的,實際值由 <code>.Capabilities.KubeVersion</code> 推導,而 registry 預設指向 <code>registry.cn-hangzhou.aliyuncs.com</code>。叢集是 1.35.6,它就會去拉 <code>.../google_containers/kube-scheduler:v1.35.6</code>,而這個阿里雲 registry 跟不跟得上最新的 K8s minor 沒有保證。裝之前問一句 registry API 最省事:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="gp">$ </span><span class="nv">TOK</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span><span class="s2">&quot;https://dockerauth.cn-hangzhou.aliyuncs.com/auth?service=registry.aliyuncs.com:cn-hangzhou:26842&amp;scope=repository:google_containers/kube-scheduler:pull&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.token<span class="k">)</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="gp">$ </span>curl<span class="w"> </span>-s<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s2">&quot;%{http_code}\n&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOK</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span>-H<span class="w"> </span><span class="s2">&quot;Accept: application/vnd.docker.distribution.manifest.list.v2+json&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">    </span>https://registry.cn-hangzhou.aliyuncs.com/v2/google_containers/kube-scheduler/manifests/v1.35.6
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="go">200</span>
+</span></code></pre></div>
+<p>本次回 <code>200</code>(拿不存在的 <code>v9.99.9</code> 對照會回 <code>404</code>,證明這個探法測得出差別),預設值可用;若回 404,就改 <code>--set scheduler.kubeScheduler.image.registry=registry.k8s.io --set scheduler.kubeScheduler.image.repository=kube-scheduler</code>。另一條完全不碰叢集的路是 <code>helm template ... --kube-version 1.35.6 | grep image:</code>,把四個映像的最終字串印出來核對。</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="gp">$ </span>helm<span class="w"> </span>repo<span class="w"> </span>add<span class="w"> </span>hami-charts<span class="w"> </span>https://project-hami.github.io/HAMi/<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>helm<span class="w"> </span>repo<span class="w"> </span>update
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="gp">$ </span>helm<span class="w"> </span>install<span class="w"> </span>hami<span class="w"> </span>hami-charts/hami<span class="w"> </span>--version<span class="w"> </span><span class="m">2</span>.9.0<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-f<span class="w"> </span><span class="m">01</span>-hami-values.yaml
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="go">NAME: hami</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="go">NAMESPACE: kube-system</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="go">STATUS: deployed</span>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="go">REVISION: 1</span>
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="go">NOTES:</span>
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="go">Resource name: nvidia.com/gpu</span>
+</span></code></pre></div>
+<p>安裝後 85 秒,三顆 pod 全部 Running:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>hami-device-plugin-k884s          2/2   Running   0   73s   aks-gpuspot-21249019-vmss00000a
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>hami-device-plugin-z46mx          2/2   Running   0   73s   aks-gpuspot-21249019-vmss000009
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>hami-scheduler-6cb48464bb-g8swb   2/2   Running   0   73s   aks-system-35459509-vmss000000
+</span></code></pre></div>
+<p>每顆都是兩個容器:device plugin 是 <code>device-plugin</code> 加 <code>vgpu-monitor</code>,scheduler 是 <code>kube-scheduler</code> 加 <code>vgpu-scheduler-extender</code>。對照 Day 1 步驟 3 清點過的 KAI 七個 Deployment,HAMi 的控制面小得多,落位也符合設計:資料面兩顆在 GPU 節點、控制面一顆在 system pool。</p>
+<p>節點現在對外宣告什麼:</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;aks-gpuspot-21249019-vmss000009&quot;</span><span class="p">,</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span><span class="nt">&quot;capacity&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;nvidia.com/gpu&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;10&quot;</span><span class="w"> </span><span class="p">},</span><span class="w"> </span><span class="nt">&quot;allocatable&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;nvidia.com/gpu&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;10&quot;</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+</span></code></pre></div>
+<p>一張實體 T4 變成 10 份 <code>nvidia.com/gpu</code>。這個 10 是 <code>deviceSplitCount</code>,意思是「這張卡最多接幾個容器」,跟 VRAM 無關。而 <code>nvidia.com/gpumem</code> 與 <code>nvidia.com/gpucores</code> 一個都沒有出現在節點資源裡——它們在節點的 annotation 上:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>node<span class="w"> </span>aks-gpuspot-21249019-vmss000009<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">    </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.metadata.annotations|with_entries(select(.key|test(&quot;hami&quot;)))&#39;</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="go">{</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="go">  &quot;hami.io/node-handshake&quot;: &quot;Requesting_2026-08-04 03:12:22&quot;,</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="go">  &quot;hami.io/node-nvidia-register&quot;: &quot;[{\&quot;id\&quot;:\&quot;GPU-76fd10c5-...-0f4a59e7e1cc\&quot;,\&quot;count\&quot;:10,\&quot;devmem\&quot;:16384,\&quot;devcore\&quot;:100,\&quot;type\&quot;:\&quot;NVIDIA-Tesla T4\&quot;,\&quot;mode\&quot;:\&quot;hami-core\&quot;,\&quot;health\&quot;:true,\&quot;devicepairscore\&quot;:{}}]&quot;</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="go">}</span>
+</span></code></pre></div>
+<p><code>devmem: 16384</code>、<code>devcore: 100</code>、卡的 UUID 與 <code>mode: hami-core</code> 全在這一行裡,這是全叢集唯一看得到實體卡規格的地方。 VRAM 的帳為什麼不走 kubelet、查餘額該去哪裡看,見<a href="#mine-2">地雷 2</a>。</p>
+<h3 id="4-t4">步驟 4:把一張 T4 切給多個容器<a class="headerlink" href="#4-t4" title="Permanent link">&para;</a></h3>
+<p>三顆 pod,各要 1 份 <code>nvidia.com/gpu</code> 加 4096 MiB VRAM ,用 <code>nodeSelector: kubernetes.io/hostname</code> 釘在同一台(也就是同一張卡):</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">app</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">      </span><span class="nt">resources</span><span class="p">:</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">        </span><span class="nt">limits</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> nvidia.com/gpu</span><span class="p">:</span><span class="w"> </span><span class="nv">1</span><span class="p p-Indicator">,</span><span class="nt"> nvidia.com/gpumem</span><span class="p">:</span><span class="w"> </span><span class="nv">4096</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span></code></pre></div>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>[11:13:17] pod/slice-a created / pod/slice-b created / pod/slice-c created
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>[11:13:33] slice-a   1/1   Running   0   16s   aks-gpuspot-21249019-vmss000009
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>           slice-b   1/1   Running   0   16s   aks-gpuspot-21249019-vmss000009
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>           slice-c   1/1   Running   0   15s   aks-gpuspot-21249019-vmss000009
+</span></code></pre></div>
+<p>16 秒三顆全部 Running。是不是真的落在同一張實體卡,看 HAMi 寫回 pod 的 annotation:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>slice-a  hami.io/vgpu-devices-allocated = GPU-76fd10c5-...-0f4a59e7e1cc,NVIDIA,4096,0:;
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>slice-b  hami.io/vgpu-devices-allocated = GPU-76fd10c5-...-0f4a59e7e1cc,NVIDIA,4096,0:;
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>slice-c  hami.io/vgpu-devices-allocated = GPU-76fd10c5-...-0f4a59e7e1cc,NVIDIA,4096,0:;
+</span></code></pre></div>
+<p>同一顆 GPU UUID、各 4096 MiB。格式是 <code>&lt;GPU-UUID&gt;,&lt;廠牌&gt;,&lt;VRAM MiB&gt;,&lt;算力 %&gt;</code>,最後那個 0 表示沒有限制算力。三顆的 <code>spec.schedulerName</code> 也都變成了 <code>hami-scheduler</code>——manifest 裡沒寫這個欄位,是 webhook 改的。</p>
+<h4 id="4-gb-16-gb">容器裡看到的是 4 GB,不是 16 GB<a class="headerlink" href="#4-gb-16-gb" title="Permanent link">&para;</a></h4>
+<p><code>slice-a</code> 容器內:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>+-----------------------------------------+------------------------+----------------------+
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>|   0  Tesla T4                       Off |   00000001:00:00.0 Off |                  Off |
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>| N/A   34C    P8             13W /   70W |       0MiB /   4096MiB |      0%      Default |
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>+-----------------------------------------+------------------------+----------------------+
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>===== torch view =====
+</span><span id="__span-16-6"><a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>name= Tesla T4 total_MiB= 4096
+</span></code></pre></div>
+<p>同一時刻,借旁邊一顆不要 GPU 的 pod 在宿主機端查同一張卡:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>memory.used [MiB], memory.total [MiB], utilization.gpu [%]
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>0 MiB, 16384 MiB, 0 %
+</span></code></pre></div>
+<p>同一張卡,兩種數字。三顆 pod 各自看到的都是 <code>0MiB / 4096MiB</code>,而且 <code>Processes</code> 區塊全是空的,彼此看不到對方的行程。</p>
+<p>PyTorch 那一行 <code>total_MiB= 4096</code> 比 <code>nvidia-smi</code> 更關鍵。它走的是 <code>cudaGetDeviceProperties</code>,而框架的自動記憶體規劃——PyTorch 的 caching allocator、TensorFlow 的 memory growth、vLLM 的 <code>gpu_memory_utilization</code>——全部以這個數字為基準乘一個比例。容器若看到 16 GB,vLLM 照預設值 0.9 就會去要 14.4 GB,配額再怎麼寫都攔不住第一次配置。HAMi 把源頭改掉,框架的自動規劃自然落在配額之內,應用端一行程式都不用動。</p>
+<h4 id="pod-spec">這個限制塞在哪裡(pod spec 裡完全看不到)<a class="headerlink" href="#pod-spec" title="Permanent link">&para;</a></h4>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>hami-lab<span class="w"> </span>get<span class="w"> </span>pod<span class="w"> </span>slice-a<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="w">    </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.spec.containers[0]|{env,volumeMounts,resources}&#39;</span>
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="go">{</span>
+</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="go">  &quot;env&quot;: null,</span>
+</span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="go">  &quot;volumeMounts&quot;: [],</span>
+</span><span id="__span-18-6"><a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="go">  &quot;resources&quot;: { &quot;limits&quot;: { &quot;nvidia.com/gpu&quot;: &quot;1&quot;, &quot;nvidia.com/gpumem&quot;: &quot;4096&quot; } }</span>
+</span><span id="__span-18-7"><a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="go">}</span>
+</span></code></pre></div>
+<p><code>env</code> 是 <code>null</code>、vgpu 相關的 volumeMount 一個都沒有。但 exec 進去是另一個世界:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>hami-lab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>slice-a<span class="w"> </span>--<span class="w"> </span>env<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-iE<span class="w"> </span><span class="s2">&quot;cuda|nvidia|vgpu&quot;</span>
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="go">CUDA_DEVICE_MEMORY_LIMIT_0=4096m</span>
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="go">CUDA_DEVICE_MEMORY_SHARED_CACHE=/usr/local/vgpu/b0118c30-....cache</span>
+</span><span id="__span-19-4"><a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="go">CUDA_DEVICE_SM_LIMIT=0</span>
+</span><span id="__span-19-5"><a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="go">LIBCUDA_LOG_LEVEL=1</span>
+</span><span id="__span-19-6"><a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="go">NVIDIA_VISIBLE_DEVICES=GPU-76fd10c5-...-0f4a59e7e1cc</span>
+</span><span id="__span-19-7"><a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>hami-lab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>slice-a<span class="w"> </span>--<span class="w"> </span>cat<span class="w"> </span>/etc/ld.so.preload
+</span><span id="__span-19-8"><a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="go">/usr/local/vgpu/libvgpu.so</span>
+</span></code></pre></div>
+<p>這些是 device plugin 在 <code>Allocate()</code> 回應裡交給 kubelet 的,由容器執行期直接注入,不會回寫到 pod spec。所以要確認一顆 pod 有沒有真的被 HAMi 接管,<code>kubectl get pod -o yaml</code> 幫不上忙,只能 exec 進去看這兩樣。攔截點就是 <code>libvgpu.so</code> 被動態載入器掛在 CUDA 與 NVML 之前:<code>nvidia-smi</code> 之所以乖乖回報 4096,是因為它問的 <code>nvmlDeviceGetMemoryInfo</code> 也走過同一層。</p>
+<h4 id="vram">VRAM 不夠時,排程階段就擋下來<a class="headerlink" href="#vram" title="Permanent link">&para;</a></h4>
+<p>同一張卡已經配出 3 × 4096 = 12288 MiB(實體 16384),再送一顆要 8192 MiB 的:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>NAME                   READY   STATUS    RESTARTS   AGE
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>mem-overcommit-probe   0/1     Pending   0          16s
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>
+</span><span id="__span-20-4"><a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>Events:
+</span><span id="__span-20-5"><a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a>  Warning  FilteringFailed   hami-scheduler   1 nodes CardInsufficientMemory(aks-gpuspot-21249019-vmss000009)
+</span><span id="__span-20-6"><a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a>  Warning  FilteringFailed   hami-scheduler   no available node, 1 nodes do not meet
+</span><span id="__span-20-7"><a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a>  Warning  FailedScheduling  hami-scheduler   0/3 nodes are available: 1 NodeUnfitPod, ...
+</span><span id="__span-20-8"><a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a>
+</span><span id="__span-20-9"><a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a># 同一時刻節點的帳本:
+</span><span id="__span-20-10"><a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a>Allocated resources:
+</span><span id="__span-20-11"><a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a>  Resource           Requests    Limits
+</span><span id="__span-20-12"><a id="__codelineno-20-12" name="__codelineno-20-12" href="#__codelineno-20-12"></a>  nvidia.com/gpu     3           3
+</span></code></pre></div>
+<p><code>CardInsufficientMemory</code> 是 extender 自己發的事件,訊息直接點名哪一張卡不夠,比 default-scheduler 的 <code>Insufficient &lt;resource&gt;</code> 精準得多。而節點帳本只寫著切了三刀,「 VRAM 只剩 4096」這件事在上面完全查不到,這就是<a href="#mine-2">地雷 2</a> 的實際後果。</p>
+<h4 id="hami">不指定節點時,HAMi 會把一張卡疊滿再換下一張<a class="headerlink" href="#hami" title="Permanent link">&para;</a></h4>
+<p>四顆 pod、各要 3000 MiB、不寫任何 <code>nodeSelector</code>,看它自己怎麼擺:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>NAME        STATUS    NODE
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>g-place-1   Running   aks-gpuspot-21249019-vmss000009
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>g-place-2   Running   aks-gpuspot-21249019-vmss000009
+</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>g-place-3   Running   aks-gpuspot-21249019-vmss000009
+</span><span id="__span-21-5"><a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a>g-place-4   Running   aks-gpuspot-21249019-vmss000009
+</span><span id="__span-21-6"><a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>
+</span><span id="__span-21-7"><a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a>g-place-1 dev=GPU-76fd10c5-...-0f4a59e7e1cc,NVIDIA,3000,0:;   ← 四顆的 UUID 完全相同
+</span><span id="__span-21-8"><a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a>node 000009:  nvidia.com/gpu  4  (4 顆 pod,共 12000 MiB)
+</span><span id="__span-21-9"><a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a>node 00000a:  nvidia.com/gpu  0  (完全沒用到)
+</span></code></pre></div>
+<p>整組四顆疊在同一張實體 T4 上,另一台節點一張卡都沒碰,而且這是 HAMi 自己選的位置,不是釘上去的。chart 預設 <code>nodeSchedulerPolicy: binpack</code> 加 <code>gpuSchedulerPolicy: spread</code>——節點層面塞滿一台再換下一台,同一台有多張卡時才把 pod 分散到不同卡上。對 spot 叢集這個預設值有它的道理,集中使用讓空節點可以縮掉省錢;代價是風險也跟著集中,那台被回收,四個租戶一起死。要反過來就改 <code>scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy=spread</code>。</p>
+<p>這一輪測試的第一版用的是 <code>busybox:1.36</code>,四顆全部 <code>Failed</code>,原因見<a href="#mine-3">地雷 3</a>。</p>
+<h3 id="5">步驟 5:超額配置只炸自己<a class="headerlink" href="#5" title="Permanent link">&para;</a></h3>
+<p>配額寫得出來、排程階段擋得住,都還只是記帳。真正要驗的是執行期:一顆宣告 4096 MiB 的容器,程式硬要配置 8192 MiB 會怎樣,鄰居會不會被波及。</p>
+<p>兩顆 pod 釘在同一台(也就是同一張卡),配額都是 4096 MiB:<code>iso-holder</code> 配置 3.00 GiB 並長期持有,每 15 秒回報一次還活著與資料校驗值;<code>iso-hog</code> 以 512 MiB 為單位一路加碼,目標 8192 MiB。</p>
+<h4 id="hog">hog 的死法有兩層,兩層都要看<a class="headerlink" href="#hog" title="Permanent link">&para;</a></h4>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>budget check: total_MiB = 4096
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>HOG: allocated 512 MiB total
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>...
+</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>HOG: allocated 3584 MiB total
+</span><span id="__span-22-5"><a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a>[HAMI-core ERROR (pid:1 thread=125213539699584 allocator.c:52)]: Device 0 OOM 4401922048 / 4294967296
+</span><span id="__span-22-6"><a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a>HOG: FAILED at 4096 MiB
+</span><span id="__span-22-7"><a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a>HOG: exception type = OutOfMemoryError
+</span><span id="__span-22-8"><a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a>HOG: exception text = CUDA out of memory. Tried to allocate 512.00 MiB. GPU 0 has a total
+</span><span id="__span-22-9"><a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a>capacity of 4.00 GiB of which 410.00 MiB is free. Including non-PyTorch memory, this process
+</span><span id="__span-22-10"><a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a>has 3.60 GiB memory in use. ... If reserved but unallocated memory is large try
+</span><span id="__span-22-11"><a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a>setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.
+</span></code></pre></div>
+<p>上面那一層是 HAMi-core。分母 <code>4294967296</code> 正好是 4 GiB,也就是配額;分子 <code>4401922048</code> 約 4.10 GiB,是這次請求之後的累計量;<code>allocator.c:52</code> 是 <code>libvgpu.so</code> 裡做 OOM 檢查的位置。這個錯誤由攔截層送出,驅動並沒有參與。</p>
+<p>下面那一層是 PyTorch:<code>GPU 0 has a total capacity of 4.00 GiB</code>。框架完全相信自己在一張 4 GB 的卡上,連建議都給得合情合理(叫你調 <code>expandable_segments</code> 避免碎片化)。應用端不需要知道自己被切了,這正是隔離該有的樣子。</p>
+<p>還有一個數字要記住:實際拿到 3584 MiB(7 塊 512),第 8 塊被擋。差的約 512 MiB 是 CUDA context 本身的開銷,<strong>配額是含 context 的總量</strong>。要跑 4 GB 的模型,配額得開到 4.5–5 GB 才夠。</p>
+<h4 id="_4">撞的是自己的配額,不是卡的容量<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h4>
+<p>把 hog 放慢(每塊之間停 2 秒),同時在宿主機端抽樣實體卡用量:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>[11:16:54] 實體卡 used=3193 MiB | hog:
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>[11:16:58] 實體卡 used=3807 MiB | hog: HOG: allocated 1024 MiB total
+</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>[11:17:02] 實體卡 used=4831 MiB | hog: HOG: allocated 2048 MiB total
+</span><span id="__span-23-4"><a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>[11:17:06] 實體卡 used=5855 MiB | hog: HOG: allocated 3072 MiB total
+</span><span id="__span-23-5"><a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a>[11:17:10] 實體卡 used=6879 MiB | hog: HOG: allocated 3584 MiB total
+</span><span id="__span-23-6"><a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a>[11:17:14] 實體卡 used=3193 MiB | hog: HOG: exception text = CUDA out of memory ...
+</span></code></pre></div>
+<p>hog 被拒絕的那一刻,實體卡是 <strong>6879 / 16384 MiB,還空著 9.5 GB</strong>,它照樣拿不到第 8 塊 512 MiB。硬隔離的全部意思就在這一行數字裡:上限來自容器的配額,卡上還剩多少對它不存在。少了這一層,這顆 pod 會一路吃到 16 GB,鄰居就沒得跑了。hog 退出後實體用量掉回 3193 MiB(holder 的 3 GiB 加 CUDA context), VRAM 乾淨釋放。</p>
+<h4 id="_5">鄰居毫髮無傷<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h4>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>HOLDER: allocated 3.00 GiB, checksum= 1.0
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>HOLDER alive t=0s   reserved_MiB=3072 first_elem=1.0
+</span><span id="__span-24-3"><a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>...
+</span><span id="__span-24-4"><a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a>HOLDER alive t=165s reserved_MiB=3072 first_elem=1.0
+</span><span id="__span-24-5"><a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>
+</span><span id="__span-24-6"><a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a>NAME           READY   STATUS      RESTARTS   AGE
+</span><span id="__span-24-7"><a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a>iso-hog-slow   0/1     Completed   0          71s
+</span><span id="__span-24-8"><a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a>iso-holder     1/1     Running     0          3m
+</span></code></pre></div>
+<p>跨越兩次鄰居 OOM(快版與慢版各一次),holder 的 <code>reserved_MiB</code> 一路是 3072、資料校驗值一路是 1.0、<code>RESTARTS 0</code>。沒有 Xid 錯誤、沒有 device reset,節點上其他 pod 也沒有任何一顆受影響。受害範圍精準地停在 hog 那一顆容器裡,兩次獨立測試結果一致。</p>
+<h3 id="6-pod-kai-hami-vram">步驟 6:把 pod 指名交給 KAI 排,卻要 HAMi 的 VRAM<a class="headerlink" href="#6-pod-kai-hami-vram" title="Permanent link">&para;</a></h3>
+<p>叢集裡現在兩套系統都健康跑著:Day 1 裝的 KAI 七個元件全部 Running,今天裝的 HAMi 三顆 pod 全部 Running。一個很自然的期待是「用 KAI 的佇列管配額、用 HAMi 的切分省卡」。送一顆探針試試:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="nt">spec</span><span class="p">:</span>
+</span><span id="__span-25-2"><a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="w">  </span><span class="nt">schedulerName</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kai-scheduler</span><span class="w">        </span><span class="c1"># explicitly ask for KAI</span>
+</span><span id="__span-25-3"><a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="w">  </span><span class="nt">containers</span><span class="p">:</span>
+</span><span id="__span-25-4"><a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">resources</span><span class="p">:</span>
+</span><span id="__span-25-5"><a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a><span class="w">        </span><span class="nt">limits</span><span class="p">:</span>
+</span><span id="__span-25-6"><a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a><span class="w">          </span><span class="nt">nvidia.com/gpu</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+</span><span id="__span-25-7"><a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a><span class="w">          </span><span class="nt">nvidia.com/gpumem</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">4096</span><span class="w">     </span><span class="c1"># but ask for HAMi&#39;s resource</span>
+</span></code></pre></div>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>NAME              READY   STATUS    RESTARTS   AGE
+</span><span id="__span-26-2"><a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a>collision-probe   0/1     Pending   0          20s
+</span><span id="__span-26-3"><a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a>
+</span><span id="__span-26-4"><a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a>spec.schedulerName(webhook 跑完之後)= kai-scheduler
+</span><span id="__span-26-5"><a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a>PodGroup: pg-collision-probe-50b46df6-...  ← KAI 接手了
+</span><span id="__span-26-6"><a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a>
+</span><span id="__span-26-7"><a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a>Events:
+</span><span id="__span-26-8"><a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a>  Warning  Unschedulable      kai-scheduler   Scheduling conditions were not met for pod
+</span><span id="__span-26-9"><a id="__codelineno-26-9" name="__codelineno-26-9" href="#__codelineno-26-9"></a>    hami-lab/collision-probe:
+</span><span id="__span-26-10"><a id="__codelineno-26-10" name="__codelineno-26-10" href="#__codelineno-26-10"></a>    MaxNodePoolResources: The pod hami-lab/collision-probe requires GPU: 1, CPU: 0 (cores),
+</span><span id="__span-26-11"><a id="__codelineno-26-11" name="__codelineno-26-11" href="#__codelineno-26-11"></a>    memory: 0 (GB), pods: 1, nvidia.com/gpumem: 4096000.
+</span><span id="__span-26-12"><a id="__codelineno-26-12" name="__codelineno-26-12" href="#__codelineno-26-12"></a>    No node in the default node-pool has nvidia.com/gpumem resources.
+</span></code></pre></div>
+<p>永遠 Pending。HAMi 的 webhook 沒有碰這顆 pod,KAI 接手了(PodGroup 都建出來了),然後 KAI 拿標準的節點資源帳本去找 <code>nvidia.com/gpumem</code>——那不是節點資源,自然找不到,完整診斷見<a href="#mine-4">地雷 4</a>。除了這顆刻意製造的探針,整場實驗(3 顆切分 pod、4 顆放置測試 pod、3 顆隔離 pod)KAI 完全沒有介入:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a>hami-lab namespace 的 PodGroup:              No resources found
+</span><span id="__span-27-2"><a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a>iso-holder 的 labels/annotations:             只有 hami.io/*,沒有 kai/runai 的鍵
+</span><span id="__span-27-3"><a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a>KAI admission log 提到 hami-lab 的行數: 0
+</span><span id="__span-27-4"><a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a>KAI binder log 提到 hami 的行數:        0
+</span><span id="__span-27-5"><a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a>KAI 七元件(跨 Day 1–3):                     全部 Running,RESTARTS 0,age 20h
+</span></code></pre></div>
+<p><code>hami-lab</code> 這個 namespace 同時落在兩個 mutating webhook 的作用範圍內(KAI 的 <code>mutating-kai-admission</code> 排除 <code>kube-system</code> 與 <code>kai-scheduler</code>,HAMi 的 <code>vgpu.hami.io</code> 排除帶 <code>hami.io/webhook: ignore</code> 標籤的),實際上卻沒有打架:誰接手由 <code>schedulerName</code> 決定,而兩邊都不碰沒有 GPU 資源請求的 pod——步驟 2 那組預熱 DaemonSet 從頭到尾保持 <code>default-scheduler</code>,兩個 webhook 誰都沒有動它。</p>
+<p>兩個 webhook 有一處設計正好相反,值得寫進監控規格:<strong>KAI 的 <code>failurePolicy</code> 是 <code>Fail</code></strong>(webhook 掛掉就擋下所有建立 pod 的請求),<strong>HAMi 是 <code>Ignore</code></strong>(webhook 掛掉 pod 照建,只是不會被切分)。後者在故障時很陰:pod 會以「沒有任何 VRAM 限制」的狀態跑起來,<code>kubectl get pods</code> 一片 Running,隔離其實已經失效,而且沒有任何告警。監控條件因此要寫成「pod 有沒有拿到 <code>hami.io/vgpu-devices-allocated</code> annotation」,只看 Running 看不出這件事。</p>
+<h3 id="7gpu-operator-day-1">步驟 7:GPU Operator 到底需不需要(結清 Day 1 的懸案)<a class="headerlink" href="#7gpu-operator-day-1" title="Permanent link">&para;</a></h3>
+<p>Day 1 步驟 5 留了一個沒答完的問題:KAI 的 README 把 NVIDIA GPU Operator 列成前置條件,但整張卡配置在只有 device plugin 的叢集上照樣跑通,當時的推測是「KAI 的 GPU sharing/fraction 需要 runtime class 這類 Operator 帶進來的設定」。今天的環境正好能驗這個問題的另一半:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-28-1"><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>ds,deploy<span class="w"> </span>-A<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-iE<span class="w"> </span><span class="s2">&quot;nvidia|dcgm|nfd|node-feature|mig|gpu-feature&quot;</span>
+</span><span id="__span-28-2"><a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="gp"># </span>operator<span class="w"> </span>類工作負載<span class="o">(</span>driver<span class="w"> </span>/<span class="w"> </span>toolkit<span class="w"> </span>/<span class="w"> </span>dcgm<span class="w"> </span>/<span class="w"> </span>NFD<span class="w"> </span>/<span class="w"> </span>MIG<span class="w"> </span>manager<span class="o">)</span>:NONE
+</span><span id="__span-28-3"><a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a>
+</span><span id="__span-28-4"><a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>node<span class="w"> </span>aks-gpuspot-21249019-vmss000009<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-28-5"><a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a><span class="w">    </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;[.metadata.labels|keys[]|select(test(&quot;feature.node|nvidia&quot;))]&#39;</span>
+</span><span id="__span-28-6"><a id="__codelineno-28-6" name="__codelineno-28-6" href="#__codelineno-28-6"></a><span class="go">[ &quot;nvidia.com/gpu.present&quot; ]     ← 這一顆是我們自己在 pool 層級掛的,不是 NFD 掛的</span>
+</span></code></pre></div>
+<p>本日所有結果——一張卡切 10 份、四顆 pod 共用一張 T4、容器內看到 4096 MiB、超額配置在排程階段被擋、執行期被 HAMi-core 擋——全部在零 GPU Operator 的叢集上取得。<strong>HAMi 這條路的 VRAM 切分與硬隔離,在 AKS 上不需要 NVIDIA GPU Operator</strong>——Day 1 懸案的 HAMi 半邊就此結案;至於 Day 1 推測裡點名的 KAI 自家 fraction 與 runtime class,那是另一半,留給 Day 4 驗證。原因不難理解:HAMi 需要平台提供的只有兩樣,<strong>NVIDIA 驅動</strong>(AKS 受管,580.159.04)與 <strong>nvidia-container-runtime</strong>(AKS 的 GPU 節點預裝),而 device plugin 與 CUDA 攔截層本來就是它自己的東西,Operator 沒有插手的餘地。</p>
+<p>即使如此,Operator 並非全無用武之地。本日觀察到的線索整理如下:</p>
+<table>
+<thead>
+<tr>
+<th>情境</th>
+<th>Operator 幫得上什麼</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>節點自動打標籤</td>
+<td><code>gpu=on</code> 與 <code>nvidia.com/gpu.present</code> 今天是手動維護的,還得記得寫在 pool 層級。NFD 依 PCI vendor ID 自動辨識,換機型或換 pool 都不用改設定</td>
+</tr>
+<tr>
+<td>GPU 硬體指標</td>
+<td>今天完全沒有 per-GPU 的使用率、溫度、功耗資料。HAMi 自己的 metrics 只涵蓋它的配額帳本,硬體層面得自己補 DCGM exporter</td>
+</tr>
+<tr>
+<td>MIG</td>
+<td>A100/H100 要切 MIG instance 得靠 Operator 的 MIG manager。T4 不支援 MIG,本日無從驗證</td>
+</tr>
+<tr>
+<td>自建叢集</td>
+<td>沒有受管驅動的環境,Operator 幾乎是唯一合理的解</td>
+</tr>
+</tbody>
+</table>
+<p>兩者也不互斥:HAMi chart 留了 <code>devicePlugin.gpuOperatorToolkitReady</code> 開關(預設關閉,開了會去等 <code>/run/nvidia/validations</code>),這個開關存在本身就說明官方預期兩套可以並存。</p>
+<h3 id="8">步驟 8:收尾<a class="headerlink" href="#8" title="Permanent link">&para;</a></h3>
+<p>刪掉測試 pod 與 <code>hami-lab</code> namespace;HAMi 與 KAI 都保留安裝(Day 4 要用),GPU pool 照 Day 0 的紀律縮回 0:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-29-1"><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>hami-lab<span class="w"> </span>delete<span class="w"> </span>pod<span class="w"> </span>--all<span class="w"> </span>--grace-period<span class="o">=</span><span class="m">5</span>
+</span><span id="__span-29-2"><a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="gp">$ </span>kubectl<span class="w"> </span>delete<span class="w"> </span>namespace<span class="w"> </span>hami-lab
+</span><span id="__span-29-3"><a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>scale<span class="w"> </span>-g<span class="w"> </span>&lt;resource-group&gt;<span class="w"> </span>--cluster-name<span class="w"> </span>&lt;cluster&gt;<span class="w"> </span>-n<span class="w"> </span>gpuspot<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-29-4"><a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a><span class="w">    </span>--subscription<span class="w"> </span>&lt;subscription-id&gt;<span class="w"> </span>--node-count<span class="w"> </span><span class="m">0</span>
+</span><span id="__span-29-5"><a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>show<span class="w"> </span>-g<span class="w"> </span>&lt;resource-group&gt;<span class="w"> </span>--cluster-name<span class="w"> </span>&lt;cluster&gt;<span class="w"> </span>-n<span class="w"> </span>gpuspot<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-29-6"><a id="__codelineno-29-6" name="__codelineno-29-6" href="#__codelineno-29-6"></a><span class="w">    </span>--subscription<span class="w"> </span>&lt;subscription-id&gt;<span class="w"> </span>--query<span class="w"> </span><span class="s1">&#39;{count:count,state:provisioningState}&#39;</span><span class="w"> </span>-o<span class="w"> </span>json
+</span><span id="__span-29-7"><a id="__codelineno-29-7" name="__codelineno-29-7" href="#__codelineno-29-7"></a><span class="go">{</span>
+</span><span id="__span-29-8"><a id="__codelineno-29-8" name="__codelineno-29-8" href="#__codelineno-29-8"></a><span class="go">  &quot;count&quot;: 0,</span>
+</span><span id="__span-29-9"><a id="__codelineno-29-9" name="__codelineno-29-9" href="#__codelineno-29-9"></a><span class="go">  &quot;state&quot;: &quot;Succeeded&quot;</span>
+</span><span id="__span-29-10"><a id="__codelineno-29-10" name="__codelineno-29-10" href="#__codelineno-29-10"></a><span class="go">}</span>
+</span></code></pre></div>
+<p>那道回查不是裝飾。<a href="../sprint1-day2-gang-scheduling-preemption/#mine-5">Day 2 地雷 5</a> 的結論是「別人可能覆蓋你的期望值」,今天它擋下的是另一種誤判:scale 指令的輸出被拿去餵一段 JSON 解析,吐了一串 <code>JSONDecodeError</code>,光看那個畫面很容易判定 scale 失敗。回查才確認 pool 其實乖乖收掉了,炸掉的只是解析腳本。<strong>回查防的不只是別人,也防自己看錯輸出。</strong></p>
+<p>GPU 節點消失後,兩個 HAMi 元件的下場不同:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-30-1"><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>hami-scheduler-6cb48464bb-g8swb   2/2   Running   0   12m       ← 在 system pool,不受影響
+</span><span id="__span-30-2"><a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>hami-device-plugin (DaemonSet)    DESIRED 0  CURRENT 0          ← 沒有 gpu=on 的節點,自然歸零
+</span></code></pre></div>
+<p>DaemonSet 的 <code>DESIRED</code> 直接歸零(nodeSelector <code>gpu=on</code> 找不到節點),scheduler 因為釘在 system pool 而完好,這正是安裝值把控制面與資料面分開放的用意。Day 4 開機後 DaemonSet 會自己長回來,不需要重裝;<code>gpu=on</code> 寫在 pool 層級,新節點一出生就帶著。本日 GPU 計費約 17 分鐘,和 Day 1 的 16 分鐘相近,遠低於 Day 2 的 28 分鐘。</p>
+<h2 id="checkpoint">驗收 checkpoint<a class="headerlink" href="#checkpoint" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>檢查項</th>
+<th>指令</th>
+<th>期待結果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>device plugin 換手乾淨</td>
+<td>卸載 nvdp 後每 10 秒查節點 <code>allocatable</code></td>
+<td>16 秒內兩台歸零(<code>capacity</code> 仍是 1),裝 HAMi 後變 <code>10</code></td>
+</tr>
+<tr>
+<td>多顆 pod 共用同一張卡</td>
+<td>pod 的 <code>hami.io/vgpu-devices-allocated</code></td>
+<td>三顆同一個 GPU UUID,各 <code>4096</code></td>
+</tr>
+<tr>
+<td>容器看到的是配額</td>
+<td>容器內 <code>nvidia-smi</code> 與 <code>torch.cuda.get_device_properties</code></td>
+<td><code>0MiB / 4096MiB</code>、<code>total_MiB= 4096</code>(宿主機 16384)</td>
+</tr>
+<tr>
+<td>注入點真的在</td>
+<td><code>kubectl exec &lt;pod&gt; -- cat /etc/ld.so.preload</code></td>
+<td><code>/usr/local/vgpu/libvgpu.so</code></td>
+</tr>
+<tr>
+<td>兩階段都擋得住超配</td>
+<td>卡上剩 4096 時送一顆要 8192 的;4096 配額的容器一路加碼配置</td>
+<td>前者 Pending 且事件是 <code>CardInsufficientMemory</code>,後者噴 <code>HAMI-core ERROR ... allocator.c:52</code>,分母 <code>4294967296</code></td>
+</tr>
+<tr>
+<td>鄰居不受牽連</td>
+<td>holder 的 log 與 <code>RESTARTS</code></td>
+<td><code>reserved_MiB</code> 一路 3072、校驗值不變、<code>RESTARTS 0</code></td>
+</tr>
+<tr>
+<td>預設放置策略</td>
+<td>四顆不指定節點的 pod</td>
+<td>全部落在同一節點的同一張卡,另一台完全沒用到</td>
+</tr>
+<tr>
+<td>零 GPU Operator</td>
+<td><code>kubectl get ds,deploy -A \| grep -iE "nvidia\|dcgm\|nfd\|mig"</code></td>
+<td>沒有任何 operator 類工作負載</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_6">地雷記錄<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
+<h3 id="mine-1">地雷 1:device plugin 拆掉了,<code>capacity</code> 還在說這台機器有卡<a class="headerlink" href="#mine-1" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:<code>helm uninstall nvdp</code> 之後,<code>kubectl describe node</code> 的 Capacity 區塊依然寫著 <code>nvidia.com/gpu: 1</code>。只看 Capacity 會以為 device plugin 還活著、GPU 還能用。</p>
+<p><strong>根因</strong>:kubelet 對 device plugin 註冊的擴充資源有兩套帳。plugin 斷線時,kubelet 把 <strong>allocatable 立刻歸零</strong>(避免再排新 pod 上來),但 <strong>capacity 的鍵值會保留</strong>,要到 kubelet 重啟或節點重建才真正消失。「資源鍵還在」不等於「資源可用」。</p>
+<p><strong>修法</strong>:判斷 device plugin 是否健在,一律看 <code>allocatable</code>。一行版:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-31-1"><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>nodes<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-31-2"><a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="w">    </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">&#39;.items[]|&quot;\(.metadata.name) \(.status.allocatable[&quot;nvidia.com/gpu&quot;] // &quot;&lt;absent&gt;&quot;)&quot;&#39;</span>
+</span></code></pre></div>
+<p>三種輸出要分清楚:<code>&lt;absent&gt;</code> 是這節點從來沒有 GPU 資源;<code>0</code> 是曾經有、現在 plugin 不在(或卡被佔滿);<code>&gt;0</code> 才是真的可以排。</p>
+<h3 id="mine-2">地雷 2:<code>nvidia.com/gpumem</code> 不是節點資源,<code>kubectl describe node</code> 查不到 VRAM 餘額<a class="headerlink" href="#mine-2" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:pod 明明寫了 <code>nvidia.com/gpumem: 4096</code> 也順利跑起來,但 <code>kubectl describe node</code> 的 Capacity、Allocatable、Allocated resources 三個區塊都找不到 <code>nvidia.com/gpumem</code> 這一行。想知道「這張卡還剩多少 VRAM 可以配」,用慣的 kubectl 指令全部失效。</p>
+<p><strong>根因</strong>:HAMi 的 device plugin 只向 kubelet 註冊 <code>nvidia.com/gpu</code> 一種擴充資源(值等於 <code>deviceSplitCount</code>)。 VRAM 與算力的帳完全不經過 kubelet:實體卡規格寫在節點 annotation <code>hami.io/node-nvidia-register</code>,已配出去的量記在 scheduler extender 的記憶體與各 pod 的 annotation 上。scheduler 的 configmap 把這件事講得很明白:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-32-1"><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="nt">managedResources</span><span class="p">:</span>
+</span><span id="__span-32-2"><a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> ignoredByScheduler</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">nvidia.com/gpu</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-32-3"><a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> ignoredByScheduler</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">nvidia.com/gpumem</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-32-4"><a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> ignoredByScheduler</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">nvidia.com/gpucores</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span></code></pre></div>
+<p><code>ignoredByScheduler: true</code> 的意思是「內建 kube-scheduler 不要拿這幾個資源做 fit 判斷」,全部交給 extender。內建排程器根本不知道 <code>gpumem</code> 是什麼,也就不可能把它算進節點帳本。</p>
+<p><strong>修法</strong>:查 VRAM 餘額要靠 HAMi 自己的資訊來源,三條路——各 pod 的 <code>hami.io/vgpu-devices-allocated</code> annotation 加總;extender 的 log(<code>kubectl -n kube-system logs deploy/hami-scheduler -c vgpu-scheduler-extender</code>)裡的 <code>Usedmem</code>;或 HAMi 的 metrics endpoint(chart 預設開在 NodePort 31993)。別拿 <code>kubectl describe node</code> 當 VRAM 容量規劃的依據,它只告訴你 <code>nvidia.com/gpu</code> 用掉幾份,那是切了幾刀,跟用掉幾 GB 是兩回事。</p>
+<h3 id="mine-3">地雷 3:HAMi 管的容器一定要有 glibc——busybox/alpine 直接 exit 127<a class="headerlink" href="#mine-3" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:放置策略測試的第一版用 <code>busybox:1.36</code>,四顆 pod 全部 <code>Failed</code>,容器 <code>exitCode: 127</code>,log 只有一行:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-33-1"><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a>sh: error while loading shared libraries: libdl.so.2: cannot open shared object file: No such file or directory
+</span></code></pre></div>
+<p>排程完全成功(<code>FilteringSucceed</code> / <code>BindingSucceed</code> 都有、annotation 也正確配到卡),是容器一啟動就死。看事件會以為映像壞了。</p>
+<p><strong>根因</strong>:HAMi 對它管的每一個容器都寫入 <code>/etc/ld.so.preload = /usr/local/vgpu/libvgpu.so</code>。<code>libvgpu.so</code> 動態連結 glibc(需要 <code>libdl.so.2</code>),而 busybox 與 alpine 用的是 musl,根本沒有這個 so。動態載入器在 <code>main()</code> 之前就失敗,連 <code>sh</code> 都起不來,於是 127。</p>
+<p><strong>修法</strong>:(1) 凡是要吃 <code>nvidia.com/gpumem</code> 的映像,基底必須是 glibc(debian、ubuntu、conda 系;<code>pytorch/pytorch</code>、<code>nvidia/cuda</code> 都可以);(2) 真的要用輕量映像做非 GPU 的雜事,就不要在那顆 pod 上寫任何 HAMi 資源,沒有資源請求就不會被注入;(3) 追查時記住這個特徵組合:<strong>排程成功 + 立刻 exit 127 + 找不到 <code>.so</code></strong>,幾乎一定是 preload 與 libc 不匹配,不必去查 GPU 驅動。</p>
+<p><strong>教訓</strong>:同一顆雷會不會爆,取決於 pod 有沒有真的排上去——本章那顆 busybox 的 <code>mem-overcommit-probe</code> 一路 Pending,沒進到啟動容器那一步,所以毫無症狀。</p>
+<h3 id="mine-4">地雷 4:HAMi 的 webhook 只接 <code>default-scheduler</code> 的 pod,已指名別的排程器就整顆放生<a class="headerlink" href="#mine-4" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:pod 寫了 <code>schedulerName: kai-scheduler</code> 又要 <code>nvidia.com/gpumem</code>,結果永遠 Pending,KAI 抱怨 <code>No node in the default node-pool has nvidia.com/gpumem resources</code>。兩套東西都裝好了、都健康,pod 就是排不上。</p>
+<p><strong>根因</strong>:HAMi 的 mutating webhook(<code>vgpu.hami.io</code>)帶著 <code>forceOverwriteDefaultScheduler: true</code>,但這個 force 只在 <code>schedulerName == default-scheduler</code> 時生效——已經指名其他排程器的 pod,HAMi 一律不碰。於是這顆 pod 落到 KAI 手上,而 KAI 用的是標準的節點資源帳本,<code>nvidia.com/gpumem</code> 根本不是節點資源(<a href="#mine-2">地雷 2</a>),KAI 當然找不到。訊息裡的 <code>4096000</code> 是 KAI 把它當一般資源做了 milli 換算(4096 × 1000),數字看起來很怪但不是 bug,是單位慣例不同。</p>
+<p><strong>修法</strong>:目前這兩套不能靠「都裝著」自動合作。誰拿到 pod 由 <code>schedulerName</code> 決定,而兩邊對 <code>gpumem</code> 的理解完全不同。本章的做法是讓 HAMi 的 pod 保持 <code>default-scheduler</code>(不要寫 <code>schedulerName</code>,讓 HAMi webhook 去改),KAI 的 pod 走 KAI 的路,兩邊不交集。</p>
+<p><strong>判讀技巧</strong>:看到 <code>No node ... has &lt;resource&gt; resources</code> 這種訊息,先問「這個資源到底是不是節點資源」,再問「是誰在排這顆 pod」。本例兩個答案都不是直覺上的那個。</p>
+<h2 id="_7">帶得走的東西<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h2>
+<ul>
+<li>device plugin 是可以熱抽換的一層。卸載舊的、裝新的,節點的 <code>allocatable</code> 十幾秒內就跟著改,不必重啟 kubelet 也不必重建節點。但判斷它在不在,只能看 <code>allocatable</code>,<code>capacity</code> 會留著一筆過期的舊帳。</li>
+<li>讓框架看到「假的卡容量」,比在排程器記帳更根本。PyTorch、TensorFlow、vLLM 的記憶體規劃都以 <code>cudaGetDeviceProperties</code> 回報的總量為基準乘一個比例,改掉這個源頭,應用端一行程式不動就落在配額之內。</li>
+<li>硬隔離的判準,是那個「卡上還空著 9.5 GB、容器卻拿不到 512 MiB」的瞬間。上限來自容器的配額而非卡的剩餘量,兩者分得開,隔離才算數。</li>
+<li>規劃配額時記得含 CUDA context。4096 MiB 的配額實際只配得出約 3584 MiB,差的那半 GB 是 context 開銷,估算模型需求時要一起算進去。</li>
+<li>有些狀態不在它「應該在」的地方: VRAM 餘額不在節點資源裡,隔離設定也不在 pod spec 裡。習慣用 <code>kubectl describe</code> 查一切的直覺在這裡有兩個破口,得改用 annotation 與 exec 補上。</li>
+<li>監控要盯設定有沒有生效,而不只是 pod 有沒有跑起來。<code>failurePolicy: Ignore</code> 的 webhook 掛掉時,pod 照常 Running,隔離卻已經不存在,畫面上看不出任何異狀。</li>
+</ul>
+<h2 id="_8">延伸閱讀<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h2>
+<p>想往下深挖,從這幾份開始:</p>
+<ul>
+<li><strong><a href="https://project-hami.io/docs/core-concepts/gpu-virtualization">HAMi GPU 虛擬化原理</a></strong> —— <code>/etc/ld.so.preload</code> 的掛法、<code>dlsym</code> 劫持如何攔下 <code>cu*</code> 與 <code>nvml*</code> 呼叫,以及 <code>nvmlDeviceGetMemoryInfo</code> 被改寫後為什麼 <code>nvidia-smi</code> 只回報配額,對應本章步驟 4。</li>
+<li><strong><a href="https://project-hami.io/docs/core-concepts/architecture">HAMi 架構總覽</a></strong> —— mutating webhook 改寫 <code>schedulerName</code> 的判斷邏輯與 scheduler extender 的職責分工,對照本章<a href="#mine-4">地雷 4</a> 的失效條件。</li>
+<li><strong><a href="https://github.com/Project-HAMi/HAMi-core">HAMi-core:容器內的 GPU 資源控制器</a></strong> —— <code>libvgpu.so</code> 的原始碼與 <code>CUDA_DEVICE_MEMORY_LIMIT</code> 等環境變數的定義處,本章那則 <code>allocator.c:52</code> OOM 訊息的出處。</li>
+<li><strong><a href="https://www.cncf.io/blog/2026/07/15/hami-becomes-a-cncf-incubating-project/">HAMi 成為 CNCF incubating 專案</a></strong> —— 專案成熟度歷程(2024-08 進 sandbox、2026-07 升 incubating)與採用情況,評估要不要放進正式環境時的判斷材料。</li>
+</ul>
+<h2 id="_9">下一步<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h2>
+<p>今天結束時,叢集裡兩套系統都健在:KAI 管得了佇列、配額與 gang,HAMi 切得動 VRAM 也擋得住超用。但<a href="#mine-4">地雷 4</a> 已經先把結果講白了——它們各排各的,同一顆 pod 只能選一邊,兩套都裝著並不會自動變成「用 KAI 的佇列跑 HAMi 切出來的 vGPU」。Day 4 就從這個縫隙接下去:HAMi 官方為這件事準備了什麼機制,把它裝起來實際跑一次,看整合之後排程權責怎麼重新劃分、哪些設定得改,以及原本兩邊各自的行為會不會因此被改寫。</p>
+<hr />
+<div class="admonition quote">
+<p>HAMi 標誌為 CNCF artwork 之官方資產,此處作社群教學用途。</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到頂端
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="頁腳" >
+        
+          
+          <a href="../sprint1-day2-gang-scheduling-preemption/" class="md-footer__link md-footer__link--prev" aria-label="上一頁: Day 2 · Gang Scheduling 與搶占">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                上一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 2 · Gang Scheduling 與搶占
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../sprint1-day4-hami-kai-integration/" class="md-footer__link md-footer__link--next" aria-label="下一頁: Day 4 · HAMi 進階與 KAI 整合">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                下一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 4 · HAMi 進階與 KAI 整合
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      KAI Scheduler、HAMi、Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,作社群教學用途
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.code.annotate", "content.code.select", "content.tabs.link", "search.suggest", "search.highlight", "search.share"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u8907\u88fd", "clipboard.copy": "\u8907\u88fd", "search.result.more.one": "\u6b64\u9801\u5c1a\u6709 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.more.other": "\u6b64\u9801\u5c1a\u6709 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.none": "\u6c92\u6709\u7b26\u5408\u7684\u9805\u76ee", "search.result.one": "\u627e\u5230 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.other": "\u627e\u5230 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.placeholder": "\u6253\u5b57\u9032\u884c\u641c\u5c0b", "search.result.term.missing": "\u7f3a\u5c11\u5b57\u8a5e", "select.version": "\u9078\u64c7\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

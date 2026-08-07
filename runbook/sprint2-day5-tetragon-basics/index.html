@@ -1,0 +1,2921 @@
+
+<!doctype html>
+<html lang="zh-TW" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="雲原生實作課程 —— GPU 排程 runbook、踩雷解法與反思">
+      
+      
+      
+        <link rel="canonical" href="https://deepwavelab.github.io/CloudNativePracticing/runbook/sprint2-day5-tetragon-basics/">
+      
+      
+        <link rel="prev" href="../sprint2-day4-falco-custom-rules/">
+      
+      
+        <link rel="next" href="../sprint2-day6-tetragon-enforcement/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Day 5 · Tetragon 與 TracingPolicy - Cloud Native Lab Course</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/terminal.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#day-5-tetragon-tracingpolicy" class="md-skip">
+          跳轉到
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="頁首">
+    <a href="../.." title="Cloud Native Lab Course" class="md-header__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Cloud Native Lab Course
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Day 5 · Tetragon 與 TracingPolicy
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換深色模式"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="切換深色模式" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換淺色模式"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="切換淺色模式" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜尋" placeholder="搜尋" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="搜尋">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="分享" aria-label="分享" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="清除" aria-label="清除" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜尋引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="標籤" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  首頁
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint1-day0-azure-aks-foundation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 1 · GPU 排程三部曲
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../sprint2-day0-ebpf-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 2 · eBPF 與執行期安全
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="導覽列" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Cloud Native Lab Course" class="md-nav__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Cloud Native Lab Course
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首頁
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    首頁
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day0-azure-aks-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 環境建置與成本紀律
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day1-kai-queue-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · KAI 安裝與 Queue 基礎
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day2-gang-scheduling-preemption/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Gang Scheduling 與搶占
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day3-hami-memory-isolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · HAMi 安裝與 VRAM 硬隔離
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day4-hami-kai-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · HAMi 進階與 KAI 整合
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day5-hami-webui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · HAMi-WebUI 觀測介面
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day6-dra-simulated-devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · DRA 概念與模擬裝置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day7-dra-aks-real-gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · DRA 真卡實測
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day8-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 綜合:三者分工決策表
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day0-ebpf-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · eBPF 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day1-bpftrace-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · bpftrace 三支經典工具
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day2-bpftrace-kubernetes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · 把核心事件接回 Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day3-falco-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Falco 安裝與出廠規則
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day4-falco-custom-rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · 自訂規則、誤報調校與告警路由
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Tetragon 與 TracingPolicy
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Tetragon 與 TracingPolicy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        兩套工具的形狀不一樣,不是好壞
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-helm-crd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1: 安裝,以及 Helm 沒有告訴你的那兩個 CRD
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 1: 安裝,以及 Helm 沒有告訴你的那兩個 CRD">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        它建了什麼
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        啟動日誌裡的三行
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2: 出廠狀態到底吵不吵——一邊是 0,一邊是每分鐘 1915 筆
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 2: 出廠狀態到底吵不吵——一邊是 0,一邊是每分鐘 1915 筆">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        答案一:匯出的事件流
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        答案二:agent 裡面的事件流
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-tetra-clipod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3: tetra CLI、事件從哪來、pod 身分怎麼查出來
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 3: tetra CLI、事件從哪來、pod 身分怎麼查出來">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#kubectl-exec" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一次普通的 kubectl exec 長什麼樣
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pod 身分是怎麼來的
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4: 第一條 TracingPolicy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 4: 第一條 TracingPolicy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3000" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        核心層過濾:3000 次讀取的實驗
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5: 四個偏離,兩套工具同時看
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 5: 四個偏離,兩套工具同時看">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        訊噪比
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6: 成本
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 6: 成本">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        資源
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        閒置事件率
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        誠實的差距
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收 checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷記錄
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="地雷記錄">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 1:CRD 不是 Helm 裝的,是 operator 在執行期建的
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 2:預設排除清單裡的 "" 是「整台主機」
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 3:每一筆事件都揹著整份節點標籤
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 4:kubectl apply 成功、物件健康、策略根本沒載入
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 5:策略讓它變準,不會讓它變安靜
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 6:nsenter 的歸屬,Tetragon 跟 Falco 錯得一樣
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 7:Tetragon 的事件裡沒有 tty 欄位
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 8:chart 不給 resources 也不給 priorityClassName
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的東西
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day6-tetragon-enforcement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · 從偵測到攔截
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day7-cilium-kubeproxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Cilium 與 kube-proxy replacement
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day8-cilium-network-policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · CiliumNetworkPolicy(L3/L4 → L7)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day9-hubble/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Hubble 可觀測性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 綜合:四套工具的分工
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        兩套工具的形狀不一樣,不是好壞
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-helm-crd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1: 安裝,以及 Helm 沒有告訴你的那兩個 CRD
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 1: 安裝,以及 Helm 沒有告訴你的那兩個 CRD">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        它建了什麼
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        啟動日誌裡的三行
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2: 出廠狀態到底吵不吵——一邊是 0,一邊是每分鐘 1915 筆
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 2: 出廠狀態到底吵不吵——一邊是 0,一邊是每分鐘 1915 筆">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        答案一:匯出的事件流
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        答案二:agent 裡面的事件流
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-tetra-clipod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3: tetra CLI、事件從哪來、pod 身分怎麼查出來
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 3: tetra CLI、事件從哪來、pod 身分怎麼查出來">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#kubectl-exec" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一次普通的 kubectl exec 長什麼樣
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pod 身分是怎麼來的
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4: 第一條 TracingPolicy
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 4: 第一條 TracingPolicy">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3000" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        核心層過濾:3000 次讀取的實驗
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5: 四個偏離,兩套工具同時看
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 5: 四個偏離,兩套工具同時看">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        訊噪比
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6: 成本
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 6: 成本">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        資源
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        閒置事件率
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        誠實的差距
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收 checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷記錄
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="地雷記錄">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 1:CRD 不是 Helm 裝的,是 operator 在執行期建的
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 2:預設排除清單裡的 "" 是「整台主機」
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 3:每一筆事件都揹著整份節點標籤
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 4:kubectl apply 成功、物件健康、策略根本沒載入
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 5:策略讓它變準,不會讓它變安靜
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 6:nsenter 的歸屬,Tetragon 跟 Falco 錯得一樣
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 7:Tetragon 的事件裡沒有 tty 欄位
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 8:chart 不給 resources 也不給 priorityClassName
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的東西
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="day-5-tetragon-tracingpolicy">Day 5: 換一個工具看同一批事件——Tetragon 與 TracingPolicy<a class="headerlink" href="#day-5-tetragon-tracingpolicy" title="Permanent link">&para;</a></h1>
+<p><img align="right" alt="Tetragon 官方標誌" src="../../assets/logos/tetragon-icon-color.svg" width="95" /></p>
+<blockquote>
+<p>Falco 用使用者空間的規則引擎把 syscall 事件變成有名字的告警。Tetragon 走另一條路:過濾在核心裡做完,輸出的是紀錄而不是判斷。今天把 Tetragon 裝在同一座叢集上,寫第一條 TracingPolicy,然後讓兩套工具同時看同一批動作——最值得記住的結論來自它們<strong>答案一樣錯</strong>的那一格。</p>
+</blockquote>
+<div class="admonition abstract">
+<p class="admonition-title">你在課程的哪裡</p>
+<ul>
+<li><strong>Day 3–4</strong>:Falco 裝好了、讀得懂規則語言、補過兩個出廠規則的洞,也知道調校誤報要交出多少偵測力。</li>
+<li><strong>今天</strong>:裝 Tetragon、拆解一條 TracingPolicy、量出「核心裡過濾」跟「使用者空間比對」差在哪,然後四個偏離動作兩套工具同時看。驗收是 TracingPolicy 產出的事件能對回自己的操作。</li>
+<li><strong>Day 6</strong>:今天所有跟攔截有關的開關都刻意關著。下一章才把它從「看」切到「殺」。</li>
+</ul>
+</div>
+<h2 id="_1">兩套工具的形狀不一樣,不是好壞<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<p>Falco 交付的是<strong>判斷</strong>:一筆告警帶規則名、嚴重度、MITRE 分類,人看到就知道發生了什麼。代價是沒寫規則的事一律看不見(<a href="../sprint2-day3-falco-basics/#mine-4">Day 3 地雷 4</a>)。</p>
+<p>Tetragon 交付的是<strong>紀錄</strong>:行程執行了什麼、參數是什麼、父行程是誰、屬於哪顆 pod。它不告訴你這件事好不好,那是你的事。</p>
+<p>這個差別會一路貫穿今天的每一個數字,所以先擺在前面。今天走六步:</p>
+<table>
+<thead>
+<tr>
+<th>步驟</th>
+<th>做什麼</th>
+<th>為什麼排在這</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>安裝</td>
+<td>它裝出來的東西跟 Falco 不一樣,而且有一樣是 Helm 沒告訴你的</td>
+</tr>
+<tr>
+<td>2</td>
+<td>量出廠狀態的事件率</td>
+<td><strong>同一顆節點同一段時間,量到 0 與每分鐘 1915 筆兩個答案</strong>,只做一半會得到錯的結論</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>tetra</code> CLI 與 pod 身分</td>
+<td>事件從哪來、身分怎麼查出來,決定了步驟 5 的結果</td>
+</tr>
+<tr>
+<td>4</td>
+<td>第一條 TracingPolicy</td>
+<td>驗收,以及核心層過濾的實證</td>
+</tr>
+<tr>
+<td>5</td>
+<td>四個偏離,兩套工具同時看</td>
+<td><strong>今天的重點</strong></td>
+</tr>
+<tr>
+<td>6</td>
+<td>成本</td>
+<td>資源、事件量、失效形狀</td>
+</tr>
+</tbody>
+</table>
+<h2 id="1-helm-crd">步驟 1: 安裝,以及 Helm 沒有告訴你的那兩個 CRD<a class="headerlink" href="#1-helm-crd" title="Permanent link">&para;</a></h2>
+<p>Tetragon 跟 Cilium 出自同一個組織,但<strong>它不需要 Cilium 當 CNI</strong>。這座叢集跑的是 Azure CNI overlay,Tetragon 裝下去完全沒有抱怨,也沒有任何一段設定提到 CNI——兩者在 datapath 上互不相干。</p>
+<p>版本現查,不假設:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">$ </span>helm<span class="w"> </span>repo<span class="w"> </span>add<span class="w"> </span>cilium<span class="w"> </span>https://helm.cilium.io/<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>helm<span class="w"> </span>repo<span class="w"> </span>update<span class="w"> </span>cilium
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="gp">$ </span>helm<span class="w"> </span>search<span class="w"> </span>repo<span class="w"> </span>cilium/tetragon<span class="w"> </span>--versions<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-3
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="go">cilium/tetragon   1.7.0   1.7.0   Helm chart for Tetragon</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="go">cilium/tetragon   1.6.1   1.6.1</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="go">cilium/tetragon   1.6.0   1.6.0</span>
+</span></code></pre></div>
+<p>chart 版本與 app 版本同號。這跟 Falco 的 <code>falco-9.1.0</code> 對 <code>0.44.1</code> 是兩條獨立版本線不一樣,抄錯會誤判升級範圍。</p>
+<p>安裝時 values 幾乎是空的,而這是刻意的:Day 3 對 Falco 釘死 <code>driver.kind</code> 是因為 <code>auto</code> 會藏起實際載入的東西;Tetragon 沒有這個選擇要做,而「出廠狀態下它會吐什麼」這個問題的誠實答案,就是不要先去動它的事件管線。</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="gp">$ </span>helm<span class="w"> </span>install<span class="w"> </span>tetragon<span class="w"> </span>cilium/tetragon<span class="w"> </span>--version<span class="w"> </span><span class="m">1</span>.7.0<span class="w"> </span>-n<span class="w"> </span>tetragon<span class="w"> </span>--create-namespace<span class="w"> </span>--wait
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="go">STATUS: deployed                    ← 21 秒</span>
+</span></code></pre></div>
+<h3 id="_2">它建了什麼<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h3>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="gp">$ </span>helm<span class="w"> </span>template<span class="w"> </span>cilium/tetragon<span class="w"> </span>--version<span class="w"> </span><span class="m">1</span>.7.0<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s1">&#39;^kind:&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sort<span class="w"> </span><span class="p">|</span><span class="w"> </span>uniq<span class="w"> </span>-c
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">   2 ClusterRole        2 ClusterRoleBinding    2 ConfigMap</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="go">   1 DaemonSet          1 Deployment            1 Role</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="go">   1 RoleBinding        2 Service               2 ServiceAccount</span>
+</span></code></pre></div>
+<p>跟 Falco 的形狀差在多一個 Deployment:</p>
+<table>
+<thead>
+<tr>
+<th>元件</th>
+<th>形狀</th>
+<th>做什麼</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tetragon</code></td>
+<td><strong>DaemonSet</strong>,每節點一顆,2 個容器</td>
+<td><code>tetragon</code>(privileged,掛 BPF 程式、寫 JSON 到節點上的檔案)加 <code>export-stdout</code>(把那個檔案 <code>tail -q -F</code> 到 stdout)</td>
+</tr>
+<tr>
+<td><code>tetragon-operator</code></td>
+<td><strong>Deployment</strong>,單副本</td>
+<td>只做一件事:建 CRD。之後基本閒置(實測 1m / 19Mi)</td>
+</tr>
+</tbody>
+</table>
+<p>那個 <code>export-stdout</code> sidecar 看起來像實作細節,其實是步驟 2 的主角。</p>
+<h3 id="_3">啟動日誌裡的三行<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h3>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>tetragon<span class="w"> </span>logs<span class="w"> </span>&lt;tetragon-pod&gt;<span class="w"> </span>-c<span class="w"> </span>tetragon<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-60
+</span></code></pre></div>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>msg=&quot;BTF discovery: default kernel btf file found&quot; btf-file=/sys/kernel/btf/vmlinux
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>msg=&quot;BPF detected features: override_return: true, buildid: true, kprobe_multi: false,
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>     uprobe_multi: true, fmodret: true, fmodret_syscall: true, signal: true, large: true,
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>     link_pin: true, lsm: true, …&quot;
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>msg=&quot;Loading sensor&quot; name=__base__
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>msg=&quot;Available sensors&quot; sensors=__base__
+</span></code></pre></div>
+<p>三件事:</p>
+<ol>
+<li><strong>BTF 直接用節點自帶的 <code>/sys/kernel/btf/vmlinux</code></strong>——<a href="../sprint2-day0-ebpf-concepts/">Day 0</a> 驗過的那個檔案,今天拿到第二個使用者(第一個是 Day 1 的 bpftrace)。</li>
+<li><strong><code>lsm: true</code>。</strong> Day 0 從開機參數推論 BPF LSM 是開的,今天 Tetragon <strong>自己偵測後回報同一個答案</strong>。連同 <code>override_return</code>、<code>signal</code>、<code>fmodret</code>——Day 6 攔截需要的四項核心能力這座叢集全有。今天一項都不用。</li>
+<li><strong><code>kprobe_multi: false</code>。</strong> 這顆核心沒有這個功能,所以一個符號要掛一支 kprobe,不能一支程式掛一批。今天只用一個符號所以無感;寫到幾十個掛勾的策略時,這是載入時間與核心記憶體的差別。</li>
+</ol>
+<p>零策略時只有 <code>__base__</code> 一個 sensor。<strong>這就是「出廠狀態」的定義</strong>,下一步要量的就是它。</p>
+<p>CRD 的部分有一個坑,見<a href="#mine-1">地雷 1</a>。</p>
+<h2 id="step-2">步驟 2: 出廠狀態到底吵不吵——一邊是 0,一邊是每分鐘 1915 筆<a class="headerlink" href="#step-2" title="Permanent link">&para;</a></h2>
+<h3 id="_4">答案一:匯出的事件流<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
+<p>132 秒的閒置窗口,沒有任何人為動作:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Tetragon 匯出事件:0 筆 / 132 秒
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>同窗口 Falco 告警:0 筆
+</span></code></pre></div>
+<p><strong>兩邊都是零。</strong> 如果只做到這裡,結論會是「Tetragon 出廠跟 Falco 一樣安靜」——而這是錯的。</p>
+<p>先看一件小事:安裝當下就有 23 筆事件,而且時間戳往前跨了好幾分鐘:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>03:12:36  process_exec  kai-scheduler/binder-…/binder    /workspace/app
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>03:16:26  process_exec  falco/falco-…/falco              /usr/bin/falco
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>03:17:26  process_exec  tetragon/tetragon-…/…            /bin/sh …
+</span></code></pre></div>
+<p>第一筆比 Tetragon 自己啟動早了五分鐘。啟動日誌解釋了原因:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>msg=&quot;Read ProcFS /procRoot appended 182/244 entries&quot;
+</span></code></pre></div>
+<p>Tetragon 開機時掃 <code>/proc</code> 把既有行程重建進 process cache,<strong>而且把它們當成事件送出去</strong>。Falco 也重建行程表,但不會拿它當告警。這個差別對事故調查有用(Tetragon 起來之後你立刻有一份「現在誰在跑」的快照),對告警管線是雜訊——每次 DaemonSet 滾動就是每節點上百筆。</p>
+<h3 id="agent">答案二:agent 裡面的事件流<a class="headerlink" href="#agent" title="Permanent link">&para;</a></h3>
+<p><code>tetra</code> CLI 直接接 agent 的 unix socket,<strong>繞過匯出時的過濾</strong>。同一顆節點、60 秒:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>tetragon<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>&lt;tetragon-pod&gt;<span class="w"> </span>-c<span class="w"> </span>tetragon<span class="w"> </span>--<span class="w"> </span>timeout<span class="w"> </span><span class="m">60</span><span class="w"> </span>tetra<span class="w"> </span>getevents
+</span></code></pre></div>
+<table>
+<thead>
+<tr>
+<th>量到的東西</th>
+<th>數字</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>事件數</td>
+<td><strong>1915 筆 / 60 秒 = 1915 筆/分鐘/節點</strong></td>
+</tr>
+<tr>
+<td>平均大小</td>
+<td>3556 B/筆</td>
+</tr>
+<tr>
+<td>換算</td>
+<td>6.8 MB/分鐘/節點 ≈ <strong>9.8 GB/天/節點</strong></td>
+</tr>
+<tr>
+<td><code>process_exit</code></td>
+<td>1175</td>
+</tr>
+<tr>
+<td><code>process_exec</code></td>
+<td>740</td>
+</tr>
+<tr>
+<td>命名空間為空字串(主機行程)</td>
+<td><strong>1898(99.1%)</strong></td>
+</tr>
+<tr>
+<td>任何應用命名空間</td>
+<td><strong>0</strong></td>
+</tr>
+</tbody>
+</table>
+<p>前幾名的執行檔全部是節點自己的代理程式:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>376  /usr/bin/jq
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>210  /etc/node-problem-detector.d/plugin/check_spot_eviction.sh
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>204  /etc/node-problem-detector.d/plugin/check_scheduledevent.sh
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>202  /usr/bin/curl
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>180  /etc/node-problem-detector.d/plugin/check_scheduledevent_consolidated.sh
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a> 86  /usr/bin/cat        62 /usr/bin/dirname     60 /usr/bin/uuidgen
+</span></code></pre></div>
+<p>node-problem-detector 每隔幾秒跑一輪 shell script,每個 script 再 fork <code>curl</code>、<code>jq</code>、<code>mktemp</code>、<code>uuidgen</code>。<strong>這是受管節點的正常狀態,跟工作負載一點關係都沒有</strong>,而 Tetragon 全部看見、全部編碼、全部送進匯出層,然後在最後一關丟掉。丟掉它的是<a href="#mine-2">地雷 2</a>。</p>
+<p>事件本身也比想像中大,見<a href="#mine-3">地雷 3</a>。</p>
+<h2 id="3-tetra-clipod">步驟 3: <code>tetra</code> CLI、事件從哪來、pod 身分怎麼查出來<a class="headerlink" href="#3-tetra-clipod" title="Permanent link">&para;</a></h2>
+<p>CLI 不必另外下載,agent 映像裡就有,版本自動對齊:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>tetragon<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>&lt;tetragon-pod&gt;<span class="w"> </span>-c<span class="w"> </span>tetragon<span class="w"> </span>--<span class="w"> </span>tetra<span class="w"> </span>version
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="go">CLI version: v1.7.0</span>
+</span></code></pre></div>
+<p>它接的是 agent 的 gRPC socket。<strong>這條路跟 <code>kubectl logs -c export-stdout</code> 是兩個不同的東西</strong>,差別就是步驟 2 那 1915 倍:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>BPF programs (ring buffer)
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>        │
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>        ▼
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>  tetragon agent  ──── gRPC unix socket ────►  tetra getevents   ← 沒有過濾
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>        │
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>        ├── export-allowlist / export-denylist / field-filters
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>        ▼
+</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>  節點上的 JSON 檔
+</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>        │
+</span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>        ▼
+</span><span id="__span-11-11"><a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>  export-stdout (tail -q -F)  ──►  kubectl logs   ← 過濾之後
+</span></code></pre></div>
+<p>順帶一個會浪費時間的小坑:<code>kubectl logs &lt;tetragon-pod&gt;</code> 不加 <code>-c</code> 拿到的是第一個容器,也就是 agent 自己的文字日誌,<strong>裡面一筆事件都沒有</strong>。要看事件必須 <code>-c export-stdout</code>。</p>
+<p>抽事件的腳本後面幾章都會用:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>tetra-events.sh<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="s">#!/usr/bin/env bash</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="s"># Pull Tetragon events out of the export-stdout sidecar (NOT the agent container).</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="s">#   --types    histogram by event type</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="s">#   --compact  one line per event: time, pod, binary, args</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="s">#   --since    passed to kubectl logs (default 10m)</span>
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="s">set -euo pipefail</span>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="s">SINCE=10m; MODE=raw</span>
+</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="s">while [ $# -gt 0 ]; do</span>
+</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="s">  case &quot;$1&quot; in</span>
+</span><span id="__span-12-11"><a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a><span class="s">    --types) MODE=types ;;</span>
+</span><span id="__span-12-12"><a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a><span class="s">    --compact) MODE=compact ;;</span>
+</span><span id="__span-12-13"><a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a><span class="s">    --since) SINCE=&quot;$2&quot;; shift ;;</span>
+</span><span id="__span-12-14"><a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a><span class="s">  esac</span>
+</span><span id="__span-12-15"><a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a><span class="s">  shift</span>
+</span><span id="__span-12-16"><a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a><span class="s">done</span>
+</span><span id="__span-12-17"><a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a><span class="s">EV=$(kubectl -n tetragon logs -l app.kubernetes.io/name=tetragon -c export-stdout \</span>
+</span><span id="__span-12-18"><a id="__codelineno-12-18" name="__codelineno-12-18" href="#__codelineno-12-18"></a><span class="s">       --since=&quot;$SINCE&quot; --prefix=false 2&gt;/dev/null | grep &#39;^{&#39; || true)</span>
+</span><span id="__span-12-19"><a id="__codelineno-12-19" name="__codelineno-12-19" href="#__codelineno-12-19"></a><span class="s">case &quot;$MODE&quot; in</span>
+</span><span id="__span-12-20"><a id="__codelineno-12-20" name="__codelineno-12-20" href="#__codelineno-12-20"></a><span class="s">  types)   echo &quot;$EV&quot; | jq -r &#39;keys[] | select(startswith(&quot;process_&quot;))&#39; | sort | uniq -c ;;</span>
+</span><span id="__span-12-21"><a id="__codelineno-12-21" name="__codelineno-12-21" href="#__codelineno-12-21"></a><span class="s">  compact) echo &quot;$EV&quot; | jq -r &#39;(.process_exec//.process_exit//.process_kprobe) as $p</span>
+</span><span id="__span-12-22"><a id="__codelineno-12-22" name="__codelineno-12-22" href="#__codelineno-12-22"></a><span class="s">             | &quot;\(.time)  \($p.process.pod.namespace // &quot;-&quot;)/\($p.process.pod.name // &quot;-&quot;)  \($p.process.binary) \($p.process.arguments // &quot;&quot;)&quot;&#39; ;;</span>
+</span><span id="__span-12-23"><a id="__codelineno-12-23" name="__codelineno-12-23" href="#__codelineno-12-23"></a><span class="s">  *)       echo &quot;$EV&quot; ;;</span>
+</span><span id="__span-12-24"><a id="__codelineno-12-24" name="__codelineno-12-24" href="#__codelineno-12-24"></a><span class="s">esac</span>
+</span><span id="__span-12-25"><a id="__codelineno-12-25" name="__codelineno-12-25" href="#__codelineno-12-25"></a><span class="s">EOF</span>
+</span><span id="__span-12-26"><a id="__codelineno-12-26" name="__codelineno-12-26" href="#__codelineno-12-26"></a>chmod<span class="w"> </span>+x<span class="w"> </span>tetra-events.sh
+</span></code></pre></div>
+<h3 id="kubectl-exec">一次普通的 <code>kubectl exec</code> 長什麼樣<a class="headerlink" href="#kubectl-exec" title="Permanent link">&para;</a></h3>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>baseline-nginx<span class="w"> </span>--<span class="w"> </span>cat<span class="w"> </span>/etc/shadow
+</span></code></pre></div>
+<p>事件流裡是兩段:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>03:31:22.949  process_exec  ebpf-lab/baseline-nginx/nginx  /proc/self/fd/6 &#39;init&#39;   parent=/usr/bin/runc
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>03:31:22.951  process_exit  ebpf-lab/baseline-nginx/nginx  /proc/self/fd/6 &#39;init&#39;   parent=/usr/bin/runc
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>03:31:22.962  process_exec  ebpf-lab/baseline-nginx/nginx  /usr/bin/cat &#39;/etc/shadow&#39;  parent=/usr/bin/containerd-shim-runc-v2
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>03:31:22.964  process_exit  ebpf-lab/baseline-nginx/nginx  /usr/bin/cat &#39;/etc/shadow&#39;  parent=/usr/bin/containerd-shim-runc-v2
+</span></code></pre></div>
+<p>前兩筆是 runc 的 init helper,後兩筆才是真正的指令。<strong><code>parent=containerd-shim-runc-v2</code> 就是 Falco 那條 <code>container_entrypoint</code> macro 在看的同一件事</strong>(<a href="../sprint2-day3-falco-basics/#mine-6">Day 3 地雷 6</a>)——同一個核心事實,兩個工具各自的表達方式:Falco 把它寫成規則條件,Tetragon 直接把 <code>parent</code> 印出來讓你自己判斷。</p>
+<h3 id="pod">pod 身分是怎麼來的<a class="headerlink" href="#pod" title="Permanent link">&para;</a></h3>
+<p>事件裡的 pod 區塊:</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="nt">&quot;pod&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="w">  </span><span class="nt">&quot;namespace&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ebpf-lab&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;baseline-nginx&quot;</span><span class="p">,</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="w">  </span><span class="nt">&quot;container&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;containerd://ce8a862c00d9…&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;nginx&quot;</span><span class="p">,</span>
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="w">    </span><span class="nt">&quot;image&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;mcr.microsoft.com/mirror/docker/library/nginx:1.25&quot;</span><span class="w"> </span><span class="p">},</span>
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="w">    </span><span class="nt">&quot;pid&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">23</span><span class="w"> </span><span class="p">},</span>
+</span><span id="__span-15-6"><a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="w">  </span><span class="nt">&quot;pod_labels&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;app&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;baseline-nginx&quot;</span><span class="p">},</span>
+</span><span id="__span-15-7"><a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="w">  </span><span class="nt">&quot;workload&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;baseline-nginx&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;workload_kind&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Pod&quot;</span>
+</span><span id="__span-15-8"><a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="p">}</span>
+</span></code></pre></div>
+<p>比 Falco 多的東西很實在:<strong>容器內的 pid</strong>(不是主機 pid)、pod labels、workload 與 workload kind。Falco 的 <code>container.*</code> 給不到後兩者。</p>
+<p>但<strong>來源機制</strong>才是重點:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Falco</th>
+<th>Tetragon</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>核心事件帶了什麼</td>
+<td>pid、cgroup id</td>
+<td>pid、cgroup id(BPF 在 <code>execve</code> 當下寫進 map)</td>
+</tr>
+<tr>
+<td>誰把它變成 pod 名字</td>
+<td>container plugin,用 cgroup 路徑挖出 container id,再打<strong>容器執行期的 socket</strong> 反查</td>
+<td>agent 用 <strong>Kubernetes API informer</strong> 維護一張 cgroup id 對 pod 的表,事件出核心後查表</td>
+</tr>
+<tr>
+<td>查表在哪一層</td>
+<td>使用者空間</td>
+<td>使用者空間</td>
+</tr>
+<tr>
+<td><strong>身分的依據</strong></td>
+<td><strong>cgroup</strong></td>
+<td><strong>cgroup</strong></td>
+</tr>
+</tbody>
+</table>
+<p>兩條路的實作差很多,但<strong>最後一欄一樣</strong>。這一欄就是步驟 5 的答案,而它早在 <a href="../sprint2-day2-bpftrace-kubernetes/#mine-2">Day 2 的地雷 2</a> 就寫好了。</p>
+<h2 id="step-4">步驟 4: 第一條 TracingPolicy<a class="headerlink" href="#step-4" title="Permanent link">&para;</a></h2>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>tracingpolicy-file-open.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="s">apiVersion: cilium.io/v1alpha1</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="s">kind: TracingPolicyNamespaced          # scoped to one namespace, not the cluster</span>
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="s">metadata:</span>
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="s">  name: lab-etc-read</span>
+</span><span id="__span-16-6"><a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="s">  namespace: ebpf-lab</span>
+</span><span id="__span-16-7"><a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="s">spec:</span>
+</span><span id="__span-16-8"><a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="s">  kprobes:</span>
+</span><span id="__span-16-9"><a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="s">    - call: &quot;security_file_permission&quot;</span>
+</span><span id="__span-16-10"><a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="s">      syscall: false                   # kernel-function ABI, not the syscall ABI</span>
+</span><span id="__span-16-11"><a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="s">      return: true</span>
+</span><span id="__span-16-12"><a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a><span class="s">      args:</span>
+</span><span id="__span-16-13"><a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a><span class="s">        - index: 0</span>
+</span><span id="__span-16-14"><a id="__codelineno-16-14" name="__codelineno-16-14" href="#__codelineno-16-14"></a><span class="s">          type: &quot;file&quot;                 # struct file * — CO-RE resolves f_path to a string</span>
+</span><span id="__span-16-15"><a id="__codelineno-16-15" name="__codelineno-16-15" href="#__codelineno-16-15"></a><span class="s">        - index: 1</span>
+</span><span id="__span-16-16"><a id="__codelineno-16-16" name="__codelineno-16-16" href="#__codelineno-16-16"></a><span class="s">          type: &quot;int&quot;                  # mask: MAY_EXEC=1, MAY_WRITE=2, MAY_READ=4</span>
+</span><span id="__span-16-17"><a id="__codelineno-16-17" name="__codelineno-16-17" href="#__codelineno-16-17"></a><span class="s">      returnArg:</span>
+</span><span id="__span-16-18"><a id="__codelineno-16-18" name="__codelineno-16-18" href="#__codelineno-16-18"></a><span class="s">        index: 0</span>
+</span><span id="__span-16-19"><a id="__codelineno-16-19" name="__codelineno-16-19" href="#__codelineno-16-19"></a><span class="s">        type: &quot;int&quot;</span>
+</span><span id="__span-16-20"><a id="__codelineno-16-20" name="__codelineno-16-20" href="#__codelineno-16-20"></a><span class="s">      selectors:</span>
+</span><span id="__span-16-21"><a id="__codelineno-16-21" name="__codelineno-16-21" href="#__codelineno-16-21"></a><span class="s">        - matchArgs:                   # both entries in one selector are AND-ed</span>
+</span><span id="__span-16-22"><a id="__codelineno-16-22" name="__codelineno-16-22" href="#__codelineno-16-22"></a><span class="s">            - index: 0</span>
+</span><span id="__span-16-23"><a id="__codelineno-16-23" name="__codelineno-16-23" href="#__codelineno-16-23"></a><span class="s">              operator: &quot;Prefix&quot;</span>
+</span><span id="__span-16-24"><a id="__codelineno-16-24" name="__codelineno-16-24" href="#__codelineno-16-24"></a><span class="s">              values: [&quot;/etc/&quot;]</span>
+</span><span id="__span-16-25"><a id="__codelineno-16-25" name="__codelineno-16-25" href="#__codelineno-16-25"></a><span class="s">            - index: 1</span>
+</span><span id="__span-16-26"><a id="__codelineno-16-26" name="__codelineno-16-26" href="#__codelineno-16-26"></a><span class="s">              operator: &quot;Equal&quot;</span>
+</span><span id="__span-16-27"><a id="__codelineno-16-27" name="__codelineno-16-27" href="#__codelineno-16-27"></a><span class="s">              values: [&quot;4&quot;]</span>
+</span><span id="__span-16-28"><a id="__codelineno-16-28" name="__codelineno-16-28" href="#__codelineno-16-28"></a><span class="s">EOF</span>
+</span><span id="__span-16-29"><a id="__codelineno-16-29" name="__codelineno-16-29" href="#__codelineno-16-29"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>tracingpolicy-file-open.yaml
+</span></code></pre></div>
+<p>逐項說明為什麼長這樣:</p>
+<p><strong><code>kind: TracingPolicyNamespaced</code></strong> 是「只看指定命名空間」這個需求的正解,而它跟 Falco 的 <code>k8s.ns.name = "ebpf-lab"</code> 是完全不同的東西。Tetragon 有一張 BPF map,內容是「策略 id 對一組 cgroup id」,由 agent 從 Kubernetes 的 pod informer 填。<strong>kprobe 程式進去的第一件事就是查這張表</strong>,不在名單上的 cgroup 直接返回,事件從來沒有離開核心。Falco 的命名空間條件是在事件已經複製到使用者空間、行程資訊已經反查完之後才評估的。</p>
+<p><strong><code>call: "security_file_permission"</code></strong> 是核心符號。挑它而不是挑 <code>sys_openat</code>:拿到一個檔案的內容有十幾條路(<code>open</code>、<code>openat</code>、<code>openat2</code>、對已開啟 fd 的 <code>mmap</code>⋯⋯),而 <code>security_file_permission</code> 是核心自己把存取檢查匯流過去的那個點,<strong>一個掛勾蓋掉全部</strong>。代價是它觸發得非常頻繁,這正是選擇器存在的理由。</p>
+<p>它是一個 LSM 掛勾函式,但這裡掛的是 <strong>kprobe</strong>,只看不管。Day 6 的攔截走的是另一條路。</p>
+<p><strong><code>syscall: false</code></strong> 告訴 Tetragon 用核心函式的呼叫慣例讀參數。寫錯不會載入失敗,會<strong>讀到看起來很合理的垃圾</strong>。</p>
+<p><strong><code>type: "file"</code></strong> 是 CO-RE 的變現點:Tetragon 拿 <code>struct file *</code>,靠 BTF 走 <code>f_path</code> 解出路徑字串。策略檔裡沒有任何一個位元組跟這顆核心的版本有關。</p>
+<p><strong>選擇器的組合規則</strong>是今天最該記住的語法:<strong>同一個選擇器裡的多個 <code>matchArgs</code> 是 AND,不同選擇器之間是 OR</strong>。所以上面那段讀作「路徑以 <code>/etc/</code> 開頭<strong>而且</strong> mask 等於 4」。</p>
+<p>套用之後<strong>不要相信 <code>kubectl apply</code> 的輸出</strong>,理由見<a href="#mine-4">地雷 4</a>。唯一的驗收條件是:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>tetragon<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>&lt;tetragon-pod&gt;<span class="w"> </span>-c<span class="w"> </span>tetragon<span class="w"> </span>--<span class="w"> </span>tetra<span class="w"> </span>tracingpolicy<span class="w"> </span>list
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="go">ID  NAME          STATE     FILTERID  NAMESPACE  SENSORS         KERNELMEMORY  MODE</span>
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="go">3   lab-etc-read  enabled   3         ebpf-lab   generic_kprobe  462.15 kB     monitor_only</span>
+</span></code></pre></div>
+<p><code>MODE: monitor_only</code> 是 agent 自己判定的——<strong>今天的「只觀察」不是靠自律,是策略裡沒有任何動作,agent 據此標記的狀態</strong>。<code>KERNELMEMORY 462.15 kB</code> 是一條策略在核心裡的固定成本,這個數字 Falco 沒有對應物。</p>
+<h3 id="_5">驗收<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h3>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>baseline-nginx<span class="w"> </span>--<span class="w"> </span>cat<span class="w"> </span>/etc/shadow<span class="w"> </span>&gt;<span class="w"> </span>/dev/null
+</span></code></pre></div>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="p">{</span>
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="w">  </span><span class="nt">&quot;process_kprobe&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="w">    </span><span class="nt">&quot;process&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-19-4"><a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="w">      </span><span class="nt">&quot;pid&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">25115</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;uid&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;binary&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/usr/bin/cat&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;arguments&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/etc/shadow&quot;</span><span class="p">,</span>
+</span><span id="__span-19-5"><a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="w">      </span><span class="nt">&quot;pod&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;namespace&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ebpf-lab&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;baseline-nginx&quot;</span><span class="p">,</span>
+</span><span id="__span-19-6"><a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="w">               </span><span class="nt">&quot;container&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;nginx&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;pid&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">23</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+</span><span id="__span-19-7"><a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="w">    </span><span class="p">},</span>
+</span><span id="__span-19-8"><a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="w">    </span><span class="nt">&quot;parent&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;pid&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">21569</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;binary&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/usr/bin/containerd-shim-runc-v2&quot;</span><span class="w"> </span><span class="p">},</span>
+</span><span id="__span-19-9"><a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a><span class="w">    </span><span class="nt">&quot;function_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;security_file_permission&quot;</span><span class="p">,</span>
+</span><span id="__span-19-10"><a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a><span class="w">    </span><span class="nt">&quot;args&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;file_arg&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/etc/shadow&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;permission&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;-rw-r-----&quot;</span><span class="p">}},</span>
+</span><span id="__span-19-11"><a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a><span class="w">              </span><span class="p">{</span><span class="nt">&quot;int_arg&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">}</span><span class="w"> </span><span class="p">],</span>
+</span><span id="__span-19-12"><a id="__codelineno-19-12" name="__codelineno-19-12" href="#__codelineno-19-12"></a><span class="w">    </span><span class="nt">&quot;return&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;int_arg&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">},</span>
+</span><span id="__span-19-13"><a id="__codelineno-19-13" name="__codelineno-19-13" href="#__codelineno-19-13"></a><span class="w">    </span><span class="nt">&quot;action&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;KPROBE_ACTION_POST&quot;</span><span class="p">,</span>
+</span><span id="__span-19-14"><a id="__codelineno-19-14" name="__codelineno-19-14" href="#__codelineno-19-14"></a><span class="w">    </span><span class="nt">&quot;policy_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;lab-etc-read&quot;</span>
+</span><span id="__span-19-15"><a id="__codelineno-19-15" name="__codelineno-19-15" href="#__codelineno-19-15"></a><span class="w">  </span><span class="p">},</span>
+</span><span id="__span-19-16"><a id="__codelineno-19-16" name="__codelineno-19-16" href="#__codelineno-19-16"></a><span class="w">  </span><span class="nt">&quot;node_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;node-a&gt;&quot;</span><span class="p">,</span>
+</span><span id="__span-19-17"><a id="__codelineno-19-17" name="__codelineno-19-17" href="#__codelineno-19-17"></a><span class="w">  </span><span class="nt">&quot;time&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-08-07T03:26:20.860883032Z&quot;</span>
+</span><span id="__span-19-18"><a id="__codelineno-19-18" name="__codelineno-19-18" href="#__codelineno-19-18"></a><span class="p">}</span>
+</span></code></pre></div>
+<p>逐項對得上:<code>policy_name</code> 是剛寫的那條、<code>function_name</code> 是挑的那個掛勾、<code>file_arg.path</code> 是讀的那個檔、<code>int_arg: 4</code> 是選擇器要求的 mask、<code>process.binary</code> 加 <code>arguments</code> 是打的那行指令、<code>pod</code> 是 exec 進去的那顆,時間差 <strong>1.0 毫秒</strong>。</p>
+<p><code>return.int_arg: 0</code> 是核心允許了這次讀取——<strong>Day 6 要改的就是這個值</strong>。</p>
+<h3 id="3000">核心層過濾:3000 次讀取的實驗<a class="headerlink" href="#3000" title="Permanent link">&para;</a></h3>
+<p>策略只看 <code>/etc/</code> 開頭。在同一顆 pod 裡讀 3000 次<strong>不符合</strong>的檔案:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>baseline-nginx<span class="w"> </span>--<span class="w"> </span>bash<span class="w"> </span>-c<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="w">      </span><span class="s1">&#39;echo hello &gt; /tmp/decoy; for i in $(seq 1 3000); do cat /tmp/decoy &gt; /dev/null; done&#39;</span>
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>
+</span><span id="__span-20-4"><a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="go">策略 kprobe 事件增量:0</span>
+</span></code></pre></div>
+<p><strong>一筆都沒有。</strong> BPF 程式對每一次呼叫做了前綴比對,不符合就返回,事件連 ring buffer 都沒進去。Falco 的等價做法是把事件撈到使用者空間、填完行程與容器欄位、再拿 27 條規則的條件去比——這就是 <a href="../sprint2-day3-falco-basics/#mine-7">Day 3 地雷 7</a> 那句「沒有告警不等於沒有成本」。</p>
+<p>同一個 burst 唯一冒出來的 6 筆來自 <code>bash</code> 自己:<code>/etc/nsswitch.conf</code> 四次、<code>/etc/passwd</code> 兩次,是 bash 啟動時的 NSS 查詢。這 6 筆本身就是提醒:<strong><code>/etc/</code> 這個前綴對任何跑 shell 的容器都不是低頻</strong>。真要用在生產,前綴得縮到 <code>/etc/shadow</code> 這種等級,或者加 <code>matchBinaries</code> 把 shell 自己的查詢排掉。</p>
+<p><strong>但這一段最重要的數字在別的地方</strong>,見<a href="#mine-5">地雷 5</a>。</p>
+<h2 id="5">步驟 5: 四個偏離,兩套工具同時看<a class="headerlink" href="#5" title="Permanent link">&para;</a></h2>
+<p>Falco 是 <a href="../sprint2-day4-falco-custom-rules/">Day 4</a> 收工的狀態(25 條出廠加 2 條自訂),Tetragon 是 <code>__base__</code> 加一條 <code>lab-etc-read</code>。一次動作,兩份輸出。</p>
+<table>
+<thead>
+<tr>
+<th>偏離</th>
+<th>Falco 說了什麼</th>
+<th>怪到哪顆 pod</th>
+<th>Tetragon 說了什麼</th>
+<th>怪到哪顆 pod</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>A</strong> <code>bash -c "…" &amp; wait</code>(有 pty)</td>
+<td>2 筆:出廠 <code>Terminal shell in container</code> 加自訂 <code>Shell spawned by non-runtime parent</code></td>
+<td><code>baseline-nginx</code> ✓</td>
+<td><strong>18 筆</strong>:3 exec、3 exit、12 kprobe。無規則名、無嚴重度</td>
+<td><code>baseline-nginx</code> ✓</td>
+</tr>
+<tr>
+<td><strong>B</strong> 同上但<strong>無終端機</strong></td>
+<td><strong>1 筆</strong>:只有自訂規則。出廠規則靜音</td>
+<td><code>baseline-nginx</code> ✓</td>
+<td><strong>18 筆,與 A 完全相同的組成</strong></td>
+<td><code>baseline-nginx</code> ✓</td>
+</tr>
+<tr>
+<td><strong>C</strong> <code>nsenter</code> 進 <code>baseline-nginx</code> 讀 <code>/etc/shadow</code></td>
+<td>2 筆</td>
+<td><strong>呼叫端</strong> ✗</td>
+<td><strong>34 筆</strong>,含 <code>nsenter</code> 指令與完整參數</td>
+<td><strong>呼叫端</strong> ✗</td>
+</tr>
+<tr>
+<td><strong>D</strong> 直接在 <code>baseline-nginx</code> 裡讀 <code>/etc/shadow</code></td>
+<td>1 筆</td>
+<td><code>baseline-nginx</code> ✓</td>
+<td><strong>8 筆</strong>:2 exec、2 exit、<strong>4 kprobe(策略產生的)</strong></td>
+<td><code>baseline-nginx</code> ✓</td>
+</tr>
+</tbody>
+</table>
+<p>C 那一列是今天的頭條(<a href="#mine-6">地雷 6</a>),B 那一列是分工的核心(<a href="#mine-7">地雷 7</a>)。</p>
+<h3 id="_6">訊噪比<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
+<p>四個偏離的總帳:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Falco</th>
+<th>Tetragon</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>事件或告警總數</td>
+<td><strong>6</strong></td>
+<td><strong>78</strong></td>
+</tr>
+<tr>
+<td>每一筆都對得回一個動作嗎</td>
+<td>是</td>
+<td>是</td>
+</tr>
+<tr>
+<td>帶規則名與嚴重度嗎</td>
+<td><strong>是</strong>(含 MITRE T1059 / T1555)</td>
+<td><strong>否</strong></td>
+</tr>
+<tr>
+<td>需要人再判斷嗎</td>
+<td>否</td>
+<td><strong>是</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>13 倍。</strong> 而這是在「只有一條窄策略、四個動作、10 秒鐘」的條件下量的。步驟 4 那個 3000 次 burst 才是規模長什麼樣。</p>
+<h2 id="6">步驟 6: 成本<a class="headerlink" href="#6" title="Permanent link">&para;</a></h2>
+<h3 id="_7">資源<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h3>
+<p>閒置、一條策略載入中:</p>
+<table>
+<thead>
+<tr>
+<th>元件</th>
+<th>CPU</th>
+<th>記憶體</th>
+<th>QoS</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Tetragon</strong> agent(每節點)</td>
+<td><strong>5–11m</strong></td>
+<td><strong>83–120Mi</strong></td>
+<td><strong>BestEffort</strong></td>
+</tr>
+<tr>
+<td>Tetragon <code>export-stdout</code>(每節點)</td>
+<td>1m</td>
+<td>&lt;1Mi</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Tetragon operator(單顆)</td>
+<td>1m</td>
+<td>19Mi</td>
+<td>Burstable</td>
+</tr>
+<tr>
+<td><strong>Falco</strong>(每節點)</td>
+<td><strong>13–27m</strong></td>
+<td><strong>84–90Mi</strong></td>
+<td>Burstable</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Tetragon 的 CPU 明顯比 Falco 低</strong>,而這完全合理:Falco 對每一個 <code>execve</code> 都要在使用者空間跑一遍 27 條規則的布林運算,Tetragon 零策略時只是把事件搬出來。記憶體則是 Tetragon 略高,因為 process cache 與 <code>execve_map</code> 是預先配置的。</p>
+<p>再加上策略的核心記憶體:462.15 kB。這一項 Falco 完全沒有對應物。</p>
+<p>有一件事值得單獨記:上表刻意排除了被 <code>tetra getevents</code> 抽過兩輪的那顆 agent。它量到 11m / <strong>163Mi</strong>,而另外兩顆是 88Mi 與 120Mi。<strong><code>tetra getevents</code> 不是免費的診斷指令</strong>,而且記憶體抽完不會馬上還回來——在一顆吃緊的節點上對著 BestEffort 的 agent 開串流,等於自己把它推向 OOM。</p>
+<p>Tetragon 的部署預設見<a href="#mine-8">地雷 8</a>。</p>
+<h3 id="_8">閒置事件率<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>狀態</th>
+<th>窗口</th>
+<th>Tetragon 匯出事件</th>
+<th>Falco 告警</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>零策略</td>
+<td>132 秒</td>
+<td><strong>0</strong></td>
+<td><strong>0</strong></td>
+</tr>
+<tr>
+<td>一條策略載入中</td>
+<td>195 秒</td>
+<td><strong>4</strong></td>
+<td><strong>0</strong></td>
+</tr>
+</tbody>
+</table>
+<p>那 4 筆是自己造成的:窗口頭尾各跑一次 <code>kubectl exec</code> 進 tetragon 命名空間查策略狀態,而該命名空間不在預設的排除清單上。扣掉自己的觀測動作,兩種狀態都是零。</p>
+<p><strong>而這個零是排除清單的零,不是「沒有事情發生」的零</strong>(<a href="#mine-2">地雷 2</a>)。真實的核心層事件率是 1915 筆/分鐘/節點。</p>
+<h2 id="_9">誠實的差距<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong><code>enable-process-ns</code> 沒有測。</strong> <a href="#mine-6">地雷 6</a> 提到改用命名空間當身分依據也許能修正 <code>nsenter</code> 的歸屬,Tetragon 有這個選項且預設關閉,本課沒有開來驗證,不知道夠不夠。</li>
+<li><strong>一個計數器沒查清楚。</strong> <code>tetra tracingpolicy list -o json</code> 有 <code>stats.action_counters.post</code>,實測一次 1 位元組的讀取讓它增加 5、匯出事件只增加 1。合理的猜測是進入與返回各自計數,但<strong>沒有驗證就不寫成結論</strong>。可以確定的只有:<strong><code>post</code> 不是事件數,拿它估事件量會高估好幾倍。</strong></li>
+<li><strong>只驗了一個掛勾。</strong> 今天整章的核心層過濾論述建立在一條 kprobe 策略上,tracepoint、uprobe、LSM 掛勾的行為沒有測。</li>
+<li><strong>事件量沒有長時間觀察。</strong> 1915 筆/分鐘是 60 秒窗口的外推,不是跑一天的結果。</li>
+</ul>
+<h2 id="checkpoint">驗收 checkpoint<a class="headerlink" href="#checkpoint" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>驗證</th>
+<th>判準</th>
+<th>本課環境的結果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tetragon 不需要 Cilium</td>
+<td>在 Azure CNI overlay 的叢集上安裝完成且 agent 正常掛載 BPF</td>
+<td>DaemonSet 3/3,無任何 CNI 相關錯誤</td>
+</tr>
+<tr>
+<td>策略真的載入</td>
+<td><code>tetra tracingpolicy list</code> 的 <code>STATE</code> 是 <code>enabled</code>,不是 <code>kubectl apply</code> 成功</td>
+<td><code>enabled</code> / <code>generic_kprobe</code> / <code>462.15 kB</code></td>
+</tr>
+<tr>
+<td><strong>策略事件對得回操作</strong></td>
+<td>事件的 <code>policy_name</code>、<code>file_arg.path</code>、<code>int_arg</code>、<code>process.binary</code>、<code>pod</code> 五項全部對應到自己做的那一件事</td>
+<td>五項全中,延遲 1.0 毫秒</td>
+</tr>
+<tr>
+<td>核心層過濾是真的</td>
+<td>3000 次不符合選擇器的操作,策略事件數</td>
+<td><strong>0 筆</strong></td>
+</tr>
+<tr>
+<td>出廠事件率(匯出後)</td>
+<td>閒置窗口的匯出事件數</td>
+<td>0 筆 / 132 秒</td>
+</tr>
+<tr>
+<td>出廠事件率(核心側)</td>
+<td>同一顆節點直接接 gRPC 的事件數</td>
+<td><strong>1915 筆/分鐘</strong></td>
+</tr>
+<tr>
+<td>BPF LSM 可用</td>
+<td>agent 自己回報的能力字串</td>
+<td><code>lsm: true</code>、<code>override_return: true</code>、<code>signal: true</code>、<code>fmodret: true</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="_10">地雷記錄<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h2>
+<h3 id="mine-1">地雷 1:CRD 不是 Helm 裝的,是 operator 在執行期建的<a class="headerlink" href="#mine-1" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:<code>helm install --wait</code> 回報成功,自動化流程接著套用 TracingPolicy,偶爾失敗說找不到那個資源類型。</p>
+<p><strong>根因</strong>:Helm 只會自動安裝 chart 裡 <code>crds/</code> 目錄的東西,而這個 chart 把 CRD 放在 <code>crds-yaml/</code>:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="gp">$ </span>helm<span class="w"> </span>pull<span class="w"> </span>cilium/tetragon<span class="w"> </span>--version<span class="w"> </span><span class="m">1</span>.7.0<span class="w"> </span>--untar<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>ls<span class="w"> </span>tetragon/
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="go">Chart.yaml  crds-yaml/  LICENSE  README.md  templates/  values.yaml</span>
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="go">                ↑ 不是 crds/</span>
+</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>
+</span><span id="__span-21-5"><a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="gp">$ </span>helm<span class="w"> </span>template<span class="w"> </span>cilium/tetragon<span class="w"> </span>--version<span class="w"> </span><span class="m">1</span>.7.0<span class="w"> </span>--include-crds<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-c<span class="w"> </span>CustomResourceDefinition
+</span><span id="__span-21-6"><a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="go">0</span>
+</span></code></pre></div>
+<p>改由 operator 在執行期建立。實測時序剛好對:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>11:17:19  helm install 開始
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>11:17:27  tracingpolicies.cilium.io          建立
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>11:17:29  tracingpoliciesnamespaced.cilium.io 建立
+</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>11:17:40  helm 回 STATUS: deployed
+</span></code></pre></div>
+<p>但<strong>順序對是運氣,不是保證</strong>——<code>--wait</code> 等的是 DaemonSet 與 Deployment 就緒,不是 CRD 存在。</p>
+<p><strong>後果</strong>:<code>helm template --include-crds</code> 印不出它們、GitOps 工具按 manifest 修剪時不會管理它們、<code>helm uninstall</code> 也不會帶走它們。</p>
+<p><strong>修法</strong>:在同一份自動化裡先裝 Tetragon 再套策略的話,要自己等 CRD 出現,不能靠 <code>helm --wait</code>。</p>
+<h3 id="mine-2">地雷 2:預設排除清單裡的 <code>""</code> 是「整台主機」<a class="headerlink" href="#mine-2" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:匯出的事件流安靜得不合理——閒置窗口 0 筆,看起來比 Falco 還乾淨。</p>
+<p><strong>根因</strong>:chart 的預設值:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="nt">export-denylist</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|-</span>
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="w">  </span><span class="no">{&quot;health_check&quot;:true}</span>
+</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="w">  </span><span class="no">{&quot;namespace&quot;:[&quot;&quot;, &quot;cilium&quot;, &quot;kube-system&quot;]}</span>
+</span></code></pre></div>
+<p><strong>空字串命名空間的意思是「這個行程不屬於任何 pod」,也就是主機上的每一個行程。</strong> 同一顆節點直接接 gRPC 量到 1915 筆/分鐘,其中 1898 筆(99.1%)正是它。</p>
+<p>三件事都是可以正當防守的預設——沒有人想要 9.8 GB/天/節點 的節點代理程式日誌。問題在別的地方:</p>
+<ol>
+<li><strong>這是 chart 的預設,不是 Tetragon 的預設。</strong> 讀 Tetragon 的概念文件不會知道,<code>kubectl get ds</code> 不會顯示,agent 啟動日誌裡有但埋在 40 個其他鍵值之間。</li>
+<li><strong>它過濾在最貴的一關。</strong> BPF 程式跑了、ring buffer 佔了、protobuf 解完了、pod 反查也做了,才在匯出層丟掉。核心層過濾的省錢效果在這一段完全沒有發生。</li>
+<li><strong>它把整台主機從視野裡拿掉。</strong> <a href="#mine-6">地雷 6</a> 的攻擊路徑起點是「拿到節點 root」;一個在節點上直接跑、不在任何容器裡的行程,命名空間就是空字串——<strong>出廠設定下,它一筆都不會出現在匯出的事件流裡</strong>。</li>
+</ol>
+<p>還有一個細節說明這份清單是怎麼寫出來的:chart 預設把 Tetragon 裝在 <code>kube-system</code>,所以它自己被排除。裝在別的命名空間,Tetragon 就會報自己。</p>
+<h3 id="mine-3">地雷 3:每一筆事件都揹著整份節點標籤<a class="headerlink" href="#mine-3" title="Permanent link">&para;</a></h3>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="gp">$ </span>./tetra-events.sh<span class="w"> </span>--size
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="go">events=23  total=101694 B  avg=4421 B/event  node_labels=2158 B/event (49%)</span>
+</span></code></pre></div>
+<p><strong>一筆 4421 B 的事件裡,2158 B 是 <code>node_labels</code></strong>——雲端供應商塞在節點上的那四十幾個標籤,每一筆事件重複一次。以量到的原始速率算,<strong>光是節點標籤就是 4.8 GB/天/節點</strong>。</p>
+<p>這個放大係數<strong>是雲端供應商決定的,不在你的設定檔裡</strong>——跟 <a href="../sprint2-day4-falco-custom-rules/#mine-4">Day 4 地雷 4</a>(<code>ndots:5</code> 的六倍放大是叢集 DNS 設定決定的)是同一個家族。自架叢集的節點標籤大概十來個,同一份 chart、同一個工作負載,事件大小差兩倍以上。</p>
+<p><strong>任何用文件範例事件大小做的成本估算,在受管叢集上會低估一半。</strong></p>
+<p>關掉的方法是 <code>field-filters</code>,但那是一份要自己寫的欄位路徑清單,而且<strong>沒有任何預設值或範例把 <code>node_labels</code> 列進去</strong>。</p>
+<h3 id="mine-4">地雷 4:<code>kubectl apply</code> 成功、物件健康、策略根本沒載入<a class="headerlink" href="#mine-4" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:四個 Kubernetes 端的指標全綠。</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>tracingpolicy-file-open.yaml
+</span><span id="__span-25-2"><a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="go">tracingpolicynamespaced.cilium.io/lab-etc-read created      ← 成功</span>
+</span><span id="__span-25-3"><a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span>get<span class="w"> </span>tracingpoliciesnamespaced
+</span><span id="__span-25-4"><a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="go">lab-etc-read   8s                                           ← 存在</span>
+</span><span id="__span-25-5"><a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span>get<span class="w"> </span>tracingpolicynamespaced<span class="w"> </span>lab-etc-read<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>.status
+</span><span id="__span-25-6"><a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a><span class="go">&lt;absent&gt;                                                    ← 沒有 status</span>
+</span><span id="__span-25-7"><a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span>describe<span class="w"> </span>tracingpolicynamespaced<span class="w"> </span>lab-etc-read<span class="w"> </span><span class="p">|</span><span class="w"> </span>tail<span class="w"> </span>-1
+</span><span id="__span-25-8"><a id="__codelineno-25-8" name="__codelineno-25-8" href="#__codelineno-25-8"></a><span class="go">Events:  &lt;none&gt;                                             ← 沒有 event</span>
+</span></code></pre></div>
+<p><strong>根因</strong>:策略第一版帶了 <code>returnArgAction: "Post"</code>,那是各種範例裡最常見的寫法。實際狀態只有 agent 知道:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>tetragon<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>&lt;tetragon-pod&gt;<span class="w"> </span>-c<span class="w"> </span>tetragon<span class="w"> </span>--<span class="w"> </span>tetra<span class="w"> </span>tracingpolicy<span class="w"> </span>list
+</span><span id="__span-26-2"><a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="go">ID  NAME          STATE        FILTERID  NAMESPACE  SENSORS  KERNELMEMORY  MODE</span>
+</span><span id="__span-26-3"><a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="go">2   lab-etc-read  load_error   2         ebpf-lab            0 B           unknown</span>
+</span></code></pre></div>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a>level=warn msg=&quot;adding tracing policy failed&quot;
+</span><span id="__span-27-2"><a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a>  error=&quot;… ReturnArgAction type &#39;Post&#39; unsupported;
+</span><span id="__span-27-3"><a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a>         omit returnArgAction or use &#39;TrackSock&#39;/&#39;UntrackSock&#39;&quot;
+</span></code></pre></div>
+<p>而 CRD schema 裡<strong>正確答案就寫在那個欄位的說明文字上</strong>,偏偏該欄位是 <code>'type': 'string'</code> 而<strong>沒有 <code>enum</code></strong>——API server 只檢查型別,所以任何字串都收。</p>
+<p>這是 <a href="../sprint2-day4-falco-custom-rules/#mine-2">Day 4 地雷 2</a>(<code>evt.dir</code> 淘汰而 helm 全綠)的同一個形狀,<strong>而且更難察覺</strong>:Falco 至少把警告印在 pod 自己的日誌裡,這裡是「Kubernetes 原生、看起來就該有 status 的 CRD」什麼都不說。GitOps 面板會是綠的,<code>kubectl wait</code> 沒有東西可以等。</p>
+<p><strong>驗收條件只有一個:<code>tetra tracingpolicy list</code> 的 <code>STATE</code> 是 <code>enabled</code>。</strong></p>
+<h3 id="mine-5">地雷 5:策略讓它變準,不會讓它變安靜<a class="headerlink" href="#mine-5" title="Permanent link">&para;</a></h3>
+<p>同一個 3000 次讀取的 burst,同一個 50 秒窗口:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>事件數</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>策略產生的 <code>process_kprobe</code></td>
+<td><strong>0</strong></td>
+</tr>
+<tr>
+<td>Tetragon 匯出的總事件</td>
+<td><strong>6016</strong></td>
+</tr>
+<tr>
+<td>Falco 告警</td>
+<td><strong>0</strong></td>
+</tr>
+</tbody>
+</table>
+<p>那 6016 筆全是 3000 次 <code>cat</code> 的 exec 與 exit,來自<strong>跟策略無關的 <code>__base__</code> sensor</strong>——它永遠開著,不歸任何 TracingPolicy 管。</p>
+<p>三個實務後果:</p>
+<ol>
+<li><strong>「只裝了一條很窄的策略,所以很便宜」是錯的。</strong> 事件量由工作負載的 exec 頻率決定,跟策略一個字都沒關係。一顆會 fork 的 CI runner、一個 shell 密集的 entrypoint,就足以把量拉上去。</li>
+<li><strong>刪掉策略不會讓它安靜。</strong> 回到零策略只是回到 <code>__base__</code>,也就是<a href="#mine-2">地雷 2</a> 那個 1915 筆/分鐘。</li>
+<li><strong>要調的旋鈕不在 TracingPolicy 裡</strong>,在 chart 的匯出設定裡(排除清單、欄位過濾、速率限制),而那些是<strong>使用者空間的</strong>旋鈕——省的是下游頻寬與儲存,不省核心與 CPU。</li>
+</ol>
+<p>跟 Falco 的分工在這裡變得很具體:<strong>Falco 的成本是固定的(每個事件比對 27 條規則)而輸出接近零;Tetragon 的核心成本很低而輸出正比於工作負載的 exec 量。</strong> 兩者都不是便宜,只是把帳單開在不同欄位。</p>
+<h3 id="mine-6">地雷 6:<code>nsenter</code> 的歸屬,Tetragon 跟 Falco 錯得一樣<a class="headerlink" href="#mine-6" title="Permanent link">&para;</a></h3>
+<p><a href="../sprint2-day3-falco-basics/#mine-5">Day 3 地雷 5</a> 的結論是:Falco 看得見 <code>nsenter</code>,但因為身分是靠 cgroup 反查的,而 <code>nsenter</code> 不換 cgroup,所以告警被標成呼叫端。</p>
+<p>Tetragon 的機制完全不同——身分不是事後反查容器執行期,是 BPF 在 <code>execve</code> 當下把 cgroup id 寫進 map,agent 再對 Kubernetes informer 查表。「在核心裡當場記錄」聽起來就該比「事後去問執行期」準。</p>
+<p>實測:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-28-1"><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>03:31:22.303  process_exec  &lt;呼叫端 pod&gt;  /usr/bin/nsenter
+</span><span id="__span-28-2"><a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a>              &#39;-t 21743 -m -u -i -n -p /bin/bash -c &quot;hostname; cat /etc/shadow …&quot;&#39;
+</span><span id="__span-28-3"><a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a>03:31:22.341  process_kprobe &lt;呼叫端 pod&gt;  /usr/bin/cat &#39;/etc/shadow&#39;
+</span><span id="__span-28-4"><a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a>              fn=security_file_permission  policy=lab-etc-read
+</span></code></pre></div>
+<p>而事情發生在哪裡,指令自己回答了:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-29-1"><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="gp">$ </span>…<span class="w"> </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">21743</span><span class="w"> </span>-m<span class="w"> </span>-u<span class="w"> </span>-i<span class="w"> </span>-n<span class="w"> </span>-p<span class="w"> </span>/bin/bash<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;hostname; cat /etc/shadow …&#39;</span>
+</span><span id="__span-29-2"><a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="go">baseline-nginx                    ← hostname 回報的是被進入的那顆</span>
+</span></code></pre></div>
+<p>對照同一次實驗裡直接 exec 進去做的同一件事:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-30-1"><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>03:31:22.964  process_kprobe  ebpf-lab/baseline-nginx/nginx  /usr/bin/cat &#39;/etc/shadow&#39;
+</span></code></pre></div>
+<p><strong>兩筆事件,同一個檔案、同一支 binary、相隔 0.6 秒、貼著兩個不同的 pod 名字,其中一個是錯的。</strong></p>
+<p><strong>為什麼「在核心層」救不了這件事:pod 不是核心的概念。</strong> 核心知道 pid、mount namespace、UTS namespace、cgroup。「這是哪顆 pod」是把 cgroup id 對到 Kubernetes 物件得到的推論,而 <code>nsenter</code> 換的是命名空間、不換 cgroup。無論在核心裡把 cgroup id 記得多早、多準,記到的都是<strong>發起者的</strong> cgroup。</p>
+<p>三個工具、三種架構、同一個根因:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>結果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Day 2 bpftrace(綁 cgroup 過濾)</td>
+<td><strong>完全看不到</strong></td>
+</tr>
+<tr>
+<td>Day 3 Falco(全節點探針加執行期反查)</td>
+<td>看得到,<strong>pod 認錯</strong></td>
+</tr>
+<tr>
+<td>Day 5 Tetragon(全節點探針加核心層 cgroup id)</td>
+<td>看得到,<strong>pod 認錯</strong></td>
+</tr>
+</tbody>
+</table>
+<p>好消息跟 Day 3 一樣:<strong>訊號沒有消失,只是貼錯標籤</strong>。而 Tetragon 多給了一樣 Falco 沒有的東西——<strong><code>nsenter</code> 這個指令本身連同完整參數就是一筆頭等事件,零策略、零規則</strong>。Day 3 記過「出廠 25 條沒有一條在看 <code>nsenter</code>」;Tetragon 不需要有人先想到要看它。調查員拿到錯的 pod 名字之後,往上一層看 <code>parent=/usr/bin/nsenter</code>、再看 <code>-t 21743</code> 這個參數,<strong>真正的目標就在裡面</strong>。</p>
+<h3 id="mine-7">地雷 7:Tetragon 的事件裡沒有 tty 欄位<a class="headerlink" href="#mine-7" title="Permanent link">&para;</a></h3>
+<p>偏離 A(包了 pty 的 fork shell)與偏離 B(沒有終端機的 web shell)在 Tetragon 的事件流裡<strong>組成完全相同</strong>:各 3 筆 exec、3 筆 exit、12 筆 kprobe,binary、parent、pod、參數全部對應得上,只有時間戳與 pid 不同。</p>
+<p><strong>根因</strong>:<code>process</code> 結構裡根本沒有這個欄位。</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-31-1"><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a>process struct keys: arguments, auid, binary, cwd, docker, exec_id, flags,
+</span><span id="__span-31-2"><a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a>                     in_init_tree, parent_exec_id, pid, pod, refcnt,
+</span><span id="__span-31-3"><a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a>                     start_time, tid, uid
+</span></code></pre></div>
+<p><a href="../sprint2-day3-falco-basics/#mine-3">Day 3 地雷 3</a> 的整個故事、Day 4「<code>tty=0</code> 本身就是『不是真人打的 <code>kubectl exec</code>』的訊號」那個結論——<strong>在 Tetragon 的預設事件裡不存在</strong>。</p>
+<p>反過來,B 這一格也是 Falco 出廠規則最難看的一格:只報 1 筆,而且是自訂規則報的,出廠的 <code>Terminal shell in container</code> 因為 <code>proc.tty != 0</code> 完全靜音。Tetragon 在這裡的 18 筆雖然沒有任何判斷,但它<strong>至少沒有漏</strong>。</p>
+<p><strong>這一格就是工具分工的核心:Falco 有一個 Tetragon 沒有的欄位,Tetragon 有一個 Falco 沒有的保證——它不做判斷,所以不會判斷錯。</strong></p>
+<h3 id="mine-8">地雷 8:chart 不給 resources 也不給 priorityClassName<a class="headerlink" href="#mine-8" title="Permanent link">&para;</a></h3>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-32-1"><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>tetragon<span class="w"> </span>get<span class="w"> </span>pod<span class="w"> </span>&lt;tetragon-pod&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.qosClass} prio={.spec.priority}&#39;</span>
+</span><span id="__span-32-2"><a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="go">BestEffort prio=0</span>
+</span><span id="__span-32-3"><a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>falco<span class="w"> </span>get<span class="w"> </span>pod<span class="w"> </span>&lt;falco-pod&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.qosClass} prio={.spec.priority}&#39;</span>
+</span><span id="__span-32-4"><a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a><span class="go">Burstable prio=0</span>
+</span></code></pre></div>
+<p>Falco 的 chart 至少給了 requests(超額 4–7 倍,<a href="../sprint2-day3-falco-basics/#mine-7">Day 3 地雷 7</a>),所以它是 Burstable。Tetragon 的 DaemonSet 容器是 <code>resources: {}</code>——<strong>BestEffort</strong>,記憶體吃緊時第一批被 OOM kill。priority 兩邊都是 0,一樣低於每個系統元件。</p>
+<p>而 <code>tolerations: [{operator: Exists}]</code> 表示<strong>它容忍一切</strong>。好處是不用像 Day 3 那樣替 Falco 補 toleration;壞處是它會排到任何一顆節點,包括你不想付這份監控成本的節點。</p>
+<p><strong>Tetragon 的失效形狀跟 Falco 又不一樣</strong>:Falco 被踢是「少看到事件」;Tetragon 的 agent 被踢,<strong>BPF 程式還 pinned 在核心裡</strong>,只是沒有人在讀 ring buffer——<strong>核心的成本照付、事件全丟、健康檢查不會叫</strong>。這是三種失效裡最糟的一種。</p>
+<p>還有一個排程上的後果:兩套工具實測共吃 18–38m CPU、107–210Mi,而<strong>宣告給排程器的 requests 只有 Falco 那一份</strong>。Tetragon 對排程器是隱形的。</p>
+<h2 id="_11">帶得走的東西<a class="headerlink" href="#_11" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>「在核心裡做」不會讓 pod 歸屬變準,因為 pod 不是核心的概念。</strong> 核心只知道 pid、cgroup、命名空間;「哪顆 pod」永遠是把 cgroup 對到 Kubernetes 物件的推論。任何靠 cgroup 認身分的工具,都繼承同一組限制,換架構不會換掉它。</li>
+<li><strong>核心層過濾是真的、免費的、完美的——但它只管你自己寫的那條策略。</strong> 3000 次不符合的操作產生 0 筆策略事件;同一個窗口卻匯出 6016 筆,因為底層 sensor 不歸策略管。省的地方跟花的地方不是同一個地方。</li>
+<li><strong>看起來安靜的預設值,可能只是把東西丟在最貴的一關。</strong> 事件流的 0 筆與核心側的 1915 筆是同一顆節點同一段時間——差別是一行排除清單,而它過濾在 BPF、ring buffer、解碼、身分反查全部做完之後。</li>
+<li><strong>Falco 交付判斷,Tetragon 交付紀錄,而缺的那塊剛好是對方的長處。</strong> 同樣四個動作,Falco 6 筆帶規則名與嚴重度,Tetragon 78 筆全部要人再看一遍;但沒寫規則的事 Falco 看不見,Tetragon 照記。</li>
+<li><strong>監控元件的資源宣告要自己補。</strong> 兩套工具實測共吃的量,只有一半有告訴排程器。BestEffort 的監控元件在節點吃緊時第一個消失,而它消失的方式不會觸發任何健康檢查。</li>
+</ul>
+<h2 id="_12">延伸閱讀<a class="headerlink" href="#_12" title="Permanent link">&para;</a></h2>
+<p>想往下深挖,從這幾份開始:</p>
+<ul>
+<li><strong><a href="https://tetragon.io/docs/concepts/tracing-policy/">TracingPolicy 的概念與組成</a></strong> —— 官方對「掛勾點加上核心內過濾的選擇器」這個結構的說明,對得上步驟 4 的逐欄拆解。</li>
+<li><strong><a href="https://tetragon.io/docs/concepts/tracing-policy/selectors/">選擇器的完整語法</a></strong> —— <code>matchArgs</code>、<code>matchBinaries</code>、<code>matchPIDs</code> 等各種過濾器與運算子;官方明載同一個選擇器內的條件是 AND、多個選擇器之間是 OR。</li>
+<li><strong><a href="https://tetragon.io/docs/reference/helm-chart/">Helm chart 參數表</a></strong> —— 地雷 2 與地雷 8 的一手來源:<code>exportDenyList</code> 的預設值(含那個空字串命名空間)與 <code>resources</code> 的空物件預設,都逐字列在這份表裡。</li>
+<li><strong><a href="https://falco.org/docs/concepts/rules/basic-elements/">Falco 規則的三個基本元件</a></strong> —— 對照組。把它跟 TracingPolicy 的結構並排讀,兩種設計哲學的差別比任何文字說明都清楚。</li>
+</ul>
+<h2 id="_13">下一步<a class="headerlink" href="#_13" title="Permanent link">&para;</a></h2>
+<p>今天所有跟攔截有關的開關都刻意關著,而這座叢集的核心能力四項全有——agent 自己回報 <code>lsm</code>、<code>override_return</code>、<code>signal</code>、<code>fmodret</code> 都是 <code>true</code>,策略裡的 <code>MODE</code> 全程是 <code>monitor_only</code>。</p>
+<p>Day 6 把那個 <code>return.int_arg: 0</code> 改掉:違規的行程直接 SIGKILL。然後面對兩個真正困難的問題——<strong>SIGKILL 到底是阻止了操作,還是只是事後把行程殺掉</strong>,以及<strong>寫錯一條攔截規則,從應用程式那一側看起來是什麼樣子</strong>。今天量到的 <code>nsenter</code> 歸屬錯誤,在攔截情境下也會從「標籤貼錯」變成別的東西。</p>
+<hr />
+<div class="admonition quote">
+<p>Tetragon 標誌為 Tetragon 專案之官方資產,此處作社群教學用途。</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到頂端
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="頁腳" >
+        
+          
+          <a href="../sprint2-day4-falco-custom-rules/" class="md-footer__link md-footer__link--prev" aria-label="上一頁: Day 4 · 自訂規則、誤報調校與告警路由">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                上一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 4 · 自訂規則、誤報調校與告警路由
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../sprint2-day6-tetragon-enforcement/" class="md-footer__link md-footer__link--next" aria-label="下一頁: Day 6 · 從偵測到攔截">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                下一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 6 · 從偵測到攔截
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      KAI Scheduler、HAMi、Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,作社群教學用途
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.code.annotate", "content.code.select", "content.tabs.link", "search.suggest", "search.highlight", "search.share"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u8907\u88fd", "clipboard.copy": "\u8907\u88fd", "search.result.more.one": "\u6b64\u9801\u5c1a\u6709 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.more.other": "\u6b64\u9801\u5c1a\u6709 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.none": "\u6c92\u6709\u7b26\u5408\u7684\u9805\u76ee", "search.result.one": "\u627e\u5230 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.other": "\u627e\u5230 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.placeholder": "\u6253\u5b57\u9032\u884c\u641c\u5c0b", "search.result.term.missing": "\u7f3a\u5c11\u5b57\u8a5e", "select.version": "\u9078\u64c7\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

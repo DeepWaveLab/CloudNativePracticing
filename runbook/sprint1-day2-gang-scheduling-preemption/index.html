@@ -1,0 +1,2649 @@
+
+<!doctype html>
+<html lang="zh-TW" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="雲原生實作課程 —— GPU 排程 runbook、踩雷解法與反思">
+      
+      
+      
+        <link rel="canonical" href="https://deepwavelab.github.io/CloudNativePracticing/runbook/sprint1-day2-gang-scheduling-preemption/">
+      
+      
+        <link rel="prev" href="../sprint1-day1-kai-queue-basics/">
+      
+      
+        <link rel="next" href="../sprint1-day3-hami-memory-isolation/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Day 2 · Gang Scheduling 與搶占 - Cloud Native Lab Course</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/terminal.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#day-2-gang-scheduling-pod-spot" class="md-skip">
+          跳轉到
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="頁首">
+    <a href="../.." title="Cloud Native Lab Course" class="md-header__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Cloud Native Lab Course
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Day 2 · Gang Scheduling 與搶占
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換深色模式"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="切換深色模式" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換淺色模式"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="切換淺色模式" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜尋" placeholder="搜尋" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="搜尋">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="分享" aria-label="分享" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="清除" aria-label="清除" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜尋引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="標籤" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  首頁
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../sprint1-day0-azure-aks-foundation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 1 · GPU 排程三部曲
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint2-day0-ebpf-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 2 · eBPF 與執行期安全
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="導覽列" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Cloud Native Lab Course" class="md-nav__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Cloud Native Lab Course
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首頁
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    首頁
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day0-azure-aks-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 環境建置與成本紀律
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day1-kai-queue-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · KAI 安裝與 Queue 基礎
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Gang Scheduling 與搶占
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Gang Scheduling 與搶占
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        原理與架構
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="原理與架構">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pod-gang" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        怎麼把一組 pod 宣告成 gang
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gang" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        組出一個 gang 的三種寫法
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gang_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gang 不是一個開關,是四件事一起運作
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        今天要走的路
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-gang-gang" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1:送一個湊不齊的 gang——先確認它真的是 gang
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2:證明「零佔用」不是記帳好看,是卡真的空著
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3:湊得齊的時候,整組是同一秒上去的
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-gang" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4:拆散 gang——手動殺掉一個成員
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-gang" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5:拆散 gang——搶占者只要一張卡
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-default-kube-scheduler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6:同樣的需求交給 default kube-scheduler
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-azure-spot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 7:讓 Azure 真的收走一台 spot 節點
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 8:收尾
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收 checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷記錄
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="地雷記錄">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 1:裝了 KAI、Job 寫了 parallelism: 3,卻完全沒有 gang scheduling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 2:被驅逐的 gang,Job 卻回報「成功完成」
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 3:搶占 1 張卡,賠掉整個 gang——受害者粒度是「整組」不是「單顆」
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 4:spot 節點被回收後,node pool 不會自癒——容量默默永久減少
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 5:兩個操作者動同一個 node pool——後寫入者靜默勝出,而 activity log 會晚幾分鐘才說實話
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的東西
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day3-hami-memory-isolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · HAMi 安裝與 VRAM 硬隔離
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day4-hami-kai-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · HAMi 進階與 KAI 整合
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day5-hami-webui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · HAMi-WebUI 觀測介面
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day6-dra-simulated-devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · DRA 概念與模擬裝置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day7-dra-aks-real-gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · DRA 真卡實測
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day8-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 綜合:三者分工決策表
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day0-ebpf-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · eBPF 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day1-bpftrace-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · bpftrace 三支經典工具
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day2-bpftrace-kubernetes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · 把核心事件接回 Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day3-falco-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Falco 安裝與出廠規則
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day4-falco-custom-rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · 自訂規則、誤報調校與告警路由
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day5-tetragon-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Tetragon 與 TracingPolicy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day6-tetragon-enforcement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · 從偵測到攔截
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day7-cilium-kubeproxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Cilium 與 kube-proxy replacement
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day8-cilium-network-policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · CiliumNetworkPolicy(L3/L4 → L7)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day9-hubble/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Hubble 可觀測性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 綜合:四套工具的分工
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        原理與架構
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="原理與架構">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pod-gang" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        怎麼把一組 pod 宣告成 gang
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gang" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        組出一個 gang 的三種寫法
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gang_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gang 不是一個開關,是四件事一起運作
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        今天要走的路
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-gang-gang" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1:送一個湊不齊的 gang——先確認它真的是 gang
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2:證明「零佔用」不是記帳好看,是卡真的空著
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3:湊得齊的時候,整組是同一秒上去的
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-gang" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4:拆散 gang——手動殺掉一個成員
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-gang" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5:拆散 gang——搶占者只要一張卡
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-default-kube-scheduler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6:同樣的需求交給 default kube-scheduler
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-azure-spot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 7:讓 Azure 真的收走一台 spot 節點
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 8:收尾
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收 checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷記錄
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="地雷記錄">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 1:裝了 KAI、Job 寫了 parallelism: 3,卻完全沒有 gang scheduling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 2:被驅逐的 gang,Job 卻回報「成功完成」
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 3:搶占 1 張卡,賠掉整個 gang——受害者粒度是「整組」不是「單顆」
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 4:spot 節點被回收後,node pool 不會自癒——容量默默永久減少
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 5:兩個操作者動同一個 node pool——後寫入者靜默勝出,而 activity log 會晚幾分鐘才說實話
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的東西
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="day-2-gang-scheduling-pod-spot">Day 2: Gang Scheduling——一組 pod 的整組排程、搶占與 spot 回收<a class="headerlink" href="#day-2-gang-scheduling-pod-spot" title="Permanent link">&para;</a></h1>
+<p><img align="right" alt="KAI Scheduler 官方標誌" src="../../assets/logos/kai-scheduler-icon-color.svg" width="100" /></p>
+<blockquote>
+<p>Day 1 收尾留了一道題:佇列和搶占處理的都是單顆 pod,但訓練工作不是單顆 pod——它是一組,缺一個都開不了工。今天就把這道題放上叢集:一份需要 3 顆 pod 的訓練工作,丟進只有 2 張卡的環境,先用預設排程器跑一次、看問題出在哪,再用 KAI 跑一次、比較差在哪裡。照著做的路上有幾顆雷,最陰的一顆長這樣:畫面上一切正常、沒有任何錯誤,但你以為有的保護,其實從頭到尾都沒生效。</p>
+</blockquote>
+<div class="admonition abstract">
+<p class="admonition-title">你在課程的哪裡</p>
+<ul>
+<li><strong>Day 1</strong>:KAI 已就緒,佇列、quota 與兩套優先權的心智模型建好了。</li>
+<li><strong>今天</strong>:gang scheduling 的正反兩面。驗收:三缺一時全 Pending 且實體卡零佔用、搶占時整組同進退,外加一場親手觸發的 spot 回收時間軸。</li>
+<li><strong>Day 3</strong>:離開排程層,把一張卡真的切開。</li>
+</ul>
+</div>
+<h2 id="_1">原理與架構<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<p>Day 1 的 queue 與 priority 回答的是「兩個工作搶同一張卡,誰先拿到」。今天換一個維度:<strong>一個工作需要 N 張卡才有意義,拿到 N-1 張等於零</strong>。</p>
+<p>分散式訓練的每一步都要在所有 worker 之間做一次 all-reduce,少一個 worker,集合通訊就湊不齊,整個 job 一步都跑不動。把這種工作交給「一顆一顆各排各的」排程器,結果是<strong>半啟動死鎖</strong>:前幾顆搶到卡、跑起來、卡在等待同伴,最後一顆永遠等不到資源。此時那幾張卡處於最糟的狀態——被佔著、有 pod 在上面、但對誰都沒有產出,包括佔著它的人。</p>
+<p>這個問題的解法叫 <strong>gang scheduling</strong>——gang 字面上就是「一夥人」,意思是把 N 顆 pod 當一夥看待:湊得齊就一起上,湊不齊就全部退出、把卡還給別人,不留任何一顆單獨佔資源。<strong>資源利用率反而更高</strong>,因為那幾張卡至少能被別的工作用掉。</p>
+<h3 id="pod-gang">怎麼把一組 pod 宣告成 gang<a class="headerlink" href="#pod-gang" title="Permanent link">&para;</a></h3>
+<p>KAI 的載體是 <code>PodGroup</code>,關鍵欄位是 <code>minMember</code>——低於這個數字就不排,也不留:</p>
+<pre class="mermaid"><code>flowchart TB
+    JOB["batch/v1 Job(parallelism 3)&lt;br&gt;annotations:&lt;br&gt;kai.scheduler/batch-min-member: 3"] --&gt; PG["PodGroup(v2alpha2)&lt;br&gt;minMember: 3&lt;br&gt;queue: batch-eval"]
+    PG --&gt; SCHED["kai-scheduler&lt;br&gt;折成一筆請求:3 GPU"]
+    SCHED --&gt; OK["湊得齊:整組同一秒 Bound"]
+    SCHED --&gt; NO["湊不齊:全部 Pending&lt;br&gt;零 GPU 佔用"]</code></pre>
+<p>送 workload 之前先確認欄位——版本自己會說話,不必靠記憶:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>explain<span class="w"> </span>podgroup.spec<span class="w"> </span>--recursive
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="go">GROUP:      scheduling.run.ai</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="go">KIND:       PodGroup</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="go">VERSION:    v2alpha2</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="go">FIELD: spec &lt;Object&gt;</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="go">FIELDS:</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="go">  markUnschedulable &lt;boolean&gt;</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="go">  minMember &lt;integer&gt;</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="go">  minSubGroup   &lt;integer&gt;</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="go">  preemptibility    &lt;string&gt;</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="go">  enum: preemptible, non-preemptible</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="go">  priorityClassName &lt;string&gt;</span>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="go">  queue &lt;string&gt;</span>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="go">  schedulingBackoff &lt;integer&gt;</span>
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="go">  subGroups &lt;[]Object&gt;</span>
+</span></code></pre></div>
+<p>PodGroup 是 <strong><code>v2alpha2</code></strong>,而 Day 1 建立佇列時用的 Queue 是 <strong><code>v2</code></strong>——同一個 API group <code>scheduling.run.ai</code> 底下,兩個 kind 的版本並不同步。Day 1 步驟 3 清點元件時就看過 CRD 分屬 <code>scheduling.run.ai</code> 與 <code>kai.scheduler</code> 兩個 group;這裡再多一層:連同一個 group 內的版本也要個別確認。</p>
+<h3 id="gang">組出一個 gang 的三種寫法<a class="headerlink" href="#gang" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>方式</th>
+<th>怎麼寫</th>
+<th>適用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>隱式(預設)</td>
+<td>送 <code>batch/v1</code> Job,由 <code>pod-grouper</code> 自動產生 PodGroup</td>
+<td>最常見——但<strong>預設不給原子性</strong>,見<a href="#mine-1">地雷 1</a></td>
+</tr>
+<tr>
+<td><code>batch-min-member</code> 標註</td>
+<td>Job 資源上加 <code>kai.scheduler/batch-min-member: "N"</code></td>
+<td>要「至少 N 個一起跑」,本章主線</td>
+</tr>
+<tr>
+<td>外部 PodGroup</td>
+<td>自建 PodGroup + pod 標註 <code>pod-group-name</code>、<code>kai.scheduler/skip-podgrouper: "true"</code></td>
+<td>多個 workload 併入同一組,或由外部 controller 管生命週期</td>
+</tr>
+</tbody>
+</table>
+<h3 id="gang_1">gang 不是一個開關,是四件事一起運作<a class="headerlink" href="#gang_1" title="Permanent link">&para;</a></h3>
+<p>排程器的 action 順序決定了後面每一則事件該怎麼判讀:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kai-scheduler<span class="w"> </span>get<span class="w"> </span>cm<span class="w"> </span>kai-scheduler-default<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.data.config\.yaml}&#39;</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="go">actions: allocate, consolidation, reclaim, preempt, stalegangeviction</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="go">...</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="go">scenarioSearchBudgets:</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="go">  maxGeneratorSearchDuration:</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="go">    MultiNodeGang: 2m0s</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="go">    NodeLocalGreedy: 30s</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="go">tiers:</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="go">- plugins:</span>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="go">  ...</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="go">  - name: sg-nodelocalgreedy</span>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="go">  - name: sg-multinodegang</span>
+</span></code></pre></div>
+<p>湊齊整組的邏輯由兩個 <strong>scenario generator</strong> plugin 撐起來:<code>sg-nodelocalgreedy</code>(先試單節點塞得下的貪婪解,預算 30 秒)與 <code>sg-multinodegang</code>(跨節點湊齊,預算 2 分鐘)。而 <code>stalegangeviction</code> 排在第五個 action——「組破了要收掉」是每輪排程週期的常規檢查,不是例外處理路徑。</p>
+<p>那「破了多久才收」是多久?寬限期的預設值寫在原始碼(<code>cmd/scheduler/app/options/options.go</code>):</p>
+<div class="language-go highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nx">defaultStalenessGracePeriod</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">60</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span>
+</span></code></pre></div>
+<p>本叢集的 ConfigMap 沒有覆寫 <code>globalDefaultStalenessGracePeriod</code>,吃的就是這 60 秒。這給了後面一個<strong>可證偽的預測</strong>:手動殺掉一個成員之後,若 KAI 真的做整組收斂,動作應該在約 60 秒後發生,而不是立刻。負值代表永不驅逐——那是「寧可半殘也不要重跑」的生產選項。</p>
+<h3 id="_2">今天要走的路<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h3>
+<p>在同一組 2×T4 的叢集上跑四場演練:<strong>湊不齊</strong>(3 個成員搶 2 張卡)、<strong>湊得齊</strong>(2 個成員剛好吃滿)、<strong>拆散 gang</strong>(手動殺一顆、以及被搶占)、<strong>對照組</strong>(同樣的需求交給 default kube-scheduler)。最後用 <code>az vmss simulate-eviction</code> 模擬一次 Azure spot 回收,看真實的節點消失如何觸發同一條收斂路徑。</p>
+<p>環境沿用 Day 1:AKS <code>&lt;cluster&gt;</code>(K8s v1.35.6)、KAI Scheduler v0.16.8、<code>gpuspot</code> pool 兩台 <code>Standard_NC4as_T4_v3</code>(各 1 張 T4)、佇列 <code>cnp-root</code> 底下 <code>inference-prod</code>(priority 200)與 <code>batch-eval</code>(priority 100),workload 全部丟在 <code>kai-lab</code> namespace。</p>
+<h2 id="_3">步驟<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<h3 id="1-gang-gang">步驟 1:送一個湊不齊的 gang——先確認它真的是 gang<a class="headerlink" href="#1-gang-gang" title="Permanent link">&para;</a></h3>
+<p>最直覺的寫法是一個 <code>batch/v1</code> Job,<code>parallelism: 3</code>、<code>schedulerName: kai-scheduler</code>、掛好佇列標籤,不加任何額外標註,期待 <code>pod-grouper</code> 依 <code>parallelism</code> 產生 <code>minMember: 3</code>:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span><span class="m">02</span>-gang3-job.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="s">apiVersion: batch/v1</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="s">kind: Job</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="s">metadata:</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="s">  name: gang3</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="s">  namespace: kai-lab</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="s">spec:</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="s">  parallelism: 3</span>
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="s">  completions: 3</span>
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="s">  backoffLimit: 0</span>
+</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="s">  template:</span>
+</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="s">    metadata:</span>
+</span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="s">      labels:</span>
+</span><span id="__span-3-14"><a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="s">        kai.scheduler/queue: batch-eval</span>
+</span><span id="__span-3-15"><a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="s">        priorityClassName: train</span>
+</span><span id="__span-3-16"><a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="s">    spec:</span>
+</span><span id="__span-3-17"><a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="s">      schedulerName: kai-scheduler</span>
+</span><span id="__span-3-18"><a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a><span class="s">      restartPolicy: Never</span>
+</span><span id="__span-3-19"><a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a><span class="s">      tolerations:</span>
+</span><span id="__span-3-20"><a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a><span class="s">        - key: kubernetes.azure.com/scalesetpriority</span>
+</span><span id="__span-3-21"><a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a><span class="s">          operator: Equal</span>
+</span><span id="__span-3-22"><a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a><span class="s">          value: spot</span>
+</span><span id="__span-3-23"><a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a><span class="s">          effect: NoSchedule</span>
+</span><span id="__span-3-24"><a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a><span class="s">      containers:</span>
+</span><span id="__span-3-25"><a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a><span class="s">        - name: main</span>
+</span><span id="__span-3-26"><a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a><span class="s">          image: nvcr.io/nvidia/cuda:12.4.1-base-ubuntu22.04</span>
+</span><span id="__span-3-27"><a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a><span class="s">          command: [&quot;bash&quot;, &quot;-c&quot;]</span>
+</span><span id="__span-3-28"><a id="__codelineno-3-28" name="__codelineno-3-28" href="#__codelineno-3-28"></a><span class="s">          args: [&quot;trap &#39;exit 0&#39; TERM; nvidia-smi -L; sleep infinity &amp; wait&quot;]</span>
+</span><span id="__span-3-29"><a id="__codelineno-3-29" name="__codelineno-3-29" href="#__codelineno-3-29"></a><span class="s">          resources:</span>
+</span><span id="__span-3-30"><a id="__codelineno-3-30" name="__codelineno-3-30" href="#__codelineno-3-30"></a><span class="s">            limits:</span>
+</span><span id="__span-3-31"><a id="__codelineno-3-31" name="__codelineno-3-31" href="#__codelineno-3-31"></a><span class="s">              nvidia.com/gpu: &quot;1&quot;</span>
+</span><span id="__span-3-32"><a id="__codelineno-3-32" name="__codelineno-3-32" href="#__codelineno-3-32"></a><span class="s">EOF</span>
+</span></code></pre></div>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span><span class="m">02</span>-gang3-job.yaml
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kai-lab<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-o<span class="w"> </span>wide
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="go">NAME          READY   STATUS    RESTARTS   AGE   NODE</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="go">gang3-5mvdw   1/1     Running   0          25s   aks-gpuspot-21249019-vmss000006</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="go">gang3-b5mgg   1/1     Running   0          25s   aks-gpuspot-21249019-vmss000007</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="go">gang3-fzwls   0/1     Pending   0          25s   &lt;none&gt;</span>
+</span></code></pre></div>
+<p>2 個跑起來、1 個 Pending——這正是 gang scheduling 要消滅的半啟動死鎖,而且它是<strong>在裝了 KAI 的叢集上</strong>發生的。原因不在資源,在 PodGroup:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kai-lab<span class="w"> </span>get<span class="w"> </span>podgroups<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">    </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;.items[]|{name:.metadata.name,minMember:.spec.minMember,status:.status}&#39;</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="go">{&quot;name&quot;:&quot;pg-gang3-d1c60636-...&quot;,&quot;minMember&quot;:1,</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="go"> &quot;status&quot;:{&quot;resourcesStatus&quot;:{&quot;allocated&quot;:{&quot;nvidia.com/gpu&quot;:&quot;2&quot;},&quot;requested&quot;:{&quot;nvidia.com/gpu&quot;:&quot;3&quot;}}}}</span>
+</span></code></pre></div>
+<p><code>minMember: 1</code>。完整的診斷與修法見<a href="#mine-1">地雷 1</a>;結論是 gang 的開關要明寫在 Job 上——把上面那份複製成 <code>02b-gang3-minmember-job.yaml</code>,在 <strong>Job 自己的 <code>metadata</code></strong>(不是 pod template 的那個)補上標註:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">metadata</span><span class="p">:</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gang3</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kai-lab</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">  </span><span class="nt">annotations</span><span class="p">:</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">    </span><span class="nt">kai.scheduler/batch-min-member</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;3&quot;</span>
+</span></code></pre></div>
+<p>只差這兩行,行為完全換一個樣子:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kai-lab<span class="w"> </span>delete<span class="w"> </span>job<span class="w"> </span>gang3
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="gp">$ </span>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>02b-gang3-minmember-job.yaml
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kai-lab<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-o<span class="w"> </span>wide
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="go">NAME          READY   STATUS    RESTARTS   AGE   NODE</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="go">gang3-7z29z   0/1     Pending   0          30s   &lt;none&gt;</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="go">gang3-8wtjf   0/1     Pending   0          30s   &lt;none&gt;</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="go">gang3-8zjvx   0/1     Pending   0          30s   &lt;none&gt;</span>
+</span></code></pre></div>
+<p>三顆全部 Pending。PodGroup 的狀態把理由講得很完整:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kai-lab<span class="w"> </span>get<span class="w"> </span>podgroups<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;.items[].status&#39;</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="go">{&quot;resourcesStatus&quot;:{&quot;requested&quot;:{&quot;nvidia.com/gpu&quot;:&quot;3&quot;}},</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="go"> &quot;schedulingConditions&quot;:[{</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="go">   &quot;reason&quot;:&quot;Unschedulable&quot;,&quot;type&quot;:&quot;UnschedulableOnNodePool&quot;,&quot;status&quot;:&quot;True&quot;,</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="go">   &quot;message&quot;:&quot;PodSchedulingErrors: Resources were found for 2 pods while 3 are required for gang scheduling. Additional pods cannot be scheduled due to: no nodes with enough resources were found: 3 node(s) didn&#39;t have enough resources: GPUs..&quot;}]}</span>
+</span></code></pre></div>
+<p>兩個訊號要記住。第一,訊息直接點名 gang——「Resources were found for 2 pods while 3 are required for gang scheduling」:KAI 知道自己找得到 2 張卡,就是因為湊不到 3 才一顆都不放。第二,<code>resourcesStatus</code> 裡<strong>只有 <code>requested: 3</code>,沒有 <code>allocated</code> 欄位</strong>;對照剛才沒有 gang 時的 <code>allocated: 2</code>,這一欄的有無就是「有沒有佔卡」最快的訊號。</p>
+<h3 id="2">步驟 2:證明「零佔用」不是記帳好看,是卡真的空著<a class="headerlink" href="#2" title="Permanent link">&para;</a></h3>
+<p>PodGroup 沒有 <code>allocated</code> 只是 KAI 自己的帳。要證明<strong>實體 GPU 沒被鎖住</strong>,就在 gang 卡住期間送一顆同佇列、同優先權、只要 1 張卡的無關 pod 進去插隊:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span><span class="m">03</span>-prober-pod.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="s">kind: Pod</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="s">metadata:</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="s">  name: gang-prober</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="s">  namespace: kai-lab</span>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="s">  labels:</span>
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="s">    kai.scheduler/queue: batch-eval</span>
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="s">    priorityClassName: train</span>
+</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="s">spec:</span>
+</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="s">  schedulerName: kai-scheduler</span>
+</span><span id="__span-9-12"><a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="s">  restartPolicy: Never</span>
+</span><span id="__span-9-13"><a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="s">  tolerations:</span>
+</span><span id="__span-9-14"><a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="s">    - key: kubernetes.azure.com/scalesetpriority</span>
+</span><span id="__span-9-15"><a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="s">      operator: Equal</span>
+</span><span id="__span-9-16"><a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a><span class="s">      value: spot</span>
+</span><span id="__span-9-17"><a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a><span class="s">      effect: NoSchedule</span>
+</span><span id="__span-9-18"><a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a><span class="s">  containers:</span>
+</span><span id="__span-9-19"><a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a><span class="s">    - name: main</span>
+</span><span id="__span-9-20"><a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a><span class="s">      image: nvcr.io/nvidia/cuda:12.4.1-base-ubuntu22.04</span>
+</span><span id="__span-9-21"><a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a><span class="s">      command: [&quot;bash&quot;, &quot;-c&quot;]</span>
+</span><span id="__span-9-22"><a id="__codelineno-9-22" name="__codelineno-9-22" href="#__codelineno-9-22"></a><span class="s">      args: [&quot;trap &#39;exit 0&#39; TERM; nvidia-smi -L; sleep infinity &amp; wait&quot;]</span>
+</span><span id="__span-9-23"><a id="__codelineno-9-23" name="__codelineno-9-23" href="#__codelineno-9-23"></a><span class="s">      resources:</span>
+</span><span id="__span-9-24"><a id="__codelineno-9-24" name="__codelineno-9-24" href="#__codelineno-9-24"></a><span class="s">        limits:</span>
+</span><span id="__span-9-25"><a id="__codelineno-9-25" name="__codelineno-9-25" href="#__codelineno-9-25"></a><span class="s">          nvidia.com/gpu: &quot;1&quot;</span>
+</span><span id="__span-9-26"><a id="__codelineno-9-26" name="__codelineno-9-26" href="#__codelineno-9-26"></a><span class="s">EOF</span>
+</span></code></pre></div>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span><span class="m">03</span>-prober-pod.yaml
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kai-lab<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-o<span class="w"> </span>wide
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="go">NAME          READY   STATUS    RESTARTS   AGE   NODE</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="go">gang-prober   1/1     Running   0          26s   aks-gpuspot-21249019-vmss000006</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="go">gang3-7z29z   0/1     Pending   0          66s   &lt;none&gt;</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="go">gang3-8wtjf   0/1     Pending   0          66s   &lt;none&gt;</span>
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="go">gang3-8zjvx   0/1     Pending   0          66s   &lt;none&gt;</span>
+</span></code></pre></div>
+<p>再從叢集角度清點誰真的握著 GPU:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-A<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="err">&#39;</span>.items<span class="o">[]</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="go">    | select(.spec.nodeName!=null)</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="go">    | select([.spec.containers[].resources.limits[&quot;nvidia.com/gpu&quot;]//empty]|length&gt;0)</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="go">    | &quot;\(.metadata.namespace)/\(.metadata.name)  node=\(.spec.nodeName)  phase=\(.status.phase)&quot;&#39;</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="go">kai-lab/gang-prober  node=aks-gpuspot-21249019-vmss000006  phase=Running</span>
+</span></code></pre></div>
+<p>整個叢集只有探針 pod 一個 GPU 持有者。三個 gang 成員等了 66 秒,一張卡都沒碰——這就是 gang 的價值主張兌現的樣子:與其讓 2 個成員佔著卡空轉等第 3 個,不如全部退出讓路。</p>
+<p>排程器日誌則說明了它把這一組當成什麼:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kai-scheduler<span class="w"> </span>logs<span class="w"> </span>deploy/kai-scheduler-default<span class="w"> </span>--since<span class="o">=</span>110s<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-iE<span class="w"> </span><span class="s2">&quot;gang|pg-gang3&quot;</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="go">allocate/allocate.go:84       Attempting to allocate job: &lt;kai-lab/pg-gang3-d62ca3dd-...&gt; of queue &lt;Batch Eval&gt;, resources: &lt;[0 0 3 3 0 0 0]&gt;</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="go">allocate/allocate.go:89       Could not allocate resources for job: &lt;kai-lab/pg-gang3-d62ca3dd-...&gt; of queue &lt;batch-eval&gt;</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="go">consolidation/consolidation.go:98   Attempting to consolidate running jobs in order to make room for job: &lt;kai-lab/pg-gang3-d62ca3dd-...&gt;</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="go">consolidation/consolidation.go:102  Can&#39;t consolidate for job: &lt;kai-lab/pg-gang3-d62ca3dd-...&gt;, not enough allocatable GPUs in the cluster</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="go">preempt/preempt.go:117        Attempting to preempt for job: &lt;kai-lab/pg-gang3-d62ca3dd-...&gt;, priority: &lt;50&gt;, queue: &lt;batch-eval&gt;, resources: &lt;[0 0 3 3 0 0 0]&gt;</span>
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="go">preempt/preempt.go:105        Didn&#39;t find a preemption strategy for job &lt;kai-lab/pg-gang3-d62ca3dd-...&gt;</span>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="go">stalegangeviction/stalegangeviction.go:30  Enter StaleGangEviction ...</span>
+</span></code></pre></div>
+<p>請求量印成 <code>resources: &lt;[0 0 3 3 0 0 0]&gt;</code>——<strong>3 是整組的總和,不是單顆 pod 的 1</strong>。從 allocate 到 preempt,排程器全程用「一個要 3 GPU 的 job」在思考,這就是 gang 的實作本質:把 N 顆 pod 摺疊成一筆不可分割的資源請求。另外每一輪都完整跑完五個 action,即使明知湊不齊也每秒重試一次。</p>
+<h3 id="3">步驟 3:湊得齊的時候,整組是同一秒上去的<a class="headerlink" href="#3" title="Permanent link">&para;</a></h3>
+<p>把 gang 縮成 2 個成員(同樣帶 <code>kai.scheduler/batch-min-member: "2"</code>),剛好等於叢集的兩張 T4:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span><span class="m">04</span>-gang2-job.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="s">apiVersion: batch/v1</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="s">kind: Job</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="s">metadata:</span>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="s">  name: gang2</span>
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="s">  namespace: kai-lab</span>
+</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="s">  annotations:</span>
+</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="s">    kai.scheduler/batch-min-member: &quot;2&quot;</span>
+</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="s">spec:</span>
+</span><span id="__span-13-10"><a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="s">  parallelism: 2</span>
+</span><span id="__span-13-11"><a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="s">  completions: 2</span>
+</span><span id="__span-13-12"><a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="s">  backoffLimit: 0</span>
+</span><span id="__span-13-13"><a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="s">  template:</span>
+</span><span id="__span-13-14"><a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="s">    metadata:</span>
+</span><span id="__span-13-15"><a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="s">      labels:</span>
+</span><span id="__span-13-16"><a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a><span class="s">        kai.scheduler/queue: batch-eval</span>
+</span><span id="__span-13-17"><a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a><span class="s">        priorityClassName: train</span>
+</span><span id="__span-13-18"><a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a><span class="s">    spec:</span>
+</span><span id="__span-13-19"><a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a><span class="s">      schedulerName: kai-scheduler</span>
+</span><span id="__span-13-20"><a id="__codelineno-13-20" name="__codelineno-13-20" href="#__codelineno-13-20"></a><span class="s">      restartPolicy: Never</span>
+</span><span id="__span-13-21"><a id="__codelineno-13-21" name="__codelineno-13-21" href="#__codelineno-13-21"></a><span class="s">      tolerations:</span>
+</span><span id="__span-13-22"><a id="__codelineno-13-22" name="__codelineno-13-22" href="#__codelineno-13-22"></a><span class="s">        - key: kubernetes.azure.com/scalesetpriority</span>
+</span><span id="__span-13-23"><a id="__codelineno-13-23" name="__codelineno-13-23" href="#__codelineno-13-23"></a><span class="s">          operator: Equal</span>
+</span><span id="__span-13-24"><a id="__codelineno-13-24" name="__codelineno-13-24" href="#__codelineno-13-24"></a><span class="s">          value: spot</span>
+</span><span id="__span-13-25"><a id="__codelineno-13-25" name="__codelineno-13-25" href="#__codelineno-13-25"></a><span class="s">          effect: NoSchedule</span>
+</span><span id="__span-13-26"><a id="__codelineno-13-26" name="__codelineno-13-26" href="#__codelineno-13-26"></a><span class="s">      containers:</span>
+</span><span id="__span-13-27"><a id="__codelineno-13-27" name="__codelineno-13-27" href="#__codelineno-13-27"></a><span class="s">        - name: main</span>
+</span><span id="__span-13-28"><a id="__codelineno-13-28" name="__codelineno-13-28" href="#__codelineno-13-28"></a><span class="s">          image: nvcr.io/nvidia/cuda:12.4.1-base-ubuntu22.04</span>
+</span><span id="__span-13-29"><a id="__codelineno-13-29" name="__codelineno-13-29" href="#__codelineno-13-29"></a><span class="s">          command: [&quot;bash&quot;, &quot;-c&quot;]</span>
+</span><span id="__span-13-30"><a id="__codelineno-13-30" name="__codelineno-13-30" href="#__codelineno-13-30"></a><span class="s">          args: [&quot;trap &#39;exit 0&#39; TERM; nvidia-smi -L; sleep infinity &amp; wait&quot;]</span>
+</span><span id="__span-13-31"><a id="__codelineno-13-31" name="__codelineno-13-31" href="#__codelineno-13-31"></a><span class="s">          resources:</span>
+</span><span id="__span-13-32"><a id="__codelineno-13-32" name="__codelineno-13-32" href="#__codelineno-13-32"></a><span class="s">            limits:</span>
+</span><span id="__span-13-33"><a id="__codelineno-13-33" name="__codelineno-13-33" href="#__codelineno-13-33"></a><span class="s">              nvidia.com/gpu: &quot;1&quot;</span>
+</span><span id="__span-13-34"><a id="__codelineno-13-34" name="__codelineno-13-34" href="#__codelineno-13-34"></a><span class="s">EOF</span>
+</span></code></pre></div>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kai-lab<span class="w"> </span>delete<span class="w"> </span>job<span class="w"> </span>gang3
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="gp">$ </span>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span><span class="m">04</span>-gang2-job.yaml
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kai-lab<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-o<span class="w"> </span>wide
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="go">NAME          READY   STATUS    NODE</span>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="go">gang2-8n57n   1/1     Running   aks-gpuspot-21249019-vmss000006</span>
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="go">gang2-d4psb   1/1     Running   aks-gpuspot-21249019-vmss000007</span>
+</span></code></pre></div>
+<p>事件的秒數比 pod 列表更有資訊量。把 events 依 <code>lastTimestamp</code> 排序、取時間/物件/原因/來源四欄(篩法同 Day 1 用過的 <code>-o custom-columns</code> 寫法;事件時間為 UTC,<code>08:xx</code> 對應台灣時間 <code>16:xx</code>):</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="go">08:04:25Z  gang2         SuccessfulCreate  job-controller</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="go">08:04:25Z  gang2         SuccessfulCreate  job-controller</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="go">08:04:26Z  gang2-d4psb   Scheduled         kai-scheduler</span>
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="go">08:04:26Z  gang2-8n57n   Scheduled         kai-scheduler</span>
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="go">08:04:26Z  gang2-d4psb   Bound             binder</span>
+</span><span id="__span-15-6"><a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="go">08:04:26Z  gang2-8n57n   Bound             binder</span>
+</span><span id="__span-15-7"><a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="go">08:04:27Z  gang2-d4psb   Started           kubelet</span>
+</span><span id="__span-15-8"><a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="go">08:04:27Z  gang2-8n57n   Started           kubelet</span>
+</span></code></pre></div>
+<p>兩顆的 <code>Scheduled</code> 與 <code>Bound</code> 落在<strong>同一秒</strong>,不是一前一後。gang 滿足時的排程是一次爆發:KAI 先在記憶體裡把整組的放置方案算完,確定兩個位置都有著落,才一起送出綁定。所以 PodGroup 的 <code>allocated</code> 是從「不存在」直接跳到 <code>2</code>,中間沒有 <code>1</code> 這個狀態。</p>
+<h3 id="4-gang">步驟 4:拆散 gang——手動殺掉一個成員<a class="headerlink" href="#4-gang" title="Permanent link">&para;</a></h3>
+<p>兩顆正在跑,用 <code>--force --grace-period=0</code> 硬砍其中一顆(模擬節點失聯或 pod 意外死亡),看倖存者的命運:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="gp">$ </span><span class="nv">VICTIM</span><span class="o">=</span><span class="k">$(</span>kubectl<span class="w"> </span>-n<span class="w"> </span>kai-lab<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>--no-headers<span class="w"> </span>-o<span class="w"> </span>custom-columns<span class="o">=</span><span class="s1">&#39;:.metadata.name&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-1<span class="k">)</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kai-lab<span class="w"> </span>delete<span class="w"> </span>pod<span class="w"> </span><span class="nv">$VICTIM</span><span class="w"> </span>--force<span class="w"> </span>--grace-period<span class="o">=</span><span class="m">0</span>
+</span></code></pre></div>
+<p>每 10 秒取樣一次 pod 與 PodGroup:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>--- t+10s 16:05:42 ---  gang2-d4psb 1/1 Running   {&quot;mm&quot;:2,&quot;alloc&quot;:{&quot;nvidia.com/gpu&quot;:&quot;1&quot;},&quot;req&quot;:{&quot;nvidia.com/gpu&quot;:&quot;1&quot;}}
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>--- t+30s 16:06:04 ---  gang2-d4psb 1/1 Running   {&quot;mm&quot;:2,&quot;alloc&quot;:{&quot;nvidia.com/gpu&quot;:&quot;1&quot;},&quot;req&quot;:{&quot;nvidia.com/gpu&quot;:&quot;1&quot;}}
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>--- t+50s 16:06:25 ---  gang2-d4psb 1/1 Running   {&quot;mm&quot;:2,&quot;alloc&quot;:{&quot;nvidia.com/gpu&quot;:&quot;1&quot;},&quot;req&quot;:{&quot;nvidia.com/gpu&quot;:&quot;1&quot;}}
+</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>--- t+60s 16:06:35 ---  No resources found        {&quot;mm&quot;:2,&quot;alloc&quot;:null,&quot;req&quot;:null}
+</span></code></pre></div>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>08:05:32Z  gang2-8n57n   Killing    kubelet         Stopping container main
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>08:05:57Z  pg-gang2-...  StaleJob   kai-scheduler   Job is stale. 1 pods are active, minMember is 2
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>08:06:32Z  gang2-d4psb   Killing    kubelet         Stopping container main
+</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>08:06:33Z  gang2         Completed  job-controller  Job completed
+</span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>
+</span><span id="__span-18-6"><a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>2026-08-03T08:06:32.680Z  INFO  stalegangeviction/stalegangeviction.go:80
+</span><span id="__span-18-7"><a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a>  Evicted task: &lt;kai-lab/gang2-d4psb&gt; due its job being a stale job, its status: &lt;Releasing&gt;
+</span></code></pre></div>
+<p>原始碼推出的 60 秒預測完全命中:成員在 08:05:32 消失,倖存者在 08:06:32 被驅逐,剛好 60.0 秒。中間 KAI 先發 <code>StaleJob</code> 事件公告「1 pods are active, minMember is 2」,等滿寬限期才動手。這 60 秒是刻意留給短暫抖動(pod 重啟、節點瞬斷)的自癒空間——成員在 60 秒內回來,整組就不會被收掉。</p>
+<p>KAI 的立場是<strong>不容忍部分存活</strong>:組破了就整組回收,把卡全部還出來。對分散式訓練這是正確的,少一個 worker 的 job 本來就跑不完,留著只是佔卡空轉。不過最後一行 <code>Job completed</code> 是個陷阱——被驅逐的 gang 在 Job controller 眼中竟然是圓滿完成,詳見<a href="#mine-2">地雷 2</a>。</p>
+<h3 id="5-gang">步驟 5:拆散 gang——搶占者只要一張卡<a class="headerlink" href="#5-gang" title="Permanent link">&para;</a></h3>
+<p>重新拉起 gang2 佔滿兩張卡,然後送一顆同佇列(<code>batch-eval</code>)、<code>inference</code>(125,不可被搶占)、<strong>只要 1 張卡</strong>的搶占者。搶占者就是探針 pod 換個名字、換個優先權:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>sed<span class="w"> </span>-e<span class="w"> </span><span class="s1">&#39;s/gang-prober/gang-preemptor/&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="w">    </span>-e<span class="w"> </span><span class="s1">&#39;s/priorityClassName: train/priorityClassName: inference/&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="w">    </span><span class="m">03</span>-prober-pod.yaml<span class="w"> </span>&gt;<span class="w"> </span><span class="m">05</span>-gang-preemptor-inference.yaml
+</span></code></pre></div>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span><span class="m">04</span>-gang2-job.yaml
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="gp">$ </span>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span><span class="m">05</span>-gang-preemptor-inference.yaml
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kai-lab<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-o<span class="w"> </span>wide
+</span><span id="__span-20-4"><a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="go">NAME             READY   STATUS    NODE</span>
+</span><span id="__span-20-5"><a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="go">gang-preemptor   1/1     Running   aks-gpuspot-21249019-vmss000006</span>
+</span></code></pre></div>
+<p>10 秒後整個 gang 消失了,只剩搶占者:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>08:09:05Z  pg-gang2-5a370b1d-...  Evict  kai-scheduler
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>  Pod kai-lab/gang2-x9vkj was preempted by higher priority workload kai-lab/pg-gang-preemptor-c746b6fc-...
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>08:09:05Z  pg-gang2-5a370b1d-...  Evict  kai-scheduler
+</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>  Pod kai-lab/gang2-7bpkp was preempted by higher priority workload kai-lab/pg-gang-preemptor-c746b6fc-...
+</span><span id="__span-21-5"><a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a>08:09:05Z  gang-preemptor  Pipelined  kai-scheduler
+</span><span id="__span-21-6"><a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>08:09:06Z  gang-preemptor  Bound      binder
+</span></code></pre></div>
+<p>兩則 <code>Evict</code> 在<strong>同一秒</strong>發出,訊息都是 <code>was preempted by higher priority workload</code>——這是 preempt action 幹的,不是 StaleGangEviction(若是後者要等 60 秒,訊息也會是 stale job)。也就是說 KAI 挑受害者時,<strong>直接把整個 PodGroup 當成一個不可分割的受害單位</strong>,而不是先殺一顆、再讓它因為缺員被 stale 收掉。搶 1 張卡賠掉整組的代價與規避方式,見<a href="#mine-3">地雷 3</a>。</p>
+<h3 id="6-default-kube-scheduler">步驟 6:同樣的需求交給 default kube-scheduler<a class="headerlink" href="#6-default-kube-scheduler" title="Permanent link">&para;</a></h3>
+<p>「為什麼不用預設排程器就好」這個問題,值得用完全相同的資源需求跑一次對照。拿掉 <code>schedulerName</code>、拿掉佇列標籤,其餘與步驟 1 相同:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span><span class="m">06</span>-default-sched-3pods.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="s">apiVersion: batch/v1</span>
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="s">kind: Job</span>
+</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="s">metadata:</span>
+</span><span id="__span-22-5"><a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="s">  name: nogang3</span>
+</span><span id="__span-22-6"><a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="s">  namespace: kai-lab</span>
+</span><span id="__span-22-7"><a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="s">spec:</span>
+</span><span id="__span-22-8"><a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="s">  parallelism: 3</span>
+</span><span id="__span-22-9"><a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a><span class="s">  completions: 3</span>
+</span><span id="__span-22-10"><a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a><span class="s">  backoffLimit: 0</span>
+</span><span id="__span-22-11"><a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a><span class="s">  template:</span>
+</span><span id="__span-22-12"><a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a><span class="s">    spec:</span>
+</span><span id="__span-22-13"><a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a><span class="s">      restartPolicy: Never</span>
+</span><span id="__span-22-14"><a id="__codelineno-22-14" name="__codelineno-22-14" href="#__codelineno-22-14"></a><span class="s">      tolerations:</span>
+</span><span id="__span-22-15"><a id="__codelineno-22-15" name="__codelineno-22-15" href="#__codelineno-22-15"></a><span class="s">        - key: kubernetes.azure.com/scalesetpriority</span>
+</span><span id="__span-22-16"><a id="__codelineno-22-16" name="__codelineno-22-16" href="#__codelineno-22-16"></a><span class="s">          operator: Equal</span>
+</span><span id="__span-22-17"><a id="__codelineno-22-17" name="__codelineno-22-17" href="#__codelineno-22-17"></a><span class="s">          value: spot</span>
+</span><span id="__span-22-18"><a id="__codelineno-22-18" name="__codelineno-22-18" href="#__codelineno-22-18"></a><span class="s">          effect: NoSchedule</span>
+</span><span id="__span-22-19"><a id="__codelineno-22-19" name="__codelineno-22-19" href="#__codelineno-22-19"></a><span class="s">      containers:</span>
+</span><span id="__span-22-20"><a id="__codelineno-22-20" name="__codelineno-22-20" href="#__codelineno-22-20"></a><span class="s">        - name: main</span>
+</span><span id="__span-22-21"><a id="__codelineno-22-21" name="__codelineno-22-21" href="#__codelineno-22-21"></a><span class="s">          image: nvcr.io/nvidia/cuda:12.4.1-base-ubuntu22.04</span>
+</span><span id="__span-22-22"><a id="__codelineno-22-22" name="__codelineno-22-22" href="#__codelineno-22-22"></a><span class="s">          command: [&quot;bash&quot;, &quot;-c&quot;]</span>
+</span><span id="__span-22-23"><a id="__codelineno-22-23" name="__codelineno-22-23" href="#__codelineno-22-23"></a><span class="s">          args: [&quot;trap &#39;exit 0&#39; TERM; nvidia-smi -L; sleep infinity &amp; wait&quot;]</span>
+</span><span id="__span-22-24"><a id="__codelineno-22-24" name="__codelineno-22-24" href="#__codelineno-22-24"></a><span class="s">          resources:</span>
+</span><span id="__span-22-25"><a id="__codelineno-22-25" name="__codelineno-22-25" href="#__codelineno-22-25"></a><span class="s">            limits:</span>
+</span><span id="__span-22-26"><a id="__codelineno-22-26" name="__codelineno-22-26" href="#__codelineno-22-26"></a><span class="s">              nvidia.com/gpu: &quot;1&quot;</span>
+</span><span id="__span-22-27"><a id="__codelineno-22-27" name="__codelineno-22-27" href="#__codelineno-22-27"></a><span class="s">EOF</span>
+</span></code></pre></div>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span><span class="m">06</span>-default-sched-3pods.yaml
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kai-lab<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-o<span class="w"> </span>wide
+</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="go">nogang3-jftr6 0/1 Pending  &lt;none&gt;</span>
+</span><span id="__span-23-4"><a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="go">nogang3-pbcq4 1/1 Running  aks-gpuspot-21249019-vmss000007</span>
+</span><span id="__span-23-5"><a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="go">nogang3-zd8fs 1/1 Running  aks-gpuspot-21249019-vmss000006</span>
+</span></code></pre></div>
+<p>2 跑 + 1 卡住,兩張 T4 被佔住不放,直到有人手動介入。default-scheduler 給的理由是:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>FailedScheduling  0/3 nodes are available: 3 Insufficient nvidia.com/gpu.
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>  no new claims to deallocate, preemption: 0/3 nodes are available:
+</span><span id="__span-24-3"><a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>  1 Preemption is not helpful for scheduling, 2 No preemption victims found for incoming pod.
+</span></code></pre></div>
+<p>這段訊息<strong>只講這一顆 pod 的處境</strong>——沒有節點有足夠 GPU。它不知道還有兩顆兄弟 pod 正佔著卡,更不知道三顆是一個整體。KAI 的訊息則會把整組的缺口講出來。</p>
+<p>還有一個容易被忽略的副作用:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kai-lab<span class="w"> </span>get<span class="w"> </span>podgroups
+</span><span id="__span-25-2"><a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="go">No resources found in kai-lab namespace.</span>
+</span><span id="__span-25-3"><a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>queue<span class="w"> </span>batch-eval<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;.status&#39;</span>
+</span><span id="__span-25-4"><a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="go">{}</span>
+</span></code></pre></div>
+<p><code>pod-grouper</code> 沒有為這些 pod 建立 PodGroup,<code>batch-eval</code> 佇列的 <code>status</code> 是空物件——<strong>KAI 的配額帳本完全看不到這 2 張已被吃掉的卡</strong>。兩個排程器並存的叢集,KAI 的 queue 統計會低估實際用量,規劃 quota 時要把這塊盲區算進去。</p>
+<p>搶占的部分也跑一次對照。刻意沿用 KAI 帶進來的 <code>train</code>(50)與 <code>inference</code>(125)兩個 PriorityClass——它們本來就是標準 K8s 物件,<code>preemptionPolicy: PreemptLowerPriority</code>,default-scheduler 認得:</p>
+<p>兩顆受害者先把兩張 T4 佔滿,製造零空閒。注意優先權寫在 <code>spec.priorityClassName</code>,不是前面 KAI 那套 label:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span><span class="m">07</span>-default-sched-victim-train.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-26-2"><a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-26-3"><a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="s">kind: Pod</span>
+</span><span id="__span-26-4"><a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a><span class="s">metadata:</span>
+</span><span id="__span-26-5"><a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a><span class="s">  name: nogang-victim-1</span>
+</span><span id="__span-26-6"><a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a><span class="s">  namespace: kai-lab</span>
+</span><span id="__span-26-7"><a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a><span class="s">spec:</span>
+</span><span id="__span-26-8"><a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a><span class="s">  # kube-scheduler only reads spec.priorityClassName, never KAI&#39;s label convention</span>
+</span><span id="__span-26-9"><a id="__codelineno-26-9" name="__codelineno-26-9" href="#__codelineno-26-9"></a><span class="s">  priorityClassName: train</span>
+</span><span id="__span-26-10"><a id="__codelineno-26-10" name="__codelineno-26-10" href="#__codelineno-26-10"></a><span class="s">  restartPolicy: Never</span>
+</span><span id="__span-26-11"><a id="__codelineno-26-11" name="__codelineno-26-11" href="#__codelineno-26-11"></a><span class="s">  tolerations:</span>
+</span><span id="__span-26-12"><a id="__codelineno-26-12" name="__codelineno-26-12" href="#__codelineno-26-12"></a><span class="s">    - key: kubernetes.azure.com/scalesetpriority</span>
+</span><span id="__span-26-13"><a id="__codelineno-26-13" name="__codelineno-26-13" href="#__codelineno-26-13"></a><span class="s">      operator: Equal</span>
+</span><span id="__span-26-14"><a id="__codelineno-26-14" name="__codelineno-26-14" href="#__codelineno-26-14"></a><span class="s">      value: spot</span>
+</span><span id="__span-26-15"><a id="__codelineno-26-15" name="__codelineno-26-15" href="#__codelineno-26-15"></a><span class="s">      effect: NoSchedule</span>
+</span><span id="__span-26-16"><a id="__codelineno-26-16" name="__codelineno-26-16" href="#__codelineno-26-16"></a><span class="s">  containers:</span>
+</span><span id="__span-26-17"><a id="__codelineno-26-17" name="__codelineno-26-17" href="#__codelineno-26-17"></a><span class="s">    - name: main</span>
+</span><span id="__span-26-18"><a id="__codelineno-26-18" name="__codelineno-26-18" href="#__codelineno-26-18"></a><span class="s">      image: nvcr.io/nvidia/cuda:12.4.1-base-ubuntu22.04</span>
+</span><span id="__span-26-19"><a id="__codelineno-26-19" name="__codelineno-26-19" href="#__codelineno-26-19"></a><span class="s">      command: [&quot;bash&quot;, &quot;-c&quot;]</span>
+</span><span id="__span-26-20"><a id="__codelineno-26-20" name="__codelineno-26-20" href="#__codelineno-26-20"></a><span class="s">      args: [&quot;trap &#39;exit 0&#39; TERM; nvidia-smi -L; sleep infinity &amp; wait&quot;]</span>
+</span><span id="__span-26-21"><a id="__codelineno-26-21" name="__codelineno-26-21" href="#__codelineno-26-21"></a><span class="s">      resources:</span>
+</span><span id="__span-26-22"><a id="__codelineno-26-22" name="__codelineno-26-22" href="#__codelineno-26-22"></a><span class="s">        limits:</span>
+</span><span id="__span-26-23"><a id="__codelineno-26-23" name="__codelineno-26-23" href="#__codelineno-26-23"></a><span class="s">          nvidia.com/gpu: &quot;1&quot;</span>
+</span><span id="__span-26-24"><a id="__codelineno-26-24" name="__codelineno-26-24" href="#__codelineno-26-24"></a><span class="s">---</span>
+</span><span id="__span-26-25"><a id="__codelineno-26-25" name="__codelineno-26-25" href="#__codelineno-26-25"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-26-26"><a id="__codelineno-26-26" name="__codelineno-26-26" href="#__codelineno-26-26"></a><span class="s">kind: Pod</span>
+</span><span id="__span-26-27"><a id="__codelineno-26-27" name="__codelineno-26-27" href="#__codelineno-26-27"></a><span class="s">metadata:</span>
+</span><span id="__span-26-28"><a id="__codelineno-26-28" name="__codelineno-26-28" href="#__codelineno-26-28"></a><span class="s">  name: nogang-victim-2</span>
+</span><span id="__span-26-29"><a id="__codelineno-26-29" name="__codelineno-26-29" href="#__codelineno-26-29"></a><span class="s">  namespace: kai-lab</span>
+</span><span id="__span-26-30"><a id="__codelineno-26-30" name="__codelineno-26-30" href="#__codelineno-26-30"></a><span class="s">spec:</span>
+</span><span id="__span-26-31"><a id="__codelineno-26-31" name="__codelineno-26-31" href="#__codelineno-26-31"></a><span class="s">  priorityClassName: train</span>
+</span><span id="__span-26-32"><a id="__codelineno-26-32" name="__codelineno-26-32" href="#__codelineno-26-32"></a><span class="s">  restartPolicy: Never</span>
+</span><span id="__span-26-33"><a id="__codelineno-26-33" name="__codelineno-26-33" href="#__codelineno-26-33"></a><span class="s">  tolerations:</span>
+</span><span id="__span-26-34"><a id="__codelineno-26-34" name="__codelineno-26-34" href="#__codelineno-26-34"></a><span class="s">    - key: kubernetes.azure.com/scalesetpriority</span>
+</span><span id="__span-26-35"><a id="__codelineno-26-35" name="__codelineno-26-35" href="#__codelineno-26-35"></a><span class="s">      operator: Equal</span>
+</span><span id="__span-26-36"><a id="__codelineno-26-36" name="__codelineno-26-36" href="#__codelineno-26-36"></a><span class="s">      value: spot</span>
+</span><span id="__span-26-37"><a id="__codelineno-26-37" name="__codelineno-26-37" href="#__codelineno-26-37"></a><span class="s">      effect: NoSchedule</span>
+</span><span id="__span-26-38"><a id="__codelineno-26-38" name="__codelineno-26-38" href="#__codelineno-26-38"></a><span class="s">  containers:</span>
+</span><span id="__span-26-39"><a id="__codelineno-26-39" name="__codelineno-26-39" href="#__codelineno-26-39"></a><span class="s">    - name: main</span>
+</span><span id="__span-26-40"><a id="__codelineno-26-40" name="__codelineno-26-40" href="#__codelineno-26-40"></a><span class="s">      image: nvcr.io/nvidia/cuda:12.4.1-base-ubuntu22.04</span>
+</span><span id="__span-26-41"><a id="__codelineno-26-41" name="__codelineno-26-41" href="#__codelineno-26-41"></a><span class="s">      command: [&quot;bash&quot;, &quot;-c&quot;]</span>
+</span><span id="__span-26-42"><a id="__codelineno-26-42" name="__codelineno-26-42" href="#__codelineno-26-42"></a><span class="s">      args: [&quot;trap &#39;exit 0&#39; TERM; nvidia-smi -L; sleep infinity &amp; wait&quot;]</span>
+</span><span id="__span-26-43"><a id="__codelineno-26-43" name="__codelineno-26-43" href="#__codelineno-26-43"></a><span class="s">      resources:</span>
+</span><span id="__span-26-44"><a id="__codelineno-26-44" name="__codelineno-26-44" href="#__codelineno-26-44"></a><span class="s">        limits:</span>
+</span><span id="__span-26-45"><a id="__codelineno-26-45" name="__codelineno-26-45" href="#__codelineno-26-45"></a><span class="s">          nvidia.com/gpu: &quot;1&quot;</span>
+</span><span id="__span-26-46"><a id="__codelineno-26-46" name="__codelineno-26-46" href="#__codelineno-26-46"></a><span class="s">EOF</span>
+</span></code></pre></div>
+<p>搶占者是同一份規格的單顆 pod,只改名字與優先權:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a>sed<span class="w"> </span>-e<span class="w"> </span><span class="s1">&#39;/^---$/,$d&#39;</span><span class="w"> </span>-e<span class="w"> </span><span class="s1">&#39;s/nogang-victim-1/nogang-preemptor/&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-27-2"><a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="w">    </span>-e<span class="w"> </span><span class="s1">&#39;s/priorityClassName: train/priorityClassName: inference/&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-27-3"><a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="w">    </span><span class="m">07</span>-default-sched-victim-train.yaml<span class="w"> </span>&gt;<span class="w"> </span><span class="m">08</span>-default-sched-preemptor-inference.yaml
+</span></code></pre></div>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-28-1"><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span><span class="m">07</span>-default-sched-victim-train.yaml
+</span><span id="__span-28-2"><a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="gp">$ </span>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span><span class="m">08</span>-default-sched-preemptor-inference.yaml
+</span><span id="__span-28-3"><a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kai-lab<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-o<span class="w"> </span>wide
+</span><span id="__span-28-4"><a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a><span class="go">nogang-preemptor 1/1 Running aks-gpuspot-21249019-vmss000007</span>
+</span><span id="__span-28-5"><a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a><span class="go">nogang-victim-2  1/1 Running aks-gpuspot-21249019-vmss000006</span>
+</span></code></pre></div>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-29-1"><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>nogang-victim-1   Preempted  Preempted by pod d330a2f9-... on node aks-gpuspot-21249019-vmss000007
+</span><span id="__span-29-2"><a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a>08:13:34Z  nogang-victim-1   Killing  kubelet  Stopping container main
+</span><span id="__span-29-3"><a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a>08:13:35Z  nogang-preemptor  Started  kubelet
+</span></code></pre></div>
+<p>原生搶占正常運作,而且<strong>只殺一顆</strong>(victim-1 死、victim-2 活)。這正是與步驟 5 的關鍵對照:同樣是「搶 1 張卡」,default-scheduler 的受害者是單顆 pod、傷害最小,KAI 面對 gang 時收掉整組。另外 <code>Preempted</code> 事件把搶占者印成 UID 而不是名字,事後追查要多一步反查;KAI 的訊息則直接給 workload 名稱。</p>
+<p>受害者 08:13:34 收到 <code>Killing</code>、搶占者 08:13:35 就 <code>Started</code>,<strong>只花 1 秒</strong>——Day 1 地雷 6 記錄的 31 秒空窗來自受害者沒有攔 <code>SIGTERM</code>、硬吃滿 30 秒寬限期;本日所有 pod 都寫了 <code>trap 'exit 0' TERM</code>,寬限期完全沒有發生。那個修法有效,代價是<a href="#mine-2">地雷 2</a>。</p>
+<p>把跑過的項目整理成對照表:</p>
+<table>
+<thead>
+<tr>
+<th>面向</th>
+<th>KAI Scheduler v0.16.8</th>
+<th>default kube-scheduler</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3 顆要 3 卡、只有 2 卡</td>
+<td>加 <code>batch-min-member</code> 後三顆全 Pending、<strong>零 GPU 佔用</strong>,別的工作可用卡</td>
+<td>2 跑 + 1 Pending,兩張卡被鎖住空轉</td>
+</tr>
+<tr>
+<td>gang 的預設行為</td>
+<td><strong>預設沒有</strong>:裸 Job 的 PodGroup 是 <code>minMember: 1</code>,要明寫標註</td>
+<td>無此概念</td>
+</tr>
+<tr>
+<td>搶占受害者粒度</td>
+<td>受害者是 <strong>PodGroup(整組)</strong>——搶 1 卡讓 2 成員 gang 全數被驅逐</td>
+<td>受害者是<strong>單顆 pod</strong>——搶 1 卡只殺 1 顆</td>
+</tr>
+<tr>
+<td>缺員後的處理</td>
+<td><code>StaleGangEviction</code>:成員掉了 60 秒內沒回來就整組收掉</td>
+<td>無。剩下的 pod 繼續佔著卡</td>
+</tr>
+<tr>
+<td>排程器看到的單位</td>
+<td>一個 job 一筆請求(<code>resources: &lt;[0 0 3 3 0 0 0]&gt;</code>,3 是整組總和)</td>
+<td>一顆 pod 一筆請求,彼此無關</td>
+</tr>
+<tr>
+<td>失敗訊息的資訊量</td>
+<td>點名 gang 與缺口:「Resources were found for 2 pods while 3 are required for gang scheduling」</td>
+<td>只講單顆處境:「3 Insufficient nvidia.com/gpu」</td>
+</tr>
+<tr>
+<td>混用時的帳</td>
+<td>只記帳走 KAI 的 pod;default-scheduler 吃掉的卡在 queue <code>status</code> 中看不到</td>
+<td>——</td>
+</tr>
+</tbody>
+</table>
+<p>上表只涵蓋本章實際跑過的項目。沒有測的不寫:default-scheduler 的 <code>PodDisruptionBudget</code> 與 <code>nodeAffinity</code> 進階場景、K8s SIG 的 Coscheduling plugin,以及 KAI 的 GPU sharing、多節點拓撲、<code>subGroups</code>。</p>
+<h3 id="7-azure-spot">步驟 7:讓 Azure 真的收走一台 spot 節點<a class="headerlink" href="#7-azure-spot" title="Permanent link">&para;</a></h3>
+<p>前面的缺員是手動製造的。spot 節點被雲端商回收是<strong>真實的</strong>缺員來源,而整場 lab 都跑在 spot GPU 上。Azure 提供 <code>az vmss simulate-eviction</code> 可以隨時製造一次,不必等運氣。</p>
+<p>AKS 的節點實體落在受管 resource group(<code>MC_&lt;rg&gt;_&lt;cluster&gt;_&lt;region&gt;</code>),先對出 VMSS 與實例編號:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-30-1"><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="gp">$ </span>az<span class="w"> </span>vmss<span class="w"> </span>list<span class="w"> </span>-g<span class="w"> </span>MC_&lt;resource-group&gt;_&lt;cluster&gt;_japaneast<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-30-2"><a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a><span class="w">    </span>--subscription<span class="w"> </span>&lt;subscription-id&gt;<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-30-3"><a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="w">    </span>--query<span class="w"> </span><span class="s1">&#39;[].{name:name,sku:sku.name,capacity:sku.capacity,priority:virtualMachineProfile.priority}&#39;</span><span class="w"> </span>-o<span class="w"> </span>json
+</span><span id="__span-30-4"><a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a><span class="go">[</span>
+</span><span id="__span-30-5"><a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a><span class="go">  {&quot;capacity&quot;: 2, &quot;name&quot;: &quot;aks-gpuspot-21249019-vmss&quot;, &quot;priority&quot;: &quot;Spot&quot;, &quot;sku&quot;: &quot;Standard_NC4as_T4_v3&quot;},</span>
+</span><span id="__span-30-6"><a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a><span class="go">  {&quot;capacity&quot;: 1, &quot;name&quot;: &quot;aks-system-35459509-vmss&quot;, &quot;priority&quot;: null, &quot;sku&quot;: &quot;Standard_D2as_v5&quot;}</span>
+</span><span id="__span-30-7"><a id="__codelineno-30-7" name="__codelineno-30-7" href="#__codelineno-30-7"></a><span class="go">]</span>
+</span><span id="__span-30-8"><a id="__codelineno-30-8" name="__codelineno-30-8" href="#__codelineno-30-8"></a>
+</span><span id="__span-30-9"><a id="__codelineno-30-9" name="__codelineno-30-9" href="#__codelineno-30-9"></a><span class="gp">$ </span>az<span class="w"> </span>vmss<span class="w"> </span>list-instances<span class="w"> </span>-g<span class="w"> </span>MC_&lt;resource-group&gt;_&lt;cluster&gt;_japaneast<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-30-10"><a id="__codelineno-30-10" name="__codelineno-30-10" href="#__codelineno-30-10"></a><span class="w">    </span>-n<span class="w"> </span>aks-gpuspot-21249019-vmss<span class="w"> </span>--subscription<span class="w"> </span>&lt;subscription-id&gt;<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-30-11"><a id="__codelineno-30-11" name="__codelineno-30-11" href="#__codelineno-30-11"></a><span class="w">    </span>--query<span class="w"> </span><span class="s1">&#39;[].{id:instanceId,name:osProfile.computerName}&#39;</span><span class="w"> </span>-o<span class="w"> </span>json
+</span><span id="__span-30-12"><a id="__codelineno-30-12" name="__codelineno-30-12" href="#__codelineno-30-12"></a><span class="go">[{&quot;id&quot;: &quot;6&quot;, &quot;name&quot;: &quot;aks-gpuspot-21249019-vmss000006&quot;},</span>
+</span><span id="__span-30-13"><a id="__codelineno-30-13" name="__codelineno-30-13" href="#__codelineno-30-13"></a><span class="go"> {&quot;id&quot;: &quot;7&quot;, &quot;name&quot;: &quot;aks-gpuspot-21249019-vmss000007&quot;}]</span>
+</span></code></pre></div>
+<p><code>virtualMachineProfile.priority: "Spot"</code> 是判斷 spot pool 最直接的欄位;instance id 與節點名稱尾碼一致,要打哪台可以直接對照,不必猜。</p>
+<p>兩成員 gang 正在跑,砍掉其中一台的底層 VM:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-31-1"><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="gp">$ </span>az<span class="w"> </span>vmss<span class="w"> </span>simulate-eviction<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-31-2"><a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="w">    </span>-g<span class="w"> </span>MC_&lt;resource-group&gt;_&lt;cluster&gt;_japaneast<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-31-3"><a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a><span class="w">    </span>-n<span class="w"> </span>aks-gpuspot-21249019-vmss<span class="w"> </span>--instance-id<span class="w"> </span><span class="m">6</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-31-4"><a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a><span class="w">    </span>--subscription<span class="w"> </span>&lt;subscription-id&gt;
+</span></code></pre></div>
+<p>指令無輸出、立即返回。接下來的兩分鐘,四個系統依序動作:</p>
+<pre class="mermaid"><code>flowchart TB
+    A["08:17:34 下 simulate-eviction"] --&gt; B["08:17:37 節點 condition VMEventScheduled&lt;br&gt;預告:08:18:16 GMT 被搶占"]
+    B --&gt; C["08:17:43 kubelet 停掉成員 A&lt;br&gt;VM 還活著,AKS 主動疏散"]
+    C --&gt; D["08:18:43 StaleGangEviction 收掉成員 B&lt;br&gt;從 pod 消失起算 60 秒"]
+    D --&gt; E["08:19:11 node 物件才 NodeNotReady&lt;br&gt;08:19:21 DeletingNode"]</code></pre>
+<p>節點 condition 的原文:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-32-1"><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a>2026-08-03T08:17:37Z  aks-gpuspot-21249019-vmss000006  VMEventScheduled
+</span><span id="__span-32-2"><a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a>  Node condition VMEventScheduled is now: True, reason: VMEventScheduled,
+</span><span id="__span-32-3"><a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a>  message: &quot;Preempt Scheduled: Mon, 03 Aug 2026 08:18:16 GMT. DurationInSeconds: -1.
+</span><span id="__span-32-4"><a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a>  For more information, see https://aka.ms/aks/scheduledevents EventId: 218E4ED7-...&quot;
+</span></code></pre></div>
+<p>三層結論,順序很重要:</p>
+<p><strong>Azure 有預告,而且 AKS 不會乾等。</strong> 從 <code>VMEventScheduled</code>(08:17:37)到實際被搶占(08:18:16)有 <strong>39 秒</strong>預告期;AKS 收到 scheduled event 後 6 秒(08:17:43)就讓 kubelet 開始停容器。pod 是在 VM 還活著時被主動疏散的,不是隨 VM 一起被強制終止。這段時間就是 spot workload 寫 checkpoint 的<strong>全部預算</strong>。</p>
+<p><strong>KAI 的 60 秒時鐘從「pod 消失」起算,不是從「節點消失」起算。</strong> 成員在 08:17:43 沒了,倖存者在 08:18:43 被收掉,又是精準的 60 秒,與手動殺 pod 完全一致。KAI 對節點層級的故障沒有特殊處理路徑,它只看 PodGroup 的成員數——行為因此很好預測。</p>
+<p><strong>節點物件比 VM 晚死很久。</strong> VM 08:18:16 被搶占,K8s 的 node 物件到 08:19:11 才 <code>NotReady</code>、08:19:21 才被移除,落後將近 1 分鐘。這段期間 <code>kubectl get nodes</code> 仍顯示 <code>Ready</code>。<strong>用 node Ready 狀態判斷 spot 節點還在不在,會慢一整分鐘</strong>;要即時反應得盯 <code>VMEventScheduled</code> 這個 node condition。</p>
+<p>節點沒了之後,pool 也沒有自己補回來:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-33-1"><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>show<span class="w"> </span>-g<span class="w"> </span>&lt;resource-group&gt;<span class="w"> </span>--cluster-name<span class="w"> </span>&lt;cluster&gt;<span class="w"> </span>-n<span class="w"> </span>gpuspot<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-33-2"><a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="w">    </span>--subscription<span class="w"> </span>&lt;subscription-id&gt;<span class="w"> </span>--query<span class="w"> </span><span class="s1">&#39;{count:count,provisioningState:provisioningState}&#39;</span><span class="w"> </span>-o<span class="w"> </span>json
+</span><span id="__span-33-3"><a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="go">{&quot;count&quot;: 1, &quot;provisioningState&quot;: &quot;Succeeded&quot;}</span>
+</span></code></pre></div>
+<p>觀察超過 3 分鐘,<code>count</code> 停在 1 且狀態是 <code>Succeeded</code>——Azure 認為這就是穩定狀態。叢集就這樣少了一半 GPU,沒有任何告警,原因與修法見<a href="#mine-4">地雷 4</a>。手動補回去的那道指令,還帶出了本章最後一顆雷(<a href="#mine-5">地雷 5</a>):兩個操作者對同一個 node pool 各下各的期望值時會發生什麼。</p>
+<p>把 spot 與 gang 疊在一起,風險是<strong>相乘不是相加</strong>:任何一台被回收,整組就在 60 秒後被回收;pool 又不會自癒,於是重跑時可能連湊齊 <code>minMember</code> 的節點數都沒有,直接卡在 Pending。要在 spot 上跑分散式訓練,三件事缺一不可——<strong>開 cluster autoscaler</strong>、<strong>39 秒內寫得完 checkpoint</strong>、<strong>gang 大小留餘裕</strong>(別讓 <code>minMember</code> 剛好等於全部節點數)。</p>
+<h3 id="8">步驟 8:收尾<a class="headerlink" href="#8" title="Permanent link">&para;</a></h3>
+<p>刪掉測試 workload、佇列與 namespace,KAI 保留安裝(Day 3–4 的 HAMi 實驗接著用)。佇列用的是 <a href="../sprint1-day1-kai-queue-basics/">Day 1 步驟 4</a> 那份 <code>01-queues.yaml</code>,內容原封不動:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-34-1"><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kai-lab<span class="w"> </span>delete<span class="w"> </span>job<span class="w"> </span>--all
+</span><span id="__span-34-2"><a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a><span class="gp">$ </span>kubectl<span class="w"> </span>delete<span class="w"> </span>-f<span class="w"> </span><span class="m">01</span>-queues.yaml
+</span><span id="__span-34-3"><a id="__codelineno-34-3" name="__codelineno-34-3" href="#__codelineno-34-3"></a><span class="gp">$ </span>kubectl<span class="w"> </span>delete<span class="w"> </span>namespace<span class="w"> </span>kai-lab
+</span><span id="__span-34-4"><a id="__codelineno-34-4" name="__codelineno-34-4" href="#__codelineno-34-4"></a><span class="go">job.batch &quot;gang2&quot; deleted</span>
+</span><span id="__span-34-5"><a id="__codelineno-34-5" name="__codelineno-34-5" href="#__codelineno-34-5"></a><span class="go">queue.scheduling.run.ai &quot;cnp-root&quot; deleted</span>
+</span><span id="__span-34-6"><a id="__codelineno-34-6" name="__codelineno-34-6" href="#__codelineno-34-6"></a><span class="go">queue.scheduling.run.ai &quot;inference-prod&quot; deleted</span>
+</span><span id="__span-34-7"><a id="__codelineno-34-7" name="__codelineno-34-7" href="#__codelineno-34-7"></a><span class="go">queue.scheduling.run.ai &quot;batch-eval&quot; deleted</span>
+</span><span id="__span-34-8"><a id="__codelineno-34-8" name="__codelineno-34-8" href="#__codelineno-34-8"></a><span class="go">namespace &quot;kai-lab&quot; deleted</span>
+</span></code></pre></div>
+<p>GPU pool 照 Day 0 的收工循環縮回 0(指令同 Day 0 步驟 8)。今天模擬回收又補過節點,收工時更要回查 <code>count</code> 確認最終狀態,別只看指令的回傳值——理由見<a href="#mine-5">地雷 5</a>。</p>
+<h2 id="checkpoint">驗收 checkpoint<a class="headerlink" href="#checkpoint" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>檢查項</th>
+<th>指令</th>
+<th>期待結果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PodGroup 真的有 gang</td>
+<td><code>kubectl -n kai-lab get podgroups -o json \| jq '.items[].spec.minMember'</code></td>
+<td>等於成員數,<strong>不是 1</strong></td>
+</tr>
+<tr>
+<td>湊不齊時零佔用</td>
+<td>全叢集清點 <code>nvidia.com/gpu</code> 持有者</td>
+<td>只有探針 pod,gang 成員一顆都不在</td>
+</tr>
+<tr>
+<td>湊得齊時整組同時上</td>
+<td><code>kubectl -n kai-lab get events</code></td>
+<td>兩顆的 <code>Scheduled</code> 與 <code>Bound</code> 落在同一秒</td>
+</tr>
+<tr>
+<td>缺員回收準時</td>
+<td>砍一個成員後每 10 秒取樣</td>
+<td>第 60 秒倖存者被驅逐,<code>allocated</code> 變 null</td>
+</tr>
+<tr>
+<td>搶占粒度</td>
+<td>送 1 張卡的 <code>inference</code> 搶占者</td>
+<td>兩則 <code>Evict</code> 同一秒,整個 PodGroup 消失</td>
+</tr>
+<tr>
+<td>對照組失效模式</td>
+<td>同需求交給 <code>default-scheduler</code></td>
+<td>2 Running + 1 Pending,兩張卡鎖住</td>
+</tr>
+<tr>
+<td>spot 預告時間</td>
+<td>節點 condition <code>VMEventScheduled</code></td>
+<td>有 <code>Preempt Scheduled</code> 時間戳,約 39 秒後生效</td>
+</tr>
+<tr>
+<td>pool 會不會自癒</td>
+<td><code>az aks nodepool show --query count</code></td>
+<td>回收後停在 1——不會自己補</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_4">地雷記錄<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<h3 id="mine-1">地雷 1:裝了 KAI、Job 寫了 <code>parallelism: 3</code>,卻完全沒有 gang scheduling<a class="headerlink" href="#mine-1" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:<code>batch/v1</code> Job 設 <code>parallelism: 3</code>、<code>schedulerName: kai-scheduler</code>、掛好佇列標籤,送上去卻是 2 個 Running + 1 個 Pending——半啟動死鎖照樣發生,跟沒裝 KAI 一模一樣。</p>
+<p><strong>根因</strong>:<code>pod-grouper</code> 對<strong>裸 Job 的預設是 <code>minMember: 1</code></strong>,不是 <code>parallelism</code>。KAI 只把 Job 的 pod 歸進同一個 PodGroup 方便記帳,預設並不賦予原子性。PyTorchJob、JobSet 這類本身就帶「幾個 worker」語意的 CRD 才會自動推導出 gang;<code>batch/v1</code> Job 沒有這個語意。答案其實寫在官方 <code>docs/batch/README.md</code> 的第一段——「will be scheduled <strong>separately</strong>」——只是很容易讀過去。</p>
+<p><strong>驗證法</strong>:不要看 pod 跑不跑得起來,直接查 PodGroup:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-35-1"><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kai-lab<span class="w"> </span>get<span class="w"> </span>podgroups<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.items[].spec.minMember&#39;</span>
+</span></code></pre></div>
+<p>這個數字是 1 就代表沒有 gang,不管 Job 寫了多少 <code>parallelism</code>。</p>
+<p><strong>修法</strong>:在 Job 的 <code>metadata.annotations</code> 加 <code>kai.scheduler/batch-min-member: "3"</code>——下在 <strong>Job 資源本身</strong>,不是 pod template。</p>
+<h3 id="mine-2">地雷 2:被驅逐的 gang,Job 卻回報「成功完成」<a class="headerlink" href="#mine-2" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:整組被 StaleGangEviction 收掉之後,<code>kubectl get job</code> 顯示 <code>succeeded: 2</code>、condition <code>Complete / CompletionsReached</code>、事件是 <code>Job completed</code>。從 Job 的角度看,這是一次圓滿的執行——真正的工作一秒都沒做完。</p>
+<p><strong>根因</strong>:容器指令寫的是 <code>trap 'exit 0' TERM; sleep infinity &amp; wait</code>,這是 Day 1 地雷 6 為了避開 30 秒寬限期而特地寫的。但收到 <code>SIGTERM</code> 就 <code>exit 0</code> 的代價是:被驅逐的 pod 在 Job controller 眼中是<strong>正常結束</strong>(exit code 0 = Succeeded),於是 <code>completions: 2</code> 被判定達成,Job 標記為 Complete,也不會補建 pod。</p>
+<p><strong>修法</strong>:驅逐訊號要以<strong>非零 exit code</strong> 結束,Job 才會正確記為失敗並依 <code>backoffLimit</code> 重試:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-36-1"><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a><span class="c1"># 143 = 128 + SIGTERM(15); exits fast but keeps the failure semantics</span>
+</span><span id="__span-36-2"><a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a><span class="nb">trap</span><span class="w"> </span><span class="s1">&#39;exit 143&#39;</span><span class="w"> </span>TERM
+</span></code></pre></div>
+<p>監控上也不能只看 Job 的 <code>Complete</code> condition 判斷訓練是否真的跑完,要另外看 workload 自己的 checkpoint 或 metrics。</p>
+<p><strong>教訓</strong>:這與 Day 1 地雷 6 是一組取捨——優雅退出換來快速釋放 GPU,但會污染 Job 的成敗語意。兩個都要處理:<strong>快速退出 + 非零 exit code</strong>。</p>
+<h3 id="mine-3">地雷 3:搶占 1 張卡,賠掉整個 gang——受害者粒度是「整組」不是「單顆」<a class="headerlink" href="#mine-3" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:搶占者只要 1 張 GPU,正在跑的是一個 2 成員 gang,結果兩個成員同時被驅逐,釋出 2 張卡卻只用掉 1 張,另一張空在那裡。</p>
+<p><strong>根因</strong>:KAI 的受害者選擇單位是 PodGroup(workload),不是 pod。gang 的原子性是雙向的——要嘛全上、要嘛全下。既然殺一顆就會讓整組變成 stale(無論如何都活不了),排程器索性整組一次回收。對照 Day 1 步驟 7:同樣搶 1 張卡,但當時的受害者是兩顆各自獨立的 <code>train</code> pod,就只死一顆。差別不在搶占者,在受害者有沒有 gang。</p>
+<p><strong>代價</strong>:搶占的爆炸半徑與受害 gang 的大小成正比。一個 8 卡 gang 會為了讓出 1 張卡而整組被驅逐,浪費 7 張卡的已完成計算。</p>
+<p><strong>修法</strong>:(1) 把 gang 型工作放進<strong>獨立佇列並給足 quota</strong>——quota 內的資源受保護,搶占進不來(Day 1 地雷 4 的機制反過來用);(2) gang 工作務必做 checkpoint,重跑成本才可控;(3) 需要細粒度搶占就別用 gang——但那等於放棄分散式訓練的正確性,通常不是選項。</p>
+<h3 id="mine-4">地雷 4:spot 節點被回收後,node pool 不會自癒——容量默默永久減少<a class="headerlink" href="#mine-4" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:一台 spot 節點被 Azure 回收,<code>az aks nodepool show</code> 的 <code>count</code> 從 2 變成 1,<code>provisioningState: Succeeded</code>,看起來一切正常。叢集少了一半 GPU,沒有任何告警。</p>
+<p><strong>根因</strong>:本 pool <strong>沒有開 cluster autoscaler</strong>(Day 0 建立時刻意不開,免得它在 gang 示範中自動擴充節點)。沒有 autoscaler 就沒有任何元件負責「把 count 補回期望值」——VMSS 的 capacity 被 Azure 回收後直接下修,AKS 也把它當成新的期望值。<code>count</code> 這個欄位是<strong>現況</strong>,不是<strong>目標</strong>。</p>
+<p><strong>修法</strong>:(1) 生產環境的 spot pool 一定要開 cluster autoscaler(<code>--enable-cluster-autoscaler --min-count N --max-count M</code>),才會自動補節點;(2) 或搭配隨需 pool 做保底容量,spot 只吃尖峰;(3) 監控要盯 pool 的 <code>count</code> 與期望值的差,不能只盯節點 Ready。</p>
+<h3 id="mine-5">地雷 5:兩個操作者動同一個 node pool——後寫入者靜默勝出,而 activity log 會晚幾分鐘才說實話<a class="headerlink" href="#mine-5" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:手動補容量的指令下了 <code>--node-count 2</code>,中途查到 <code>count: 2 / provisioningState: Updating</code>(真實進度),最後卻收斂成 <code>count: 0 / Succeeded</code>。要 2,拿到 0,而且平台回報成功。</p>
+<p><strong>第一次診斷(錯的)</strong>:三個方向都追查過——受管 resource group 沒有任何 <code>Failed</code> 事件、spot 配額 <code>Standard NCASv3_T4 Family vCPUs 0/50</code> 充足、activity log 只有自己那一道操作:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-37-1"><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a><span class="gp">$ </span>az<span class="w"> </span>monitor<span class="w"> </span>activity-log<span class="w"> </span>list<span class="w"> </span>--resource-group<span class="w"> </span>&lt;resource-group&gt;<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-37-2"><a id="__codelineno-37-2" name="__codelineno-37-2" href="#__codelineno-37-2"></a><span class="w">    </span>--start-time<span class="w"> </span><span class="m">2026</span>-08-03T08:15:00Z<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-37-3"><a id="__codelineno-37-3" name="__codelineno-37-3" href="#__codelineno-37-3"></a><span class="w">    </span>--query<span class="w"> </span><span class="s2">&quot;[?contains(operationName.value,&#39;agentPools&#39;)].{time:eventTimestamp,op:operationName.localizedValue,status:status.value}&quot;</span><span class="w"> </span>-o<span class="w"> </span>table
+</span><span id="__span-37-4"><a id="__codelineno-37-4" name="__codelineno-37-4" href="#__codelineno-37-4"></a><span class="go">Time                          Op                           Status</span>
+</span><span id="__span-37-5"><a id="__codelineno-37-5" name="__codelineno-37-5" href="#__codelineno-37-5"></a><span class="go">2026-08-03T08:21:28.8985242Z  Create or Update Agent Pool  Accepted</span>
+</span><span id="__span-37-6"><a id="__codelineno-37-6" name="__codelineno-37-6" href="#__codelineno-37-6"></a><span class="go">2026-08-03T08:21:23.8985592Z  Create or Update Agent Pool  Started</span>
+</span></code></pre></div>
+<p>證據看起來很完整,於是得出結論:「沒有第二個呼叫者,是 AKS 在 spot 收斂期間靜默吃掉了 scale 請求。」<strong>這個結論是錯的。</strong></p>
+<p><strong>5 分鐘後,同一道指令重查</strong>:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-38-1"><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a>Time                          Op                           Status
+</span><span id="__span-38-2"><a id="__codelineno-38-2" name="__codelineno-38-2" href="#__codelineno-38-2"></a>2026-08-03T08:28:15.5148959Z  Create or Update Agent Pool  Succeeded
+</span><span id="__span-38-3"><a id="__codelineno-38-3" name="__codelineno-38-3" href="#__codelineno-38-3"></a>2026-08-03T08:27:26.1896742Z  Create or Update Agent Pool  Accepted
+</span><span id="__span-38-4"><a id="__codelineno-38-4" name="__codelineno-38-4" href="#__codelineno-38-4"></a>2026-08-03T08:27:22.5097896Z  Create or Update Agent Pool  Succeeded
+</span><span id="__span-38-5"><a id="__codelineno-38-5" name="__codelineno-38-5" href="#__codelineno-38-5"></a>2026-08-03T08:27:21.3458554Z  Create or Update Agent Pool  Started
+</span><span id="__span-38-6"><a id="__codelineno-38-6" name="__codelineno-38-6" href="#__codelineno-38-6"></a>2026-08-03T08:21:28.8985242Z  Create or Update Agent Pool  Accepted
+</span><span id="__span-38-7"><a id="__codelineno-38-7" name="__codelineno-38-7" href="#__codelineno-38-7"></a>2026-08-03T08:21:23.8985592Z  Create or Update Agent Pool  Started
+</span></code></pre></div>
+<p>多出了 08:27:21 那一組——那是另一個 session 的收工停機流程下的 <code>--node-count 0</code>。真正的時間軸是:</p>
+<table>
+<thead>
+<tr>
+<th>時間(UTC)</th>
+<th>操作</th>
+<th>來源</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>08:21:23</td>
+<td><code>nodepool scale --node-count 2</code></td>
+<td>實驗 session</td>
+</tr>
+<tr>
+<td>08:23:57</td>
+<td>查到 <code>count: 2 / Updating</code>(真實進度)</td>
+<td>實驗 session</td>
+</tr>
+<tr>
+<td>08:27:21</td>
+<td><code>nodepool scale --node-count 0</code></td>
+<td><strong>另一個 session</strong></td>
+</tr>
+<tr>
+<td>08:28:52</td>
+<td>收斂為 <code>count: 0 / Succeeded</code></td>
+<td>——</td>
+</tr>
+</tbody>
+</table>
+<p><strong>真正的根因(兩層)</strong>:</p>
+<ol>
+<li><strong>node pool 的 <code>count</code> 是宣告式的期望值,沒有鎖也沒有版本檢查</strong>。兩個 session 先後下 scale,AKS 一律接受,最後一次寫入直接覆蓋——不報衝突、不警告,兩道指令都回 <code>Succeeded</code>。</li>
+<li><strong>Azure activity log 有數分鐘的傳播延遲</strong>。08:27:21 的操作在 08:27:51 查詢時查不到,5 分鐘後才出現。「查了 log 沒看到別人,所以沒有別人」這個推論,在事發後幾分鐘內<strong>不成立</strong>。</li>
+</ol>
+<p><strong>另一個陷阱</strong>:兩個 session 用同一組 Azure 憑證,activity log 的 <code>caller</code> 欄位完全相同。就算傳播完成,也無法靠 <code>caller</code> 分辨是誰下的,只能靠時間戳對照各自的操作紀錄。</p>
+<p><strong>修法</strong>:(1) 共用叢集要約定<strong>單一收放權責</strong>(誰負責開關機),或用 tag 標記「實驗進行中」;(2) 事故追查時,activity log 至少等 5–10 分鐘再下結論,並且<strong>先問人</strong>再怪平台;(3) 自動化腳本 scale 後一律回查 <code>count</code> 與實際節點數——這件事無論如何都要做,只是原因不是平台會吃掉請求,而是別人可能覆蓋你。</p>
+<p><strong>教訓</strong>:排除法的有效性,取決於證據是否已經完整到齊。在分散式系統裡,「還沒出現」和「不存在」長得一模一樣。</p>
+<h2 id="_5">帶得走的東西<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<ul>
+<li>gang 的原子性是雙向的:「全上」的好處與「全下」的代價來自同一個機制。要前者就得為後者準備 checkpoint,沒有只享受一半的選項。</li>
+<li>判斷「有沒有 gang」只有一個可靠依據:PodGroup 的 <code>spec.minMember</code>。pod 跑得起來不代表沒有 gang,跑不起來也不代表有——<code>parallelism</code> 更是完全無關。</li>
+<li>半啟動死鎖的成本不是「慢」,是「卡被鎖住而且對誰都沒用」。全部退出讓路看起來像浪費,實際的叢集利用率反而更高。</li>
+<li>排程器的自癒視窗是可查的常數,不是玄學:60 秒寫在原始碼的預設值裡,可以先預測再驗證——這種「先讀原始碼再下實驗」的順序,比事後解釋現象可靠得多。</li>
+<li>兩個排程器並存,帳本就有盲區。KAI 的 queue <code>status</code> 只認自己排的 pod,別人吃掉的卡完全不記帳,規劃 quota 時會嚴重低估。</li>
+<li>雲端 API 的宣告式欄位沒有版本檢查,最後一次寫入的人贏;而 activity log 有傳播延遲,查不到不等於沒發生。</li>
+</ul>
+<h2 id="_6">延伸閱讀<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
+<p>想往下深挖,從這幾份開始:</p>
+<ul>
+<li><strong><a href="https://github.com/NVIDIA/KAI-Scheduler/blob/v0.16.8/docs/batch/README.md">KAI Scheduler 的批次工作與 gang 標註</a></strong> —— <code>kai.scheduler/batch-min-member</code> 的官方說明與三種組 gang 的寫法,對應本章地雷 1。</li>
+<li><strong><a href="https://github.com/NVIDIA/KAI-Scheduler/blob/v0.16.8/cmd/scheduler/app/options/options.go">KAI Scheduler 排程器啟動參數原始碼</a></strong> —— <code>defaultStalenessGracePeriod = 60 * time.Second</code> 與 <code>--default-staleness-grace-period</code> 旗標的定義處,60 秒預測的出處。</li>
+<li><strong><a href="https://learn.microsoft.com/en-us/azure/virtual-machines/linux/scheduled-events">Azure Scheduled Events</a></strong> —— spot 回收的 <code>Preempt</code> 事件、最短 30 秒預告時間,以及 VM 內查詢事件的 metadata 端點。</li>
+<li><strong><a href="https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/">Pod 優先權與搶占 | Kubernetes</a></strong> —— 原生搶占如何挑受害者 pod、PodDisruptionBudget 與優雅終止的處理,對照本章 KAI 的整組粒度。</li>
+</ul>
+<h2 id="_7">下一步<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h2>
+<p>排程層的兩個問題到此收斂:Day 1 解決「誰先拿到卡」,Day 2 解決「一次要拿幾張才算數」。但兩天下來的資源單位始終是<strong>一整張 T4</strong>——一顆只需要 2 GB VRAM 的推論服務,照樣要佔掉 16 GB 的卡。Day 3 換 HAMi 接手,把單張卡切給多個容器共用,並驗證 VRAM 上限是<strong>硬隔離</strong>還是君子協定。順帶要收 Day 1 留下的懸案:GPU Operator 到底是不是必要條件——整張卡配置時證明不需要, VRAM 切分的場景是否不同,Day 3 驗證。</p>
+<hr />
+<div class="admonition quote">
+<p>KAI Scheduler 標誌為 CNCF artwork 之官方資產,此處作社群教學用途。</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到頂端
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="頁腳" >
+        
+          
+          <a href="../sprint1-day1-kai-queue-basics/" class="md-footer__link md-footer__link--prev" aria-label="上一頁: Day 1 · KAI 安裝與 Queue 基礎">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                上一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 1 · KAI 安裝與 Queue 基礎
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../sprint1-day3-hami-memory-isolation/" class="md-footer__link md-footer__link--next" aria-label="下一頁: Day 3 · HAMi 安裝與 VRAM 硬隔離">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                下一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 3 · HAMi 安裝與 VRAM 硬隔離
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      KAI Scheduler、HAMi、Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,作社群教學用途
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.code.annotate", "content.code.select", "content.tabs.link", "search.suggest", "search.highlight", "search.share"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u8907\u88fd", "clipboard.copy": "\u8907\u88fd", "search.result.more.one": "\u6b64\u9801\u5c1a\u6709 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.more.other": "\u6b64\u9801\u5c1a\u6709 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.none": "\u6c92\u6709\u7b26\u5408\u7684\u9805\u76ee", "search.result.one": "\u627e\u5230 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.other": "\u627e\u5230 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.placeholder": "\u6253\u5b57\u9032\u884c\u641c\u5c0b", "search.result.term.missing": "\u7f3a\u5c11\u5b57\u8a5e", "select.version": "\u9078\u64c7\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

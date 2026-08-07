@@ -1,0 +1,2846 @@
+
+<!doctype html>
+<html lang="zh-TW" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="雲原生實作課程 —— GPU 排程 runbook、踩雷解法與反思">
+      
+      
+      
+        <link rel="canonical" href="https://deepwavelab.github.io/CloudNativePracticing/runbook/sprint2-day7-cilium-kubeproxy/">
+      
+      
+        <link rel="prev" href="../sprint2-day6-tetragon-enforcement/">
+      
+      
+        <link rel="next" href="../sprint2-day8-cilium-network-policy/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Day 7 · Cilium 與 kube-proxy replacement - Cloud Native Lab Course</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/terminal.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#day-7-byocni-cilium-kube-proxy" class="md-skip">
+          跳轉到
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="頁首">
+    <a href="../.." title="Cloud Native Lab Course" class="md-header__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Cloud Native Lab Course
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Day 7 · Cilium 與 kube-proxy replacement
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換深色模式"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="切換深色模式" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換淺色模式"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="切換淺色模式" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜尋" placeholder="搜尋" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="搜尋">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="分享" aria-label="分享" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="清除" aria-label="清除" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜尋引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="標籤" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  首頁
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint1-day0-azure-aks-foundation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 1 · GPU 排程三部曲
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../sprint2-day0-ebpf-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 2 · eBPF 與執行期安全
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="導覽列" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Cloud Native Lab Course" class="md-nav__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Cloud Native Lab Course
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首頁
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    首頁
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day0-azure-aks-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 環境建置與成本紀律
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day1-kai-queue-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · KAI 安裝與 Queue 基礎
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day2-gang-scheduling-preemption/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Gang Scheduling 與搶占
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day3-hami-memory-isolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · HAMi 安裝與 VRAM 硬隔離
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day4-hami-kai-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · HAMi 進階與 KAI 整合
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day5-hami-webui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · HAMi-WebUI 觀測介面
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day6-dra-simulated-devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · DRA 概念與模擬裝置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day7-dra-aks-real-gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · DRA 真卡實測
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day8-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 綜合:三者分工決策表
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day0-ebpf-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · eBPF 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day1-bpftrace-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · bpftrace 三支經典工具
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day2-bpftrace-kubernetes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · 把核心事件接回 Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day3-falco-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Falco 安裝與出廠規則
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day4-falco-custom-rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · 自訂規則、誤報調校與告警路由
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day5-tetragon-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Tetragon 與 TracingPolicy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day6-tetragon-enforcement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · 從偵測到攔截
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Cilium 與 kube-proxy replacement
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Cilium 與 kube-proxy replacement
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        為什麼這一天要另外開一座叢集
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1: 建一座沒有網路的叢集
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 1: 建一座沒有網路的叢集">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cni" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        沒有 CNI 的叢集長什麼樣子
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-cilium" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2: 裝 Cilium——版本自己釘,網段自己算
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 2: 裝 Cilium——版本自己釘,網段自己算">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#falcotetragon" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        資源足跡:跟 Falco、Tetragon 正面對照
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3: 連通性測試——驗收的第一半
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4: 換掉 kube-proxy——先問它現在到底在做什麼
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 4: 換掉 kube-proxy——先問它現在到底在做什麼">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#kube-proxy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        先看 kube-proxy 寫了什麼
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        誰真的做了那次翻譯
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        換掉它
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5: 量化——規則數、查找路徑,以及不能宣稱的那一項
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 5: 量化——規則數、查找路徑,以及不能宣稱的那一項">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        規則數
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        查找路徑
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延遲:這一項沒有辦法誠實地宣稱改善
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        第二輪連通性測試
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收第二半的完整證據
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6: 收工——沒有安全網的一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        誠實的差距
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收 checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷記錄
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="地雷記錄">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 1:az aks create 根本沒有 --priority 這個參數
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 2:決定能不能排到 NotReady 節點的是 taint 容忍,不是 hostNetwork
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 3:cilium-cli 會告訴你 stable 是哪一版,然後裝另一版
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 4:Cilium 出廠的 pod 網段把 AKS 的 Service 網段整個吃掉
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 5:cilium pod 的 Burstable 是一顆 init container 借來的
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 6:--tolerations 沒有套到測試框架的 DaemonSet
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 7:AKS spot 節點池的 taint 拔不掉,而兩種拔法的失敗方式不一樣
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 8:kubeProxyReplacement: false 不代表 kube-proxy 在做事
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 9:刪掉 kube-proxy DaemonSet,受管控制面 80 秒後把它裝回來
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 10:kube-proxy 走了,它寫的規則不會跟著走
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 11:AKS 的 system pool 不能縮到 0
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的東西
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day8-cilium-network-policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · CiliumNetworkPolicy(L3/L4 → L7)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day9-hubble/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Hubble 可觀測性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 綜合:四套工具的分工
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        為什麼這一天要另外開一座叢集
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1: 建一座沒有網路的叢集
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 1: 建一座沒有網路的叢集">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cni" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        沒有 CNI 的叢集長什麼樣子
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-cilium" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2: 裝 Cilium——版本自己釘,網段自己算
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 2: 裝 Cilium——版本自己釘,網段自己算">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#falcotetragon" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        資源足跡:跟 Falco、Tetragon 正面對照
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3: 連通性測試——驗收的第一半
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4: 換掉 kube-proxy——先問它現在到底在做什麼
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 4: 換掉 kube-proxy——先問它現在到底在做什麼">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#kube-proxy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        先看 kube-proxy 寫了什麼
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        誰真的做了那次翻譯
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        換掉它
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5: 量化——規則數、查找路徑,以及不能宣稱的那一項
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 5: 量化——規則數、查找路徑,以及不能宣稱的那一項">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        規則數
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        查找路徑
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延遲:這一項沒有辦法誠實地宣稱改善
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        第二輪連通性測試
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收第二半的完整證據
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6: 收工——沒有安全網的一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        誠實的差距
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收 checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷記錄
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="地雷記錄">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 1:az aks create 根本沒有 --priority 這個參數
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 2:決定能不能排到 NotReady 節點的是 taint 容忍,不是 hostNetwork
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 3:cilium-cli 會告訴你 stable 是哪一版,然後裝另一版
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 4:Cilium 出廠的 pod 網段把 AKS 的 Service 網段整個吃掉
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 5:cilium pod 的 Burstable 是一顆 init container 借來的
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 6:--tolerations 沒有套到測試框架的 DaemonSet
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 7:AKS spot 節點池的 taint 拔不掉,而兩種拔法的失敗方式不一樣
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 8:kubeProxyReplacement: false 不代表 kube-proxy 在做事
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 9:刪掉 kube-proxy DaemonSet,受管控制面 80 秒後把它裝回來
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 10:kube-proxy 走了,它寫的規則不會跟著走
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 11:AKS 的 system pool 不能縮到 0
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的東西
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="day-7-byocni-cilium-kube-proxy">Day 7: 換掉資料平面——BYOCNI 叢集、Cilium,與一個裝了但沒在用的 kube-proxy<a class="headerlink" href="#day-7-byocni-cilium-kube-proxy" title="Permanent link">&para;</a></h1>
+<p><img align="right" alt="Cilium 官方標誌" src="../../assets/logos/cilium-icon-color.svg" width="95" /></p>
+<blockquote>
+<p>前六天都在觀察行程與檔案:誰執行了什麼、誰開了哪個檔。今天換一個角度,把 eBPF 放進網路路徑本身——不是加一層監控,是<strong>把 Kubernetes 的 Service 實作整個換掉</strong>。而今天最值得記住的發現,是動手之前就先問清楚「現在到底是誰在做這件事」得到的:<strong>那個要被換掉的元件,有一大半工作早就不是它在做了。</strong></p>
+</blockquote>
+<div class="admonition abstract">
+<p class="admonition-title">你在課程的哪裡</p>
+<ul>
+<li><strong>Day 0–6</strong>:eBPF 的載入路徑與 verifier、bpftrace 的臨場追蹤、Falco 的規則引擎、Tetragon 的核心層攔截。四套工具都掛在 syscall 與 LSM 那一層。</li>
+<li><strong>今天</strong>:建一座沒有 CNI 的叢集、自管 Cilium、開啟 kube-proxy replacement。驗收有兩半:連通性測試通過,而且叢集裡不再有 kube-proxy 但 Service 仍然可達。</li>
+<li><strong>Day 8–9</strong>:有了自己的資料平面,才能寫 L3 到 L7 的網路政策,以及用 Hubble 看流量。</li>
+</ul>
+</div>
+<h2 id="_1">為什麼這一天要另外開一座叢集<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<p>自管 Cilium <strong>只能裝在建立時就指定 <code>--network-plugin none</code> 的叢集上,既有叢集轉換不了</strong>。受管的「Azure CNI powered by Cilium」可以原地開啟,但它的 L7 政策與 Hubble UI 需要付費附加元件——而那兩項正是 Cilium 最值得學的部分。更關鍵的是,原地升級會<strong>永久改掉</strong>前六天那座叢集的資料平面,而 Falco 與 Tetragon 都還裝在上面。</p>
+<p>所以今天新建一座臨時叢集。這個決定本身就是課程內容的一部分:<strong>BYOCNI 不是一個設定選項,是一條從叢集建立那一刻就分岔的路。</strong></p>
+<p>今天走六步:</p>
+<table>
+<thead>
+<tr>
+<th>步驟</th>
+<th>做什麼</th>
+<th>為什麼排在這</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>建一座沒有 CNI 的叢集</td>
+<td><strong>先看清楚 CNI 不在時壞的是什麼</strong></td>
+</tr>
+<tr>
+<td>2</td>
+<td>裝 Cilium</td>
+<td>版本要自己釘、網段要自己算,兩件都有坑</td>
+</tr>
+<tr>
+<td>3</td>
+<td>連通性測試</td>
+<td>驗收的第一半,而且要學會怎麼讀那份報表</td>
+</tr>
+<tr>
+<td>4</td>
+<td>換掉 kube-proxy</td>
+<td><strong>先問它現在在做什麼</strong></td>
+</tr>
+<tr>
+<td>5</td>
+<td>量化差異</td>
+<td>規則數、查找路徑、延遲,以及哪一個數字不能宣稱</td>
+</tr>
+<tr>
+<td>6</td>
+<td>收工</td>
+<td>這座叢集不在自動關機的排程裡,沒有安全網</td>
+</tr>
+</tbody>
+</table>
+<h2 id="1">步驟 1: 建一座沒有網路的叢集<a class="headerlink" href="#1" title="Permanent link">&para;</a></h2>
+<p>配額不要用推論的。前一天的節點池已經歸零,理論上額度是空的——但理論不算數:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">$ </span>az<span class="w"> </span>vm<span class="w"> </span>list-usage<span class="w"> </span>-l<span class="w"> </span>japaneast<span class="w"> </span>--query<span class="w"> </span><span class="s2">&quot;[?...].{n:localName,c:currentValue,l:limit}&quot;</span><span class="w"> </span>-o<span class="w"> </span>tsv
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="go">Total Regional Low-priority vCPUs    0    50      ← spot 配額整條沒人用</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="go">Total Regional vCPUs                16   200</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="go">Standard DASv5 Family vCPUs          0    50      ← 要看的是這一欄</span>
+</span></code></pre></div>
+<p><code>Total Regional vCPUs</code> 是訂閱層級的總帳(含其他資源),<code>Standard DASv5 Family</code> 才是這次要動的家族。</p>
+<p>接著建叢集。原本的計畫是「2 台 spot」,而那個計畫在第一行指令就撞牆了(<a href="#mine-1">地雷 1</a>):</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>az<span class="w"> </span>aks<span class="w"> </span>create<span class="w"> </span>-g<span class="w"> </span>&lt;resource-group&gt;<span class="w"> </span>-n<span class="w"> </span>&lt;cluster&gt;<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>--location<span class="w"> </span>japaneast<span class="w"> </span>--tier<span class="w"> </span>free<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>--network-plugin<span class="w"> </span>none<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span>--nodepool-name<span class="w"> </span>system<span class="w"> </span>--node-count<span class="w"> </span><span class="m">1</span><span class="w"> </span>--node-vm-size<span class="w"> </span>Standard_D2as_v5<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span>--generate-ssh-keys
+</span></code></pre></div>
+<p><strong>5 分 13 秒。</strong> 回傳的 JSON 裡 <code>networkProfile.networkPlugin</code> 是 <code>none</code>、<code>serviceCidr</code> 是 <code>10.0.0.0/16</code>,而 <code>podCidr</code> 是 <strong><code>null</code></strong>——最後那個 null 等一下會變成一顆地雷。</p>
+<h3 id="cni">沒有 CNI 的叢集長什麼樣子<a class="headerlink" href="#cni" title="Permanent link">&para;</a></h3>
+<p>這是本章最值得慢慢看的一段,因為多數人不會刻意去看它。</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>nodes
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">NAME                             STATUS     ROLES   AGE     VERSION</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="go">&lt;node&gt;                           NotReady   &lt;none&gt;  2m14s   v1.35.6</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>node<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .status.conditions[*]}…&#39;</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="go">Ready  False  KubeletNotReady</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="go">       container runtime network not ready: NetworkReady=false</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="go">       reason:NetworkPluginNotReady</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="go">       message:Network plugin returns error: cni plugin not initialized</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>node<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec.taints}&#39;</span>
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="go">[{&quot;effect&quot;:&quot;NoSchedule&quot;,&quot;key&quot;:&quot;node.kubernetes.io/not-ready&quot;}]</span>
+</span></code></pre></div>
+<p><strong>節點 <code>NotReady</code> 不是 kubelet 壞了。</strong> <code>MemoryPressure</code>、<code>DiskPressure</code>、<code>PIDPressure</code> 三個條件全部正常,kubelet 活著、有在回報、有在跑容器。它唯一說不出口的是「我的 CNI 沒初始化」——而 <code>Ready=False</code> 一旦成立,Kubernetes 就替它打上 <code>node.kubernetes.io/not-ready:NoSchedule</code>。</p>
+<p>於是 pod 分成兩半:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-A<span class="w"> </span>-o<span class="w"> </span>custom-columns<span class="o">=</span>NAME:…,HOSTNET:.spec.hostNetwork,STATUS:.status.phase
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">cloud-node-manager-cz2z9              true     Running</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="go">csi-azuredisk-node-fr7dk              true     Running</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="go">kube-proxy-bxgkf                      true     Running</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="go">konnectivity-agent-7fc6788985-jlh2t   true     Pending      ← 注意這一顆</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="go">coredns-5d474ff6db-8qrgn              &lt;none&gt;   Pending</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="go">metrics-server-6f4547db5c-c9chh       &lt;none&gt;   Pending</span>
+</span></code></pre></div>
+<p>直覺的說法是「hostNetwork 的活著,其他的排不上」。<strong>這個說法只對了一半</strong>,而錯的那一半見<a href="#mine-2">地雷 2</a>。</p>
+<p>CoreDNS 的排程錯誤訊息也值得抄下來,因為它會誤導人:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="go">Warning  FailedScheduling  default-scheduler  no nodes available to schedule pods</span>
+</span></code></pre></div>
+<p>「沒有節點」——但 <code>kubectl get nodes</code> 明明列得出一台。scheduler 說的「沒有」是「沒有可用的」,而它不會告訴你為什麼。<strong>在 BYOCNI 叢集上,這行訊息的正解永遠是「你還沒裝 CNI」。</strong></p>
+<p>這個中間狀態可以這樣講:<strong>沒有 CNI 的 Kubernetes 是一座只能跑 hostNetwork DaemonSet 的叢集。</strong> control plane 全部正常、API 全部能回、<code>kubectl</code> 一切如常——壞掉的是「pod 有自己的 IP」這個前提,而幾乎所有東西都建立在那個前提上。</p>
+<h2 id="2-cilium">步驟 2: 裝 Cilium——版本自己釘,網段自己算<a class="headerlink" href="#2-cilium" title="Permanent link">&para;</a></h2>
+<p>裝法選 Helm 而不是 <code>cilium install</code>,理由有兩層:版本是明文的而不是某個 CLI 二進位檔內建的常數(<a href="#mine-3">地雷 3</a>);以及 Sprint 2 的 Falco 與 Tetragon 都是 Helm 裝的,<strong>要拿三套工具的資源佔用互相比較,安裝方式得是同一把尺</strong>。cilium-cli 仍然留著,但只當診斷工具——<code>cilium status</code> 與 <code>cilium connectivity test</code> 這兩件事 Helm 做不到。</p>
+<p>網段必須自己指定,原因見<a href="#mine-4">地雷 4</a>。正確的 values:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>cilium-values.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="s"># AKS BYOCNI preset: writes the CNI conflist and skips the AKS-specific bits.</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="s">aksbyocni:</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="s">  enabled: true</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="s">nodeinit:</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="s">  enabled: true</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="s"># MUST be set. Cilium&#39;s cluster-pool default is 10.0.0.0/8, which swallows</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="s"># AKS&#39;s service CIDR (10.0.0.0/16). 10.244.0.0/16 is what AKS&#39;s own kube-proxy</span>
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="s"># already assumes — see mine 4.</span>
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="s">ipam:</span>
+</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="s">  mode: cluster-pool</span>
+</span><span id="__span-5-13"><a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="s">  operator:</span>
+</span><span id="__span-5-14"><a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="s">    clusterPoolIPv4PodCIDRList: [&quot;10.244.0.0/16&quot;]</span>
+</span><span id="__span-5-15"><a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="s">    clusterPoolIPv4MaskSize: 24</span>
+</span><span id="__span-5-16"><a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>
+</span><span id="__span-5-17"><a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a><span class="s">kubeProxyReplacement: false     # turned on in step 4, deliberately not yet</span>
+</span><span id="__span-5-18"><a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a><span class="s">EOF</span>
+</span><span id="__span-5-19"><a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a>
+</span><span id="__span-5-20"><a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a>helm<span class="w"> </span>repo<span class="w"> </span>add<span class="w"> </span>cilium<span class="w"> </span>https://helm.cilium.io/<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>helm<span class="w"> </span>repo<span class="w"> </span>update<span class="w"> </span>cilium
+</span><span id="__span-5-21"><a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a>helm<span class="w"> </span>install<span class="w"> </span>cilium<span class="w"> </span>cilium/cilium<span class="w"> </span>--version<span class="w"> </span><span class="m">1</span>.20.0<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-f<span class="w"> </span>cilium-values.yaml
+</span></code></pre></div>
+<p>裝出來的是<strong>三個 DaemonSet 加一個 Deployment</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>元件</th>
+<th>形狀</th>
+<th>做什麼</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cilium</code>(agent)</td>
+<td>DaemonSet,每節點 1</td>
+<td>掛載 eBPF 程式、管 endpoint、寫 CNI conflist</td>
+</tr>
+<tr>
+<td><code>cilium-envoy</code></td>
+<td>DaemonSet,每節點 1</td>
+<td>L7 政策的執行體(Day 8 的 HTTP 規則要靠它)</td>
+</tr>
+<tr>
+<td><code>cilium-node-init</code></td>
+<td>DaemonSet,每節點 1</td>
+<td>節點層前置,跑完就 sleep(實測 1m CPU / 0Mi)</td>
+</tr>
+<tr>
+<td><code>cilium-operator</code></td>
+<td>Deployment</td>
+<td>叢集層:IPAM 配發 pod CIDR、身分回收</td>
+</tr>
+</tbody>
+</table>
+<p><code>cilium-envoy</code> 獨立成一個 DaemonSet 是 1.16 之後的預設(以前塞在 agent 裡)。它現在只吃 13Mi;Day 8 開 L7 政策之後要再量一次(<strong>後續實測是沒有長</strong>——一顆 endpoint、一條 HTTP 規則的規模下仍是 14Mi)。</p>
+<p>另外裝了 <strong>10 個 CRD</strong>,Day 8 要用的 <code>CiliumNetworkPolicy</code> 是其中之一。</p>
+<h3 id="falcotetragon">資源足跡:跟 Falco、Tetragon 正面對照<a class="headerlink" href="#falcotetragon" title="Permanent link">&para;</a></h3>
+<p>Day 3 與 Day 5 對 Falco 與 Tetragon 問過同一組問題——chart 有沒有給 <code>resources</code>?有沒有給 <code>priorityClassName</code>?Cilium 的答案<strong>一半不一樣,而不一樣的那一半剛好是重要的那一半</strong>:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>requests(chart 預設)</th>
+<th>實測用量/節點</th>
+<th>QoS</th>
+<th>priority</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Falco</strong> 0.44.1</td>
+<td><code>100m/512Mi</code></td>
+<td>14–24m / 84–90Mi</td>
+<td>Burstable</td>
+<td><strong>0</strong></td>
+</tr>
+<tr>
+<td><strong>Tetragon</strong> 1.7.0</td>
+<td><code>{}</code></td>
+<td>5–11m / 83–120Mi</td>
+<td><strong>BestEffort</strong></td>
+<td><strong>0</strong></td>
+</tr>
+<tr>
+<td><strong>Cilium</strong> 1.20.0 agent</td>
+<td><code>{}</code></td>
+<td>23–30m / 85–102Mi</td>
+<td>Burstable</td>
+<td><strong>2000001000</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong><a href="../sprint2-day3-falco-basics/#mine-1">Day 3 地雷 1</a> 那個問題,Cilium 答對了。</strong> Falco 與 Tetragon 的 chart 都不設 <code>priorityClassName</code>,priority 0 比每一個系統元件都低,在滿載節點上是搶佔演算法第一個挑中的;Cilium 直接掛 <code>system-node-critical</code>,跟 kube-proxy 同級。</p>
+<p>這是合理的——<strong>它不是監控,它是網路本身,被搶佔的後果是節點斷網</strong>。但值得記住的是「chart 有沒有替你想過這件事」在三套 CNCF 專案之間答案不同。</p>
+<p>至於那個 Burstable 是怎麼來的,見<a href="#mine-5">地雷 5</a>——答案不太好看。</p>
+<h2 id="3">步驟 3: 連通性測試——驗收的第一半<a class="headerlink" href="#3" title="Permanent link">&para;</a></h2>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="gp">$ </span>cilium<span class="w"> </span>status<span class="w"> </span>--wait
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="go"> /¯¯\__/¯¯\    Cilium:             OK</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="go"> \__/¯¯\__/    Operator:           OK</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="go"> /¯¯\__/¯¯\    Envoy DaemonSet:    OK</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="go"> \__/¯¯\__/    Hubble Relay:       disabled          ← Day 9 才開</span>
+</span></code></pre></div>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="gp">$ </span>cilium<span class="w"> </span>connectivity<span class="w"> </span><span class="nb">test</span><span class="w"> </span>--tolerations<span class="w"> </span>kubernetes.azure.com/scalesetpriority<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">      </span>--test-namespace<span class="w"> </span>cilium-test-kp
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="go">（約 23 分鐘）</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="go">📋 Test Report</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="go">❌ 2/82 tests failed (0/672 actions), 50 tests skipped, 1 scenarios skipped</span>
+</span></code></pre></div>
+<p><strong>這一行很容易被誤讀成「有兩件事壞了」,所以要把數字讀清楚:</strong></p>
+<ul>
+<li><strong>672 個實際動作失敗數是 0。</strong> 每一次真正發出去的封包、每一條政策判定,全部符合預期。</li>
+<li>132 項裡 <strong>50 項被跳過</strong>,理由分三類:功能沒開(加密、Egress Gateway 等本課刻意沒開)、會改動節點狀態(CLI 預設不跑,這是對的)、版本條件(舊版加密測試已被 v2 取代)。</li>
+<li>剩下 82 項真的跑了,<strong>80 項通過</strong>。</li>
+</ul>
+<p>那兩項失敗跟資料平面無關,見<a href="#mine-6">地雷 6</a> 與<a href="#mine-7">地雷 7</a>。</p>
+<p><strong>本日對第一半的判定:通過,但要附上那兩顆地雷。</strong> 判定根據是「0/672 動作失敗」加上「失敗原因是測試框架的探針排不上一顆被強制打 taint 的節點,而它們測的功能本來就沒開」。<strong>把不能跑的東西記成綠燈,跟把它藏起來一樣糟</strong>——所以步驟 5 的第二輪測試明確排除那兩項,讓報表能夠真的全綠,而排除的理由寫在地雷裡。</p>
+<h2 id="step-4">步驟 4: 換掉 kube-proxy——先問它現在到底在做什麼<a class="headerlink" href="#step-4" title="Permanent link">&para;</a></h2>
+<p><code>cilium status</code> 寫著 <code>KubeProxyReplacement: False</code>,而 kube-proxy 兩顆 pod 好端端跑著。看起來很清楚:現在 ClusterIP 是 kube-proxy 在做,等一下換成 Cilium。</p>
+<p><strong>這個推論是錯的,而且錯得很有教育意義。</strong></p>
+<h3 id="kube-proxy">先看 kube-proxy 寫了什麼<a class="headerlink" href="#kube-proxy" title="Permanent link">&para;</a></h3>
+<p>節點視角需要一顆 <code>hostNetwork: true</code> 加 <code>privileged</code> 的 pod。少了 <code>hostNetwork</code>,<code>iptables -t nat -S</code> 會給你一份空的規則表——那個空不是「沒有規則」,是<strong>你在看容器自己的網路命名空間</strong>。</p>
+<p>被測服務是一個 ClusterIP,兩顆後端。完整的查找路徑:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="gp">$ </span>iptables<span class="w"> </span>-t<span class="w"> </span>nat<span class="w"> </span>-S<span class="w"> </span>PREROUTING
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="go">-A PREROUTING -m comment --comment &quot;cilium-feeder: CILIUM_PRE_nat&quot; -j CILIUM_PRE_nat</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="go">-A PREROUTING -m comment --comment &quot;kubernetes service portals&quot; -j KUBE-SERVICES</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="gp">$ </span>iptables<span class="w"> </span>-t<span class="w"> </span>nat<span class="w"> </span>-S<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>&lt;cluster-ip&gt;
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="go">-A KUBE-SERVICES -d &lt;cluster-ip&gt;/32 -p tcp --dport 80 -j KUBE-SVC-XS3ZU56555AQFGIC</span>
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>
+</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="gp">$ </span>iptables<span class="w"> </span>-t<span class="w"> </span>nat<span class="w"> </span>-S<span class="w"> </span>KUBE-SVC-XS3ZU56555AQFGIC
+</span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="go">-A KUBE-SVC-… -m statistic --mode random --probability 0.50000000000 -j KUBE-SEP-JZF7FF4KHPDVC7PP</span>
+</span><span id="__span-8-10"><a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="go">-A KUBE-SVC-… -j KUBE-SEP-A6QIQCODODBCXNWL</span>
+</span><span id="__span-8-11"><a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>
+</span><span id="__span-8-12"><a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="gp">$ </span>iptables<span class="w"> </span>-t<span class="w"> </span>nat<span class="w"> </span>-S<span class="w"> </span>KUBE-SEP-JZF7FF4KHPDVC7PP
+</span><span id="__span-8-13"><a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="go">-A KUBE-SEP-… -p tcp -j DNAT --to-destination 10.244.1.202:8080</span>
+</span></code></pre></div>
+<p>這就是 iptables 模式的形狀:<strong><code>KUBE-SERVICES</code> 是一條線性鏈</strong>(每個 Service 一條規則,逐條比對到中),命中後跳進該 Service 的 <code>KUBE-SVC-*</code>,用 <code>statistic --mode random --probability</code> 逐條擲骰子挑後端,最後在 <code>KUBE-SEP-*</code> 做 DNAT。兩顆後端就是第一條 0.5、第二條吃剩下的;三顆會是 0.333 / 0.5 / 1,因為那是條件機率。</p>
+<h3 id="_2">誰真的做了那次翻譯<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h3>
+<p><code>cilium service list</code> 這時候也是滿的——兩邊都「有」這條 Service:iptables 有鏈,Cilium 有 map。<strong>有資料不代表資料被用到。</strong></p>
+<p>唯一不會騙人的是封包計數器:清零、打固定次數、再讀。</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="gp">#</span><span class="c1">## A) 呼叫端 = 一般 pod</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="gp">$ </span>iptables<span class="w"> </span>-t<span class="w"> </span>nat<span class="w"> </span>-Z<span class="w">                                    </span>←<span class="w"> </span>全表計數器清零
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="gp">$ </span>kubectl<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>client<span class="w"> </span>--<span class="w"> </span>sh<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;for i in $(seq 1 20); do curl -s -o /dev/null -w &quot;%{http_code}&quot; http://&lt;cluster-ip&gt;/; done&#39;</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="go">200200200200200200200200200200200200200200200200200200200200</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="gp">$ </span>iptables<span class="w"> </span>-t<span class="w"> </span>nat<span class="w"> </span>-L<span class="w"> </span>KUBE-SERVICES<span class="w"> </span>-n<span class="w"> </span>-v<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>&lt;cluster-ip&gt;
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="go">    0     0 KUBE-SVC-XS3ZU56555AQFGIC  tcp  --  0.0.0.0/0  &lt;cluster-ip&gt;  tcp dpt:80</span>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="go">      ↑ 20 次請求全部成功,iptables 一個封包都沒看到</span>
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="gp">#</span><span class="c1">## B) 呼叫端 = hostNetwork(節點 root netns)</span>
+</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="gp">$ </span>iptables<span class="w"> </span>-t<span class="w"> </span>nat<span class="w"> </span>-Z
+</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="gp">$ </span><span class="o">(</span>在<span class="w"> </span>node-shell<span class="w"> </span>裡<span class="o">)</span><span class="w"> </span><span class="k">for</span><span class="w"> </span>i<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="k">$(</span>seq<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="m">20</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">do</span><span class="w"> </span>curl<span class="w"> </span>-s<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s2">&quot;%{http_code}&quot;</span><span class="w"> </span>http://&lt;cluster-ip&gt;/<span class="p">;</span><span class="w"> </span><span class="k">done</span>
+</span><span id="__span-9-12"><a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="go">200200200200200200200200200200200200200200200200200200200200</span>
+</span><span id="__span-9-13"><a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="gp">$ </span>iptables<span class="w"> </span>-t<span class="w"> </span>nat<span class="w"> </span>-L<span class="w"> </span>KUBE-SERVICES<span class="w"> </span>-n<span class="w"> </span>-v<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>&lt;cluster-ip&gt;
+</span><span id="__span-9-14"><a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="go">   20  1200 KUBE-SVC-XS3ZU56555AQFGIC  tcp  --  0.0.0.0/0  &lt;cluster-ip&gt;  tcp dpt:80</span>
+</span><span id="__span-9-15"><a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="gp">$ </span>iptables<span class="w"> </span>-t<span class="w"> </span>nat<span class="w"> </span>-L<span class="w"> </span>KUBE-SVC-XS3ZU56555AQFGIC<span class="w"> </span>-n<span class="w"> </span>-v
+</span><span id="__span-9-16"><a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a><span class="go">   10   600 KUBE-SEP-JZF7FF4KHPDVC7PP  … probability 0.50000000000</span>
+</span><span id="__span-9-17"><a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a><span class="go">   10   600 KUBE-SEP-A6QIQCODODBCXNWL</span>
+</span><span id="__span-9-18"><a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a><span class="go">      ↑ 20 次全部走 iptables,而且骰子擲出漂亮的 10/10</span>
+</span></code></pre></div>
+<p><strong>同一個 ClusterIP、同一顆節點、同一秒,兩個呼叫端的答案完全相反。</strong> 這是<a href="#mine-8">地雷 8</a>,也是今天的頭條。</p>
+<h3 id="_3">換掉它<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h3>
+<p>順序很重要:<strong>先讓 Cilium 接手,再拆 kube-proxy</strong>。反過來做的話,中間那段時間 hostNetwork 的流量沒有人服務,而 cilium-agent 重啟時要用的就是 hostNetwork。</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># The two k8sService* lines are NOT optional. Once kube-proxy is gone, nobody</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="c1"># translates the `kubernetes` Service (10.0.0.1:443) — and cilium-agent needs the</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="c1"># API server to learn what Services exist. Give it the control plane&#39;s real FQDN</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1"># to break that circular dependency.</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>cat<span class="w"> </span>&gt;&gt;<span class="w"> </span>cilium-values.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="s">kubeProxyReplacement: true</span>
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="s">k8sServiceHost: &lt;api-server-fqdn&gt;</span>
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="s">k8sServicePort: &quot;443&quot;</span>
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="s">EOF</span>
+</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>
+</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>helm<span class="w"> </span>upgrade<span class="w"> </span>cilium<span class="w"> </span>cilium/cilium<span class="w"> </span>--version<span class="w"> </span><span class="m">1</span>.20.0<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-f<span class="w"> </span>cilium-values.yaml<span class="w"> </span>--wait
+</span><span id="__span-10-12"><a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>kubectl<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>rollout<span class="w"> </span>restart<span class="w"> </span>ds/cilium
+</span></code></pre></div>
+<p>漏掉那兩行不會報錯,會是 agent CrashLoopBackOff 而<strong>整座叢集的 Service 一起停擺</strong>。</p>
+<p>換完之後 agent 的自我描述變了:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="go">KubeProxyReplacement Details:</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="go">  Status:               True</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="go">  Socket LB:            Enabled          ← 從 Disabled 變成 Enabled,這才是重點</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="go">  Services:</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="go">  - ClusterIP:      Enabled</span>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="go">  - NodePort:       Enabled (Range: 30000-32767)   ← 這四項才是 replacement 真正帶來的</span>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="go">  - LoadBalancer:   Enabled</span>
+</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="go">  - externalIPs:    Enabled</span>
+</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="go">  - HostPort:       Enabled</span>
+</span></code></pre></div>
+<p>拆掉 kube-proxy 本身有兩顆地雷:<a href="#mine-9">地雷 9</a>(刪了會自己回來)與<a href="#mine-10">地雷 10</a>(走了規則不會走)。</p>
+<h2 id="5">步驟 5: 量化——規則數、查找路徑,以及不能宣稱的那一項<a class="headerlink" href="#5" title="Permanent link">&para;</a></h2>
+<h3 id="_4">規則數<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
+<p>叢集裡 10 個 Service:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>nat 表總行數</th>
+<th>其中 <code>KUBE-*</code></th>
+<th>其中 <code>CILIUM_*</code></th>
+<th>Service 相關規則</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>kube-proxy 在</td>
+<td><strong>135</strong></td>
+<td>120</td>
+<td>11</td>
+<td>120</td>
+</tr>
+<tr>
+<td>replacement 之後</td>
+<td><strong>16</strong></td>
+<td>1(<code>KUBE-KUBELET-CANARY</code>,kubelet 的空鏈)</td>
+<td>11</td>
+<td><strong>0</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>10 個 Service 等於 120 條 nat 規則,而且是線性成長</strong>:每多一個 Service,<code>KUBE-SERVICES</code> 多一條要逐條比對的規則;每多一顆後端,那個 Service 的鏈多一條。剩下的 11 條 <code>CILIUM_*</code> 全部是 masquerade,<strong>跟 Service 查找無關,而且不隨 Service 數量成長</strong>。</p>
+<h3 id="_5">查找路徑<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h3>
+<p>這比規則數更根本。</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="gp">$ </span>bpftool<span class="w"> </span>cgroup<span class="w"> </span>show<span class="w"> </span>/run/cilium/cgroupv2
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="go">ID     AttachType                Name</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="go">4706   cgroup_inet4_connect      cil_sock4_connect        ← 就是這一支</span>
+</span></code></pre></div>
+<p><code>cil_sock4_connect</code> 掛在 <code>cgroup_inet4_connect</code>——也就是<strong>行程呼叫 <code>connect(2)</code> 的那一刻,在任何封包被組出來之前</strong>。應用程式以為自己連到 ClusterIP,核心在 socket 層就把目的地改寫成後端 pod 的位址,之後這條連線的每一個封包從頭到尾都是「一般的 pod 對 pod 流量」。</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>kube-proxy(iptables 模式)</th>
+<th>Cilium kube-proxy replacement</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>發生時機</td>
+<td>每個封包,在 netfilter hook</td>
+<td><strong>每條連線一次</strong>,在 <code>connect()</code></td>
+</tr>
+<tr>
+<td>資料結構</td>
+<td>線性規則鏈,O(Service 數) 比對</td>
+<td>eBPF hash map,O(1) 查找</td>
+</tr>
+<tr>
+<td>後端選擇</td>
+<td>逐條擲骰子</td>
+<td>map 的 slot 索引</td>
+</tr>
+<tr>
+<td>之後每個封包</td>
+<td>走 conntrack 查 NAT 狀態</td>
+<td><strong>不需要</strong>,位址已經是真的</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_6">延遲:這一項沒有辦法誠實地宣稱改善<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
+<p><code>time_connect</code>(只含 TCP 三次握手),各 300 次:</p>
+<table>
+<thead>
+<tr>
+<th>量測</th>
+<th>mean</th>
+<th>p50</th>
+<th>p90</th>
+<th>p99</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>kube-proxy(iptables)</td>
+<td>0.370 ms</td>
+<td>0.305</td>
+<td>0.515</td>
+<td>1.600</td>
+</tr>
+<tr>
+<td>replacement 之後 run1</td>
+<td>0.311 ms</td>
+<td>0.257</td>
+<td>0.378</td>
+<td>0.937</td>
+</tr>
+<tr>
+<td>replacement 之後 run2</td>
+<td>0.250 ms</td>
+<td>0.221</td>
+<td>0.332</td>
+<td>0.617</td>
+</tr>
+<tr>
+<td><strong>對照組:直接打後端 pod IP</strong></td>
+<td><strong>0.249 ms</strong></td>
+<td><strong>0.220</strong></td>
+<td>0.334</td>
+<td>0.727</td>
+</tr>
+</tbody>
+</table>
+<p>兩個問題讓「快了 27%」站不住:<strong>BEFORE 那一組是在連通性測試同時跑的時候量的</strong>(負載不同),而 <strong>run1 與 run2 的差距(p50 36 µs)比任何想宣稱的效果都大</strong>——這台機器的 run-to-run 雜訊已經吃掉整個訊號。</p>
+<p>但同一張表裡有一個<strong>乾淨</strong>的結論,而且比延遲比較更有意思:<strong>走 ClusterIP(p50 0.221)與直接打後端 pod IP(p50 0.220)在量測精度內完全一樣。</strong> 對照組沒有經過任何 Service 翻譯,而 socket LB 那一組多做了一次 map 查找——<strong>多出來的成本量不到</strong>。</p>
+<p>所以誠實的說法是:<strong>「Cilium 的 ClusterIP 翻譯在這台機器上量不到成本」有證據;「比 kube-proxy 快多少」沒有。</strong> 而在 10 個 Service 的實驗叢集上,線性鏈的代價本來就還沒開始顯現——<strong>那個差距要在幾百上千個 Service 的叢集才會變成數字</strong>,那也正是它真正的適用場景。</p>
+<h3 id="_7">第二輪連通性測試<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h3>
+<p>排除地雷 6 那兩項之後重跑:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="go">✅ All 80 tests (678 actions) successful, 52 tests skipped, 0 scenarios skipped.</span>
+</span></code></pre></div>
+<p>動作總數反而從 672 變成 <strong>678</strong>——多出來的 6 個是 NodePort 相關的:replacement 開啟之後 <code>NodePort: Enabled</code>,測試框架多測了幾條先前被跳過的路徑。</p>
+<h3 id="_8">驗收第二半的完整證據<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h3>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>get<span class="w"> </span>ds<span class="w"> </span>kube-proxy
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="go">NAME         DESIRED   CURRENT   READY   NODE SELECTOR</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="go">kube-proxy   0         0         0       lab.local/no-kube-proxy=true</span>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-A<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-c<span class="w"> </span>kube-proxy<span class="w">                       </span>→<span class="w"> </span><span class="m">0</span>
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="gp">$ </span><span class="o">(</span>兩顆節點<span class="o">)</span><span class="w"> </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">1</span><span class="w"> </span>-m<span class="w"> </span>-p<span class="w"> </span>--<span class="w"> </span>pgrep<span class="w"> </span>-a<span class="w"> </span>kube-proxy<span class="w">           </span>→<span class="w"> </span><span class="o">(</span>no<span class="w"> </span>kube-proxy<span class="w"> </span>process<span class="o">)</span>
+</span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="gp">$ </span>cilium-dbg<span class="w"> </span>status<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>KubeProxyReplacement<span class="w">                  </span>→<span class="w"> </span>True
+</span><span id="__span-14-8"><a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="gp">$ </span>kubectl<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>client<span class="w"> </span>--<span class="w"> </span>curl<span class="w"> </span>http://svc-backend…/<span class="w">               </span>→<span class="w"> </span><span class="m">200</span>
+</span><span id="__span-14-9"><a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="gp">$ </span><span class="o">(</span>node-shell,<span class="w"> </span>hostNetwork<span class="o">)</span><span class="w"> </span>curl<span class="w"> </span>http://&lt;cluster-ip&gt;/<span class="w">            </span>→<span class="w"> </span><span class="m">200</span>
+</span><span id="__span-14-10"><a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="gp">$ </span>kubectl<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>client<span class="w"> </span>--<span class="w"> </span>curl<span class="w"> </span>-k<span class="w"> </span>https://10.0.0.1:443/healthz<span class="w">    </span>→<span class="w"> </span><span class="m">401</span>
+</span></code></pre></div>
+<p>最後那個 <code>401</code> 是好消息:它代表 TLS 握手完成、HTTP 請求送達 API server,只是沒帶憑證。<strong><code>kubernetes</code> Service 這條「換掉 kube-proxy 最可能弄壞」的路徑是活的。</strong></p>
+<h2 id="6">步驟 6: 收工——沒有安全網的一步<a class="headerlink" href="#6" title="Permanent link">&para;</a></h2>
+<p>這座叢集是今天新建的,<strong>不在既有的自動關機排程裡</strong>。忘記收工的話它會整夜以每小時的價格計費。</p>
+<p>原本的計畫是「兩個節點池都縮到 0」,而那個計畫被 API 退件(<a href="#mine-11">地雷 11</a>)。所以只剩 <code>az aks stop</code>——<strong>而那正好是一件沒驗證過的事</strong>:BYOCNI 叢集停機再開機之後,CNI 會不會自己回來?</p>
+<p>既然變成必經之路,就當場驗證,而不是留給隔天早上:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>stop<span class="w">  </span>…<span class="w">      </span>（2<span class="w"> </span>分<span class="w"> </span><span class="m">04</span><span class="w"> </span>秒）
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>start<span class="w"> </span>…<span class="w">      </span>（4<span class="w"> </span>分<span class="w"> </span><span class="m">04</span><span class="w"> </span>秒）
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>nodes
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="go">&lt;node&gt;-vmss000001   Ready   &lt;none&gt;   90s   v1.35.6</span>
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="go">              ↑ 注意編號變了:這是一台全新的 VM,不是原來那台</span>
+</span></code></pre></div>
+<p>驗收全部一次過,沒有任何人工修補:Cilium 四個元件全部 Running、<strong>kube-proxy 的 patch 存活</strong>、<code>KubeProxyReplacement: True</code>、Service 可達。</p>
+<p><strong>節點是全新的 VM</strong>——停機再開機不是把原來那台叫醒,是重建。所以「CNI 會不會回來」這個問題實際上是「新節點上 CNI 會不會自己裝好」,而答案是會。</p>
+<h2 id="_9">誠實的差距<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>延遲改善沒有證據。</strong> 上面已經寫清楚為什麼:負載不對等、雜訊大於訊號。要回答「比 kube-proxy 快多少」需要固定負載、交錯取樣的 A/B,本課的條件不具備。</li>
+<li><strong>兩項連通性測試沒有跑過。</strong> 它們測的是加密功能,而這座叢集沒開加密;失敗原因是測試框架的探針排不上 spot 節點。<strong>這兩項在本課從未被驗證過,只是被排除。</strong></li>
+<li><strong>只有 10 個 Service。</strong> 規則數與查找路徑的差別在這個規模下是結構性的而不是效能性的。線性鏈真正變成問題的規模,本課沒有重現。</li>
+<li><strong>kube-proxy 沒有真正被移除。</strong> DaemonSet 物件還在(而且刪不掉),只是被釘在一個不存在的節點選擇器上。原生的關法綁在訂閱層級的預覽旗標,為了一座臨時叢集不做那個異動。</li>
+<li><strong><code>az aks stop</code>/<code>start</code> 只驗過一次。</strong> kube-proxy 的 patch 撐過那一次,但單一次觀察不足以當成保證。</li>
+</ul>
+<h2 id="checkpoint">驗收 checkpoint<a class="headerlink" href="#checkpoint" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>驗證</th>
+<th>判準</th>
+<th>本課環境的結果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>BYOCNI 叢集建立</td>
+<td><code>networkProfile.networkPlugin</code> 是 <code>none</code>,且節點在裝 CNI 前是 <code>NotReady</code></td>
+<td>兩項都成立,建立耗時 5 分 13 秒</td>
+</tr>
+<tr>
+<td>Cilium 就緒</td>
+<td><code>cilium status</code> 四個元件皆 OK,pod 網段不與 service CIDR 重疊</td>
+<td>agent / envoy / node-init / operator 全 OK;pod CIDR <code>10.244.0.0/16</code></td>
+</tr>
+<tr>
+<td><strong>連通性測試</strong></td>
+<td>實際執行的測試全數通過,且<strong>失敗項的原因可歸因</strong></td>
+<td>第一輪 80/82(2 項為框架排程問題);排除後第二輪 <strong>80/80、678 動作全過</strong></td>
+</tr>
+<tr>
+<td><strong>kube-proxy 不在</strong></td>
+<td>零個 pod <strong>且</strong>兩顆節點上零個行程</td>
+<td>兩項都成立</td>
+</tr>
+<tr>
+<td>Service 仍可達</td>
+<td>pod、hostNetwork、跨節點、以及 <code>kubernetes</code> Service 四條路徑</td>
+<td>四條全通(<code>kubernetes</code> 回 401 = 握手完成)</td>
+</tr>
+<tr>
+<td>規則數下降可量化</td>
+<td>nat 表行數與 <code>KUBE-*</code> 規則數</td>
+<td><strong>135 → 16 行</strong>,120 條 Service 規則 → <strong>0</strong></td>
+</tr>
+<tr>
+<td>停機重啟後仍成立</td>
+<td>重開之後 kube-proxy 仍為 0、Service 仍可達</td>
+<td>成立(新 VM,無人工修補)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_10">地雷記錄<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h2>
+<h3 id="mine-1">地雷 1:<code>az aks create</code> 根本沒有 <code>--priority</code> 這個參數<a class="headerlink" href="#mine-1" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:照著「2 台 spot 節點」的計畫下指令,被拒絕。</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>create<span class="w"> </span>…<span class="w"> </span>--priority<span class="w"> </span>Spot<span class="w"> </span>--eviction-policy<span class="w"> </span>Delete<span class="w"> </span>--spot-max-price<span class="w"> </span>-1<span class="w"> </span>…
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="go">ERROR: unrecognized arguments: --priority Spot --eviction-policy Delete --spot-max-price -1</span>
+</span></code></pre></div>
+<p><strong>根因</strong>:不是「參數值不合法」,是<strong>這個子命令沒有這組參數</strong>。AKS 的第一個節點池一定是 system pool,而 system pool 不能是 spot——這條限制不是在執行期擋你,是直接不出現在 CLI 介面上(<code>az aks nodepool add</code> 才有 <code>--priority</code>)。</p>
+<p><strong>後果</strong>:「一座 2 台 spot 的叢集」在 AKS 上不存在。最省的形狀是 <strong>1 台隨需 system 加 N 台 spot user pool</strong>,而那台隨需節點就是成本估算裡最容易漏掉的一項——本課的實際每小時成本因此比計畫估的高出約一倍。</p>
+<h3 id="mine-2">地雷 2:決定能不能排到 <code>NotReady</code> 節點的是 taint 容忍,不是 hostNetwork<a class="headerlink" href="#mine-2" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:在還沒裝 CNI 的叢集上,<code>konnectivity-agent</code> 明明是 <code>hostNetwork: true</code>,卻一樣 Pending。</p>
+<p><strong>根因</strong>:決定一顆 pod 能不能排到 <code>NotReady</code> 節點上的,是它容不容忍 <code>node.kubernetes.io/not-ready:NoSchedule</code>。<strong>DaemonSet controller 會自動替它管的 pod 加上這個容忍</strong>(所以 <code>kube-proxy</code>、<code>csi-*</code>、<code>cloud-node-manager</code> 都在跑),<strong>而 Deployment 不會</strong>。</p>
+<p><code>konnectivity-agent</code> 是 Deployment:它的第一顆副本在節點被打上 taint <strong>之前</strong>就排上去了(所以 Running),第二顆碰上 taint 就卡住。</p>
+<p><strong>教訓</strong>:「hostNetwork 的活著」這個直覺會在這裡騙你。兩顆同樣是 hostNetwork 的 pod 一顆 Running 一顆 Pending,差別在它們的控制器類型。</p>
+<h3 id="mine-3">地雷 3:cilium-cli 會告訴你 stable 是哪一版,然後裝另一版<a class="headerlink" href="#mine-3" title="Permanent link">&para;</a></h3>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="gp">$ </span>cilium<span class="w"> </span>version<span class="w"> </span>--client
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="go">cilium-cli: v0.19.7 compiled with go1.26.5 on darwin/arm64</span>
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="go">cilium image (default): v1.19.5</span>
+</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="go">cilium image (stable):  v1.20.0</span>
+</span></code></pre></div>
+<p><strong>同一段輸出裡,default 和 stable 差了一個 minor。</strong> <code>cilium install</code> 不帶 <code>--version</code> 用的是 default。</p>
+<p>這不是 bug——CLI 的預設值有自己的發佈節奏——但它讓「照官方快速上手打一行指令」的結果是一個<strong>比當下 stable 舊一版的叢集,而且沒有任何一行輸出提醒你</strong>。</p>
+<p><strong>修法</strong>:用 Helm 並寫死版本,或者 <code>cilium install --version</code> 明確指定。</p>
+<h3 id="mine-4">地雷 4:Cilium 出廠的 pod 網段把 AKS 的 Service 網段整個吃掉<a class="headerlink" href="#mine-4" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:照官方 AKS BYOCNI 快速上手裝完,節點 Ready,然後 metrics-server 進 <code>CrashLoopBackOff</code>:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="go">E0807 06:19:07 … dial tcp: lookup &lt;api-fqdn&gt; on 10.0.0.10:53:</span>
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="go">  read udp 10.0.0.140:34964-&gt;10.0.0.10:53: read: connection refused</span>
+</span></code></pre></div>
+<p><strong>根因</strong>:pod 拿到的 IP 是 <code>10.0.0.x</code>,而這座叢集的 service CIDR 是 <code>10.0.0.0/16</code>、kube-dns 的 ClusterIP 是 <code>10.0.0.10</code>。<strong>pod 正在從 Service 的網段裡拿位址。</strong> 封包送到 <code>10.0.0.10</code> 時,Cilium 認為那是本節點的一顆 pod 而不是一個 Service,於是 <code>connection refused</code>。</p>
+<p>來源是 Cilium <code>cluster-pool</code> IPAM 的出廠 <code>clusterPoolIPv4PodCIDRList</code> 為 <strong><code>10.0.0.0/8</code></strong>,而 AKS 的預設 service CIDR <code>10.0.0.0/16</code> 完全包含在裡面。<code>aksbyocni</code> 這個 preset <strong>不會</strong>幫你處理。</p>
+<p><strong>最諷刺的是正確答案就寫在叢集自己身上</strong>:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>get<span class="w"> </span>ds<span class="w"> </span>kube-proxy<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{…containers[0].command}&#39;</span>
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="go">[&quot;kube-proxy&quot;, …, &quot;--cluster-cidr=10.244.0.0/16&quot;, …]</span>
+</span></code></pre></div>
+<p>AKS 出廠的 kube-proxy 一直在說「pod 在 <code>10.244.0.0/16</code>」。<code>az aks show</code> 的 <code>networkProfile.podCidr</code> 是 <code>null</code>(因為 BYOCNI 不由 AKS 配發),<strong>但 kube-proxy 的參數不是 null</strong>。</p>
+<p><strong>教訓</strong>:BYOCNI 的意思是「pod 網段由你負責」,<strong>不是「叢集其他元件對 pod 網段沒有假設」</strong>。</p>
+<p><strong>修法</strong>是重裝而不是升級——<code>CiliumNode</code> 上的網段是已分配狀態,要先刪掉:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="gp">$ </span>helm<span class="w"> </span>uninstall<span class="w"> </span>cilium<span class="w"> </span>-n<span class="w"> </span>kube-system
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="gp">$ </span>kubectl<span class="w"> </span>delete<span class="w"> </span>ciliumnode<span class="w"> </span>--all
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="gp">$ </span>helm<span class="w"> </span>install<span class="w"> </span>cilium<span class="w"> </span>…<span class="w"> </span>-f<span class="w"> </span>cilium-values.yaml<span class="w">      </span><span class="c1"># 含正確的 clusterPoolIPv4PodCIDRList</span>
+</span></code></pre></div>
+<p>而且<strong>已經拿到舊網段 IP 的 pod 不會自己修好</strong>,要手動重建。在正式環境這一點是重點:<strong>改 pod 網段不是改設定,是整個資料平面重建。</strong></p>
+<h3 id="mine-5">地雷 5:<code>cilium</code> pod 的 Burstable 是一顆 init container 借來的<a class="headerlink" href="#mine-5" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:Cilium 是 Burstable、Tetragon 是 BestEffort,兩者的長駐容器卻同樣是 <code>resources: {}</code>。</p>
+<p><strong>根因</strong>:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>get<span class="w"> </span>ds<span class="w"> </span>cilium<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .spec.template.spec.initContainers[*]}…&#39;</span>
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="go">config                   -&gt; {}</span>
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="go">mount-cgroup             -&gt; {}</span>
+</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="go">…</span>
+</span><span id="__span-21-5"><a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="go">install-cni-binaries     -&gt; {&quot;limits&quot;:{&quot;cpu&quot;:&quot;1&quot;,&quot;memory&quot;:&quot;1Gi&quot;},&quot;requests&quot;:{&quot;cpu&quot;:&quot;100m&quot;,&quot;memory&quot;:&quot;10Mi&quot;}}</span>
+</span></code></pre></div>
+<p>七個 init container 裡只有最後一個有 requests。Kubernetes 算一顆 pod 的有效 request 時取 <strong>max(所有長駐容器的總和, 各 init container 的最大值)</strong>,於是這顆 pod 的 request 變成 <code>100m/10Mi</code>——<strong>來自一個複製完二進位檔就結束的 init container</strong>,而不是那個要跑到節點壽命結束的 agent。</p>
+<p><strong>後果有兩層</strong>:QoS 被拉成 Burstable,看起來比 Tetragon「有保障」,但保障的量是錯的;而<strong>記憶體 request 10Mi、實測 102Mi,差 10 倍</strong>——排程器對這顆節點的記憶體帳本少算了約 92Mi。</p>
+<p><a href="../sprint2-day3-falco-basics/#mine-7">Day 3 地雷 7</a> 記的是相反方向的問題(Falco 超額 4–7 倍,於是排不進去)。<strong>兩種方向都是錯的,而低估的這種更難發現</strong>:它不會讓 pod 排不上,它會讓節點在你以為還有餘裕的時候開始換頁。</p>
+<p><code>priorityClassName</code> 救得了「被搶佔」,救不了「排程器以為你只要 10Mi」。</p>
+<h3 id="mine-6">地雷 6:<code>--tolerations</code> 沒有套到測試框架的 DaemonSet<a class="headerlink" href="#mine-6" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:連通性測試兩項失敗,而訊息不是「封包不通」:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="go">🟥 Fail to acquire host namespace pod on &lt;spot-node&gt; (client&#39;s node)</span>
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="go">🟥 Could not find host network namespace pod on client node &lt;spot-node&gt;</span>
+</span></code></pre></div>
+<p><strong>根因</strong>:測試框架需要每顆節點各一顆 <code>hostNetwork</code> 探針 pod,而它只排上了一顆。</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>cilium-test-kp-1<span class="w"> </span>get<span class="w"> </span>ds<span class="w"> </span>host-netns
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="go">NAME         DESIRED   CURRENT   READY</span>
+</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="go">host-netns   1         1         1        ← 兩顆節點,DESIRED 只有 1</span>
+</span><span id="__span-23-4"><a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>
+</span><span id="__span-23-5"><a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="gp">$ </span>kubectl<span class="w"> </span>…<span class="w"> </span>get<span class="w"> </span>deploy<span class="w"> </span>client<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{…tolerations}&#39;</span>
+</span><span id="__span-23-6"><a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="go">[{&quot;key&quot;:&quot;kubernetes.azure.com/scalesetpriority&quot;,&quot;operator&quot;:&quot;Exists&quot;}]   ← 指令帶的 --tolerations 有生效</span>
+</span><span id="__span-23-7"><a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="gp">$ </span>kubectl<span class="w"> </span>…<span class="w"> </span>get<span class="w"> </span>ds<span class="w"> </span>host-netns<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{…tolerations}&#39;</span>
+</span><span id="__span-23-8"><a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a><span class="go">                                                                        ← 空的</span>
+</span></code></pre></div>
+<p><strong><code>--tolerations</code> 只套到了測試的 Deployment,沒有套到 <code>host-netns</code> DaemonSet。</strong></p>
+<p>而 spot 節點的 taint 拔不掉(<a href="#mine-7">地雷 7</a>),所以在有 spot 節點池的 AKS 叢集上,<strong>這兩項測試無法執行</strong>。同一組裡的另一項被正確地以「功能沒開」跳過了,這兩項沒有——那是跳過條件沒有覆蓋完整。</p>
+<h3 id="mine-7">地雷 7:AKS spot 節點池的 taint 拔不掉,而兩種拔法的失敗方式不一樣<a class="headerlink" href="#mine-7" title="Permanent link">&para;</a></h3>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>update<span class="w"> </span>…<span class="w"> </span>-n<span class="w"> </span>spotpool<span class="w"> </span>--node-taints<span class="w"> </span><span class="s2">&quot;&quot;</span>
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="go">Succeeded                                          ← ARM 說成功</span>
+</span><span id="__span-24-3"><a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>show<span class="w"> </span>…<span class="w"> </span>--query<span class="w"> </span>nodeTaints
+</span><span id="__span-24-4"><a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="go">[&quot;kubernetes.azure.com/scalesetpriority=spot:NoSchedule&quot;]     ← 東西還在</span>
+</span></code></pre></div>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>taint<span class="w"> </span>node<span class="w"> </span>&lt;spot-node&gt;<span class="w"> </span>kubernetes.azure.com/scalesetpriority<span class="o">=</span>spot:NoSchedule-
+</span><span id="__span-25-2"><a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="go">Error from server: admission webhook &quot;aks-node-validating-webhook.azmk8s.io&quot; denied the request:</span>
+</span><span id="__span-25-3"><a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="go">  Taint delete request … refused. User is attempting to delete a taint configured on aks node pool &quot;spotpool&quot;.</span>
+</span></code></pre></div>
+<p><strong>ARM 那一條是靜默無效(回 <code>Succeeded</code> 而什麼都沒改),kubectl 那一條是明確拒絕。</strong> 兩者對照很有價值:<strong>如果只試了第一種,你會以為指令生效了,然後去找別的原因。</strong></p>
+<p><strong>實務結論</strong>:在 AKS 上用 spot 省錢,代價是每一個要跑在那顆節點上的東西都必須自己帶容忍——<strong>你自己的工作負載可以加,但第三方 chart 與工具不一定給得了</strong>。做成本規劃時這是一項隱藏的相容性成本,不只是「便宜 81.5%」。</p>
+<h3 id="mine-8">地雷 8:<code>kubeProxyReplacement: false</code> 不代表 kube-proxy 在做事<a class="headerlink" href="#mine-8" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:沒有症狀——這正是問題所在。在 <code>kubeProxyReplacement: false</code>、kube-proxy 好端端跑著的狀態下,<strong>一般 pod 對 ClusterIP 的流量根本沒有經過它</strong>(<a href="#step-4">步驟 4</a> 的封包計數器實測)。</p>
+<p><strong>根因</strong>:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="go">KubeProxyReplacement:   False</span>
+</span><span id="__span-26-2"><a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="go">KubeProxyReplacement Details:</span>
+</span><span id="__span-26-3"><a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="go">  Status:               False</span>
+</span><span id="__span-26-4"><a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a><span class="go">  Socket LB:            Disabled</span>
+</span><span id="__span-26-5"><a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a><span class="go">  Services:</span>
+</span><span id="__span-26-6"><a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a><span class="go">  - ClusterIP:      Enabled          ← 就是這一行</span>
+</span><span id="__span-26-7"><a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a><span class="go">  - NodePort:       Disabled</span>
+</span><span id="__span-26-8"><a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a><span class="go">  - LoadBalancer:   Disabled</span>
+</span><span id="__span-26-9"><a id="__codelineno-26-9" name="__codelineno-26-9" href="#__codelineno-26-9"></a><span class="go">  - externalIPs:    Disabled</span>
+</span><span id="__span-26-10"><a id="__codelineno-26-10" name="__codelineno-26-10" href="#__codelineno-26-10"></a><span class="go">  - HostPort:       Disabled</span>
+</span></code></pre></div>
+<p><code>kubeProxyReplacement: false</code> 關掉的是 <strong>NodePort、LoadBalancer、externalIPs、HostPort 加 socket LB</strong>,<strong>ClusterIP 一直是開的</strong>。Cilium 掛在每個 pod veth 上的 tc BPF 程式在封包離開 pod 的網路命名空間那一刻就做完 DNAT,封包到達節點時目的地已經是後端 pod IP——<code>KUBE-SERVICES</code> 鏈當然一個字都比對不到。</p>
+<p>所以在一座還沒開 replacement 的 Cilium 叢集上,kube-proxy 實際負責的是<strong>節點自己發起的流量</strong>(hostNetwork pod、節點上的服務、kubelet)以及 NodePort 那幾類入口。</p>
+<p><strong>這會誤導兩種人</strong>:以為「先不開 replacement 比較保守」的(保守的範圍比想像中小得多),和拿 iptables 規則數量當「kube-proxy 負載」指標的(<strong>那些規則絕大多數是死的</strong>)。</p>
+<h3 id="mine-9">地雷 9:刪掉 kube-proxy DaemonSet,受管控制面 80 秒後把它裝回來<a class="headerlink" href="#mine-9" title="Permanent link">&para;</a></h3>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>delete<span class="w"> </span>ds<span class="w"> </span>kube-proxy
+</span><span id="__span-27-2"><a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="go">daemonset.apps &quot;kube-proxy&quot; deleted</span>
+</span><span id="__span-27-3"><a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="go">t+20s      not found</span>
+</span><span id="__span-27-4"><a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="go">t+60s      not found</span>
+</span><span id="__span-27-5"><a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a><span class="go">t+80s    kube-proxy   2   2   0   2   0   &lt;none&gt;   0s     ← 回來了</span>
+</span><span id="__span-27-6"><a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a><span class="go">t+100s   kube-proxy   2   2   2   2   2   &lt;none&gt;   21s    ← 而且已經跑起來</span>
+</span></code></pre></div>
+<p><strong>根因</strong>:在受管 Kubernetes 上 kube-proxy 是受管附加元件,控制面的 reconciler 會把它補回來。刪除指令會成功、<code>kubectl get</code> 會說不存在,<strong>一分多鐘之後它自己回來</strong>——如果你在這中間下結論「移除成功」,就會得到相反的答案。</p>
+<p><strong>修法</strong>:官方給受管叢集的做法是把 DaemonSet 釘在一個<strong>不存在的節點選擇器</strong>上。那個標籤鍵取什麼名字都可以,唯一的要求是叢集裡沒有任何節點帶著它。</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-28-1"><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>patch<span class="w"> </span>daemonset<span class="w"> </span>kube-proxy<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-28-2"><a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="w">    </span>-p<span class="w"> </span><span class="s1">&#39;{&quot;spec&quot;:{&quot;template&quot;:{&quot;spec&quot;:{&quot;nodeSelector&quot;:{&quot;lab.local/no-kube-proxy&quot;:&quot;true&quot;}}}}}&#39;</span>
+</span></code></pre></div>
+<p>這個 patch <strong>沒有</strong>被 reconciler 改回去(觀察 125 秒,並且撐過一次停機重啟)。</p>
+<p>誠實記錄驗收的實際形狀:<strong>DaemonSet 物件還在(而且刪不掉),但零個 pod、兩顆節點上零個行程</strong>。這是受管叢集上「沒有 kube-proxy」能達到的最強狀態。</p>
+<h3 id="mine-10">地雷 10:kube-proxy 走了,它寫的規則不會跟著走<a class="headerlink" href="#mine-10" title="Permanent link">&para;</a></h3>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-29-1"><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="gp">$ </span><span class="o">(</span>kube-proxy<span class="w"> </span>的<span class="w"> </span>pod<span class="w"> </span>早就不在了<span class="o">)</span><span class="w"> </span>iptables<span class="w"> </span>-t<span class="w"> </span>nat<span class="w"> </span>-S<span class="w"> </span><span class="p">|</span><span class="w"> </span>wc<span class="w"> </span>-l
+</span><span id="__span-29-2"><a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="go">135</span>
+</span><span id="__span-29-3"><a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="gp">$ </span>iptables<span class="w"> </span>-t<span class="w"> </span>nat<span class="w"> </span>-S<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-c<span class="w"> </span>KUBE-
+</span><span id="__span-29-4"><a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a><span class="go">120</span>
+</span></code></pre></div>
+<p><strong>根因</strong>:kube-proxy 是使用者空間的行程,規則是它寫進 netfilter 的<strong>持久狀態</strong>。行程結束,規則留著。</p>
+<p>這些規則現在是純粹的死重量:沒有人維護它們(Service 增減不會更新),但<strong>每個從節點發出的封包仍然要走過那條線性鏈</strong>。更糟的是它們現在是<strong>過期的</strong>——哪天有封包真的比對中一條指向已經不存在的 pod IP 的 DNAT,結果是連到黑洞。</p>
+<p><strong>修法</strong>:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-30-1"><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="gp">$ </span>iptables-save<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-v<span class="w"> </span>KUBE-<span class="w"> </span><span class="p">|</span><span class="w"> </span>iptables-restore
+</span></code></pre></div>
+<p>清完剩 16 行,其中只有一條 <code>KUBE-KUBELET-CANARY</code>(那是 kubelet 的空鏈,不是 kube-proxy 的)。</p>
+<h3 id="mine-11">地雷 11:AKS 的 system pool 不能縮到 0<a class="headerlink" href="#mine-11" title="Permanent link">&para;</a></h3>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-31-1"><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>scale<span class="w"> </span>…<span class="w"> </span>-n<span class="w"> </span>spotpool<span class="w"> </span>--node-count<span class="w"> </span><span class="m">0</span>
+</span><span id="__span-31-2"><a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="go">Succeeded                                          ← spot pool 沒問題</span>
+</span><span id="__span-31-3"><a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a>
+</span><span id="__span-31-4"><a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>scale<span class="w"> </span>…<span class="w"> </span>-n<span class="w"> </span>system<span class="w"> </span>--node-count<span class="w"> </span><span class="m">0</span>
+</span><span id="__span-31-5"><a id="__codelineno-31-5" name="__codelineno-31-5" href="#__codelineno-31-5"></a><span class="go">ERROR: (InvalidParameter) agentPoolProfile.count was 0. It must be greater or equal to</span>
+</span><span id="__span-31-6"><a id="__codelineno-31-6" name="__codelineno-31-6" href="#__codelineno-31-6"></a><span class="go">       minCount:1 … 3) The node is a system pool.</span>
+</span></code></pre></div>
+<p><strong>system pool 最少一台。</strong> 而那一台是隨需的(<a href="#mine-1">地雷 1</a>),留著過夜的成本會把整個 sprint 的節點預算燒穿。</p>
+<p><strong>後果</strong>:「縮容到零」這個收工方式在這座叢集上不存在,只剩 <code>az aks stop</code>。而那正好是一件沒驗證過的事(BYOCNI 叢集停機再開,CNI 會不會自己回來),於是<strong>原本想迴避的未驗證項目變成必經之路</strong>。</p>
+<p><strong>處理方式</strong>:既然必經,就當場驗證完整的停機、開機、驗收、再停機,而不是把風險留給隔天。</p>
+<h2 id="_11">帶得走的東西<a class="headerlink" href="#_11" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>動手換掉一個元件之前,先量清楚它現在到底在做什麼。</strong> 今天最大的發現不是「換掉 kube-proxy 之後如何」,是「換掉之前它就已經沒在做那件事了」——而看出這件事只需要 <code>iptables -t nat -Z</code> 加兩輪 20 次請求。<strong>有規則不代表規則被用到,唯一不會騙人的是封包計數器。</strong></li>
+<li><strong>設定的預設值是為別人的環境寫的。</strong> Cilium 的預設 pod 網段吃掉 AKS 的 Service 網段、cilium-cli 的預設版本落後它自己回報的 stable 一版、測試框架的 <code>--tolerations</code> 沒套到自己的 DaemonSet。三件都不是 bug,都是「兩邊各自合理的預設值撞在一起」。</li>
+<li><strong>受管 Kubernetes 加自管資料平面,成本在交界處。</strong> 第一個節點池不能是 spot、kube-proxy 刪了會自己回來、system pool 不能縮到 0、spot 的 taint 拔不掉——四件都跟 Cilium 無關,但四件都要處理。<strong>BYOCNI 的真實成本不在 CNI,在這些邊界。</strong></li>
+<li><strong>量不出來就說量不出來。</strong> 延遲那一項有數字、有表格,但負載不對等而且雜訊大於訊號,所以不能宣稱。同一組數據裡倒是有一個乾淨的結論(socket LB 的翻譯成本量不到),<strong>而那個結論比原本想證明的更有意思。</strong></li>
+<li><strong>請求量與實際用量兩個方向都會錯,而低估更難發現。</strong> 高估讓 pod 排不進去(看得見),低估讓排程器以為節點還有餘裕(看不見,直到開始換頁)。</li>
+</ul>
+<h2 id="_12">延伸閱讀<a class="headerlink" href="#_12" title="Permanent link">&para;</a></h2>
+<p>想往下深挖,從這幾份開始:</p>
+<ul>
+<li><strong><a href="https://docs.cilium.io/en/stable/network/kubernetes/kubeproxy-free/">Cilium 的 kube-proxy replacement</a></strong> —— 官方說明 <code>kubeProxyReplacement</code> 實際開關了哪些 Service 類型、socket LB 是整套機制的基礎,以及移除 kube-proxy 之後為什麼必須給 <code>k8sServiceHost</code>/<code>k8sServicePort</code>,對得上步驟 4。</li>
+<li><strong><a href="https://learn.microsoft.com/en-us/azure/aks/use-byo-cni">AKS 的 BYOCNI 說明</a></strong> —— <code>--network-plugin none</code> 的建立方式,以及「裝 CNI 之前節點會是 <code>NotReady</code>」那段輸出跟本課逐字相同;它也明講 BYOCNI 之下 pod 的 IP 配發完全由你選的 CNI 負責。</li>
+<li><strong><a href="https://docs.cilium.io/en/stable/network/concepts/ipam/cluster-pool/">Cilium 的 cluster-pool IPAM</a></strong> —— 地雷 4 的一手來源:官方文件自己在疑難排解段把 <code>10.0.0.0/8</code> 這個預設 pod CIDR 當成網段衝突的警語。</li>
+</ul>
+<h2 id="_13">下一步<a class="headerlink" href="#_13" title="Permanent link">&para;</a></h2>
+<p>資料平面換完了,但今天只證明了它「能通」——所有東西都還是彼此暢通無阻。Cilium 真正的價值在於它能<strong>決定誰不能通</strong>,而且判斷可以做到 HTTP 方法這一層。</p>
+<p>Day 8 寫網路政策:從命名空間隔離、埠限制,一路到「同一顆 pod 對同一個服務,GET 通過而 POST 被擋」。而那一天有一個對照特別值得等——<strong>同樣是「工作負載連到不該連的地方」這件事,<a href="../sprint2-day4-falco-custom-rules/">Day 4</a> 用 Falco 偵測、<a href="../sprint2-day6-tetragon-enforcement/">Day 6</a> 用 Tetragon 殺行程,Day 8 則是直接丟封包。三種做法的代價完全不同。</strong></p>
+<hr />
+<div class="admonition quote">
+<p>Cilium 標誌為 Cilium 專案之官方資產(CNCF artwork),此處作社群教學用途。</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到頂端
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="頁腳" >
+        
+          
+          <a href="../sprint2-day6-tetragon-enforcement/" class="md-footer__link md-footer__link--prev" aria-label="上一頁: Day 6 · 從偵測到攔截">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                上一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 6 · 從偵測到攔截
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../sprint2-day8-cilium-network-policy/" class="md-footer__link md-footer__link--next" aria-label="下一頁: Day 8 · CiliumNetworkPolicy(L3/L4 → L7)">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                下一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 8 · CiliumNetworkPolicy(L3/L4 → L7)
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      KAI Scheduler、HAMi、Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,作社群教學用途
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.code.annotate", "content.code.select", "content.tabs.link", "search.suggest", "search.highlight", "search.share"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u8907\u88fd", "clipboard.copy": "\u8907\u88fd", "search.result.more.one": "\u6b64\u9801\u5c1a\u6709 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.more.other": "\u6b64\u9801\u5c1a\u6709 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.none": "\u6c92\u6709\u7b26\u5408\u7684\u9805\u76ee", "search.result.one": "\u627e\u5230 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.other": "\u627e\u5230 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.placeholder": "\u6253\u5b57\u9032\u884c\u641c\u5c0b", "search.result.term.missing": "\u7f3a\u5c11\u5b57\u8a5e", "select.version": "\u9078\u64c7\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

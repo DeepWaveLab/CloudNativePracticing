@@ -1,0 +1,2105 @@
+
+<!doctype html>
+<html lang="zh-TW" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="雲原生實作課程 —— GPU 排程 runbook、踩雷解法與反思">
+      
+      
+      
+        <link rel="canonical" href="https://deepwavelab.github.io/CloudNativePracticing/runbook/sprint1-day0-azure-aks-foundation/">
+      
+      
+        <link rel="prev" href="../../sprints/sprint2/">
+      
+      
+        <link rel="next" href="../sprint1-day1-kai-queue-basics/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Day 0 · 環境建置與成本紀律 - Cloud Native Lab Course</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/terminal.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#day-0-quota-aks-t4-spot" class="md-skip">
+          跳轉到
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="頁首">
+    <a href="../.." title="Cloud Native Lab Course" class="md-header__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Cloud Native Lab Course
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Day 0 · 環境建置與成本紀律
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換深色模式"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="切換深色模式" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換淺色模式"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="切換淺色模式" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜尋" placeholder="搜尋" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="搜尋">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="分享" aria-label="分享" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="清除" aria-label="清除" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜尋引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="標籤" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  首頁
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 1 · GPU 排程三部曲
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint2-day0-ebpf-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 2 · eBPF 與執行期安全
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="導覽列" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Cloud Native Lab Course" class="md-nav__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Cloud Native Lab Course
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首頁
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    首頁
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 環境建置與成本紀律
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 環境建置與成本紀律
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#134" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        環境需求:一座 1.34 以上的叢集,和兩張便宜的卡
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        原理與架構
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-quota" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1:盤點 quota——它是三個維度,不是一個數字
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-quota" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2:送 quota 申請
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-rg-aks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3:建 RG 與 AKS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4:上叢集,先立一條紀律,再驗一個地基
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-gpu-spot-pool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5:開 GPU spot pool
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-device-plugin-desired0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6:裝 device plugin——然後撞上 desired=0
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-cuda-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 7:第一個 CUDA pod
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8scale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 8:收工循環——scale 歸零,再拉回來驗一次
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收 checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷記錄
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="地雷記錄">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 1:device plugin 的 rollout「成功」,desired 卻是 0
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 2:quota 有三個維度,停機的 VM 還在佔額度
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 3:B2B guest 身分送不動 quota API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 4:kubectl 不帶 context,打到別人的叢集
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的東西
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day1-kai-queue-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · KAI 安裝與 Queue 基礎
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day2-gang-scheduling-preemption/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Gang Scheduling 與搶占
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day3-hami-memory-isolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · HAMi 安裝與 VRAM 硬隔離
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day4-hami-kai-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · HAMi 進階與 KAI 整合
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day5-hami-webui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · HAMi-WebUI 觀測介面
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day6-dra-simulated-devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · DRA 概念與模擬裝置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day7-dra-aks-real-gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · DRA 真卡實測
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day8-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 綜合:三者分工決策表
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day0-ebpf-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · eBPF 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day1-bpftrace-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · bpftrace 三支經典工具
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day2-bpftrace-kubernetes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · 把核心事件接回 Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day3-falco-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Falco 安裝與出廠規則
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day4-falco-custom-rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · 自訂規則、誤報調校與告警路由
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day5-tetragon-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Tetragon 與 TracingPolicy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day6-tetragon-enforcement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · 從偵測到攔截
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day7-cilium-kubeproxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Cilium 與 kube-proxy replacement
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day8-cilium-network-policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · CiliumNetworkPolicy(L3/L4 → L7)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day9-hubble/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Hubble 可觀測性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 綜合:四套工具的分工
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#134" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        環境需求:一座 1.34 以上的叢集,和兩張便宜的卡
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        原理與架構
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-quota" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1:盤點 quota——它是三個維度,不是一個數字
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-quota" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2:送 quota 申請
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-rg-aks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3:建 RG 與 AKS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4:上叢集,先立一條紀律,再驗一個地基
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-gpu-spot-pool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5:開 GPU spot pool
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-device-plugin-desired0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6:裝 device plugin——然後撞上 desired=0
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-cuda-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 7:第一個 CUDA pod
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8scale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 8:收工循環——scale 歸零,再拉回來驗一次
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收 checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷記錄
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="地雷記錄">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 1:device plugin 的 rollout「成功」,desired 卻是 0
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 2:quota 有三個維度,停機的 VM 還在佔額度
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 3:B2B guest 身分送不動 quota API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 4:kubectl 不帶 context,打到別人的叢集
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的東西
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="day-0-quota-aks-t4-spot">Day 0: 環境建置——quota 申請、AKS 叢集與 T4 spot 節點池<a class="headerlink" href="#day-0-quota-aks-t4-spot" title="Permanent link">&para;</a></h1>
+<p><img align="right" alt="Kubernetes 官方標誌" src="../../assets/logos/kubernetes-icon-color.svg" width="95" /></p>
+<blockquote>
+<p>Sprint 1 要在 AKS 上把 KAI Scheduler、HAMi、DRA 三套 GPU 排程機制各學一輪。但在碰到任何排程器之前,得先蓋出一個「有 GPU、夠便宜、隨時能收工」的叢集。本章從 quota 盤點開始,一路走到第一個 CUDA pod 跑出 <code>nvidia-smi</code>,並且把「收工歸零、開工復原」的循環驗證到可以放心執行。本章有一顆雷特別值得記住:<strong>device plugin 裝好了、rollout status 回報成功,實際上卻一個 pod 都沒起</strong>;還有一顆會讓你以為 quota 夠了,其實有三個維度在各自卡人。</p>
+</blockquote>
+<div class="admonition abstract">
+<p class="admonition-title">你在課程的哪裡</p>
+<ul>
+<li><strong>起點</strong>:只需要一個 Azure 訂閱,和一台裝了 az、kubectl、helm 的機器。</li>
+<li><strong>今天</strong>:蓋出整個 sprint 共用的 AKS 叢集與 T4 spot pool。驗收:第一顆 CUDA pod 跑出 <code>nvidia-smi</code>,而且收工歸零、開工復原的循環實測可重複。</li>
+<li><strong>Day 1</strong>:安裝 KAI Scheduler,學佇列與配額。</li>
+</ul>
+</div>
+<div class="admonition note">
+<p class="admonition-title">指令裡的佔位符</p>
+<p>本課程的指令用 <code>&lt;cluster&gt;</code> 代表叢集名稱、<code>&lt;resource-group&gt;</code> 代表資源群組、<code>&lt;subscription-id&gt;</code> 代表訂閱 ID——照做時換成自己的值。</p>
+</div>
+<h2 id="134">環境需求:一座 1.34 以上的叢集,和兩張便宜的卡<a class="headerlink" href="#134" title="Permanent link">&para;</a></h2>
+<p>課程三個主題對環境的要求其實只有兩條。第一,DRA 的正式版 API 要 Kubernetes <strong>1.34 以上</strong>才有,所以叢集版本不能舊(本章步驟 4 會實測驗證這件事);第二,GPU 要能「隨開隨關」,學習型工作負載沒道理讓卡整天掛著計費。本課用 AKS 滿足這兩條——照著做時換成任何版本夠新的托管叢集都行,指令細節自行對應。</p>
+<p>選 T4 的理由也單純:<code>Standard_NC4as_T4_v3</code> 是 Azure 上最便宜的完整 GPU VM,spot 價約 US$0.21/小時。HAMi 的 VRAM 切分不需要 MIG(Multi-Instance GPU,A100/H100 這類資料中心卡才有的硬體級分卡功能,把一張實體卡切成數張獨立的小卡),T4 完全夠用;KAI 的排程語意跟卡的型號無關;DRA 的最小驗證一張卡就能做。</p>
+<h2 id="_1">原理與架構<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>flowchart TD
+    Q["訂閱 quota(三個維度)"] --&gt; AKS["AKS free tier · K8s 1.35"]
+    AKS --&gt; SYS["system pool&lt;br&gt;1× D2as_v5(隨需)"]
+    AKS --&gt; GPU["gpuspot pool&lt;br&gt;0–2× NC4as_T4_v3(spot)"]
+    GPU --&gt; DP["nvidia device plugin&lt;br&gt;(Helm 自管)"]</code></pre>
+<p>幾個在動手前就要拍板的決定,以及背後的理由:</p>
+<p>先說明一個之後每天都會出現的詞:<strong>device plugin</strong> 是 kubelet 的擴充機制,負責把節點上的特殊硬體(GPU、FPGA 之類)向叢集廣播成可以被排程的資源,例如 <code>nvidia.com/gpu: 1</code>。沒有它,節點上插著卡,Kubernetes 也看不到。</p>
+<p><strong>GPU driver 誰管?</strong>AKS 對 GPU node pool 提供幾種管理模式:全託管(driver + device plugin 都是 AKS 的)、只管 driver、或全部自理。本課程選「<strong>AKS 管 driver、device plugin 自己用 Helm 管</strong>」——因為 Day 3 的 HAMi 要用自己的 device plugin 接管 <code>nvidia.com/gpu</code>,Day 6 的 DRA driver 更是與傳統 device plugin 互斥。如果讓 AKS 託管 device plugin,到時候會跟自己裝的元件打架。這個決定牽動三個階段,必須在 Day 0 定案,不能到 Day 3 才發現要重建 node pool。</p>
+<p><strong>Spot 的交易條件。</strong>spot 節點約為隨需價的三折,代價是 Azure 隨時可以回收。對批次或實驗性工作這划算,但有兩件事要先知道:spot pool 會自動帶上 <code>kubernetes.azure.com/scalesetpriority=spot:NoSchedule</code> 的 taint,所有要排上去的 pod 都得聲明對應的 toleration;而 <code>--spot-max-price</code> 建立後不能改。另外 GPU pool 刻意<strong>不開 cluster autoscaler</strong>——Day 2 的 gang scheduling 示範需要「資源刻意不足」的情境,autoscaler 若自動擴節點,示範情境就不成立。</p>
+<p><strong>成本紀律是架構的一部分。</strong>free tier 的 control plane 不收費,常駐成本只有 system pool 一台 D2as_v5(約 NT$3.5/小時);GPU pool 用「開工 scale 到 2、收工 scale 到 0」的循環操作,兩張 T4 spot 開著時約 NT$13/小時。本章最後一步就是把這個循環實測一遍,確認 scale 歸零再拉回來之後,driver、標籤、device plugin 都會自己回來。</p>
+<p>今天要走的路,八步:盤點 quota → 送申請 → 建 RG 與 AKS → 上叢集驗 DRA API → 開 GPU spot pool → 裝 device plugin → 第一顆 CUDA pod → 收工循環實測。前兩步是行政流程(而且可能要等幾個工作天),後六步是技術操作——等待期能先做什麼,步驟 2 的結尾會講。</p>
+<h2 id="_2">步驟<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<h3 id="1-quota">步驟 1:盤點 quota——它是三個維度,不是一個數字<a class="headerlink" href="#1-quota" title="Permanent link">&para;</a></h3>
+<p>GPU VM 開不起來,十之八九是 quota。Azure 的 vCPU quota 至少有三個維度同時在管你,任何一個不夠都會擋:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">$ </span>az<span class="w"> </span>vm<span class="w"> </span>list-usage<span class="w"> </span>--location<span class="w"> </span>japaneast<span class="w"> </span>--subscription<span class="w"> </span>&lt;subscription-id&gt;<span class="w"> </span>-o<span class="w"> </span>table<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s2">&quot;NCASv3_T4|Low-priority|Total Regional vCPUs&quot;</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="go">Total Regional Low-priority vCPUs         0               3</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="go">Total Regional vCPUs                      50              50</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="go">Standard NCASv3_T4 Family vCPUs           0               0</span>
+</span></code></pre></div>
+<p>三行分別是:<strong>spot 專用額度</strong>(3,一台 NC4as 要 4,連一台都開不起)、<strong>區域總 vCPU</strong>(50/50,滿了)、<strong>T4 家族額度</strong>(0,GPU 家族預設就是 0,一定要申請)。GPU 節點的 vCPU 會同時吃家族額度與區域總額,所以三個都要過。</p>
+<p>這裡的 50/50 有個陷阱:區域總額是被幾台<strong>已停機(deallocated)的舊 lab VM</strong> 佔住的。停機不代表還額度——詳見<a href="#mine-2">地雷 2</a>。清掉舊資源後額度才有空間:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="gp">$ </span>az<span class="w"> </span>group<span class="w"> </span>delete<span class="w"> </span>-n<span class="w"> </span>&lt;old-lab-rg&gt;<span class="w"> </span>--subscription<span class="w"> </span>&lt;subscription-id&gt;<span class="w"> </span>--yes
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="gp">$ </span>az<span class="w"> </span>vm<span class="w"> </span>list-usage<span class="w"> </span>--location<span class="w"> </span>japaneast<span class="w"> </span>--subscription<span class="w"> </span>&lt;subscription-id&gt;<span class="w"> </span>-o<span class="w"> </span>table<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s2">&quot;Total Regional vCPUs&quot;</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="go">Total Regional vCPUs                      16              50</span>
+</span></code></pre></div>
+<h3 id="2-quota">步驟 2:送 quota 申請<a class="headerlink" href="#2-quota" title="Permanent link">&para;</a></h3>
+<p>需要申請的兩項:<code>Standard NCASv3_T4 Family vCPUs</code> 調到 8 以上(兩台 NC4as_T4_v3),<code>Total Regional Low-priority vCPUs</code> 調到 8 以上(讓這兩台能用 spot 價)。建議一次多要一點(例如 16),免得之後再跑一次流程。</p>
+<p>申請的路有三條,依你的訂閱型態而定:</p>
+<ol>
+<li><strong><code>az quota create</code></strong>:最快,但需要你的身分在該訂閱有 quota 寫入權限。本課程的訂閱掛在另一個 tenant、身分是 B2B guest,直接吃了 <code>Unauthorized</code>(見<a href="#mine-3">地雷 3</a>)。</li>
+<li><strong>Portal 的 Quotas 頁</strong>:搜尋 Quotas → Compute → 篩區域,勾選項目送出。多數自有訂閱走這條就通。</li>
+<li><strong>透過代理商(CSP 訂閱)</strong>:CSP 型訂閱的 quota 常常只有代理商能動,寫信給他們,附上訂閱名稱、訂閱 ID、區域、quota 項目與目標值。本課程實際走的是這條,等了幾個工作天。</li>
+</ol>
+<p>等待期不必空轉:kind + 模擬 GPU 的本機練習(Day 1 的前置)完全不需要真卡,可以先跑。</p>
+<h3 id="3-rg-aks">步驟 3:建 RG 與 AKS<a class="headerlink" href="#3-rg-aks" title="Permanent link">&para;</a></h3>
+<p>所有課程資源集中在一個獨立的 resource group,收尾時 <code>az group delete</code> 一鍵全清,也不會誤傷訂閱裡的其他東西:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="gp">$ </span>az<span class="w"> </span>group<span class="w"> </span>create<span class="w"> </span>-n<span class="w"> </span>&lt;resource-group&gt;<span class="w"> </span>-l<span class="w"> </span>japaneast<span class="w"> </span>--subscription<span class="w"> </span>&lt;subscription-id&gt;<span class="w"> </span>--tags<span class="w"> </span><span class="nv">course</span><span class="o">=</span>CloudNativePracticing<span class="w"> </span><span class="nv">sprint</span><span class="o">=</span><span class="m">1</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>create<span class="w"> </span>-g<span class="w"> </span>&lt;resource-group&gt;<span class="w"> </span>-n<span class="w"> </span>&lt;cluster&gt;<span class="w"> </span>--subscription<span class="w"> </span>&lt;subscription-id&gt;<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">    </span>--tier<span class="w"> </span>free<span class="w"> </span>--kubernetes-version<span class="w"> </span><span class="m">1</span>.35.6<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">    </span>--nodepool-name<span class="w"> </span>system<span class="w"> </span>--node-count<span class="w"> </span><span class="m">1</span><span class="w"> </span>--node-vm-size<span class="w"> </span>Standard_D2as_v5<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span>--generate-ssh-keys
+</span></code></pre></div>
+<p>版本選 1.35 而不是最新的 1.36,是保守考量:DRA 需要的是 1.34+,而 Day 1 要裝的 KAI Scheduler 官方文件沒有明說支援到哪個版本,拿次新版(N-1)踩到相容性問題的機率低一點。system pool 用最小的 D2as_v5 隨需節點——AKS 規定 system pool 不能用 spot。</p>
+<h3 id="4">步驟 4:上叢集,先立一條紀律,再驗一個地基<a class="headerlink" href="#4" title="Permanent link">&para;</a></h3>
+<p>拉 kubeconfig:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>get-credentials<span class="w"> </span>-g<span class="w"> </span>&lt;resource-group&gt;<span class="w"> </span>-n<span class="w"> </span>&lt;cluster&gt;<span class="w"> </span>--subscription<span class="w"> </span>&lt;subscription-id&gt;
+</span></code></pre></div>
+<p>這裡有一個值得先知道的風險:<code>az aks get-credentials</code> 會順手把 current-context 切到新叢集。如果你的 kubeconfig 裡還有別的叢集,而且別的終端機正在用,這一切就是事故的開端——本課程就真的發生過一次,詳見<a href="#mine-4">地雷 4</a>。</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>nodes
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="go">NAME                             STATUS   ROLES    AGE   VERSION</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="go">aks-system-35459509-vmss000000   Ready    &lt;none&gt;   68s   v1.35.6</span>
+</span></code></pre></div>
+<p>接著驗 Day 6–7 的地基:DRA 的 API 群組在不在。DRA 在上游 1.34 進 GA(現行官方文件標示 v1.35 stable),GA 功能理應預設開啟,但「理應」要用實測換成「確定」:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>api-resources<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>resource.k8s.io
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="go">deviceclasses            resource.k8s.io/v1    false   DeviceClass</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="go">resourceclaims           resource.k8s.io/v1    true    ResourceClaim</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="go">resourceclaimtemplates   resource.k8s.io/v1    true    ResourceClaimTemplate</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="go">resourceslices           resource.k8s.io/v1    false   ResourceSlice</span>
+</span></code></pre></div>
+<p>四個 API 都在,而且是正式版 <code>v1</code>,不用開任何 feature gate。這一步值十秒鐘,卻讓後面兩天的課不必賭。</p>
+<h3 id="5-gpu-spot-pool">步驟 5:開 GPU spot pool<a class="headerlink" href="#5-gpu-spot-pool" title="Permanent link">&para;</a></h3>
+<p>quota 核准後,開兩台 T4 spot,固定節點數、不開 autoscaler:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>add<span class="w"> </span>-g<span class="w"> </span>&lt;resource-group&gt;<span class="w"> </span>--cluster-name<span class="w"> </span>&lt;cluster&gt;<span class="w"> </span>-n<span class="w"> </span>gpuspot<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">    </span>--subscription<span class="w"> </span>&lt;subscription-id&gt;<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span>--node-count<span class="w"> </span><span class="m">2</span><span class="w"> </span>--node-vm-size<span class="w"> </span>Standard_NC4as_T4_v3<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span>--priority<span class="w"> </span>Spot<span class="w"> </span>--eviction-policy<span class="w"> </span>Delete<span class="w"> </span>--spot-max-price<span class="w"> </span>-1<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">    </span>--labels<span class="w"> </span><span class="nv">pool</span><span class="o">=</span>gpu
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>nodes<span class="w"> </span>-l<span class="w"> </span><span class="nv">pool</span><span class="o">=</span>gpu
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="go">NAME                              STATUS   ROLES    AGE    VERSION</span>
+</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="go">aks-gpuspot-21249019-vmss000000   Ready    &lt;none&gt;   102s   v1.35.6</span>
+</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="go">aks-gpuspot-21249019-vmss000001   Ready    &lt;none&gt;   106s   v1.35.6</span>
+</span></code></pre></div>
+<p><code>--spot-max-price -1</code> 的意思是「跟著現價走,不因價格被回收」(容量不足仍可能被回收,這是 spot 的本質)。此時看節點會發現:taint 只有 spot 那條,而 <code>nvidia.com/gpu</code> 資源還不存在——AKS 裝好了 driver,但 device plugin 是我們自己的事,這正是步驟 6。</p>
+<h3 id="6-device-plugin-desired0">步驟 6:裝 device plugin——然後撞上 desired=0<a class="headerlink" href="#6-device-plugin-desired0" title="Permanent link">&para;</a></h3>
+<p>用 NVIDIA 官方的 Helm chart,限定只跑在 GPU pool、並容忍 spot taint:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="gp">$ </span>helm<span class="w"> </span>repo<span class="w"> </span>add<span class="w"> </span>nvdp<span class="w"> </span>https://nvidia.github.io/k8s-device-plugin
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="gp">$ </span>helm<span class="w"> </span>upgrade<span class="w"> </span>-i<span class="w"> </span>nvdp<span class="w"> </span>nvdp/nvidia-device-plugin<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span>-n<span class="w"> </span>nvidia-device-plugin<span class="w"> </span>--create-namespace<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span>--set<span class="w"> </span>nodeSelector.pool<span class="o">=</span>gpu<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">    </span>--set-json<span class="w"> </span><span class="s1">&#39;tolerations=[{&quot;key&quot;:&quot;kubernetes.azure.com/scalesetpriority&quot;,&quot;operator&quot;:&quot;Equal&quot;,&quot;value&quot;:&quot;spot&quot;,&quot;effect&quot;:&quot;NoSchedule&quot;},{&quot;key&quot;:&quot;nvidia.com/gpu&quot;,&quot;operator&quot;:&quot;Exists&quot;,&quot;effect&quot;:&quot;NoSchedule&quot;}]&#39;</span>
+</span></code></pre></div>
+<p>裝完檢查,rollout 一切「成功」——但 GPU 資源就是不出現:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>nvidia-device-plugin<span class="w"> </span>rollout<span class="w"> </span>status<span class="w"> </span>ds/nvdp-nvidia-device-plugin
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="go">daemon set &quot;nvdp-nvidia-device-plugin&quot; successfully rolled out</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>nvidia-device-plugin<span class="w"> </span>get<span class="w"> </span>pods
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="go">No resources found in nvidia-device-plugin namespace.</span>
+</span></code></pre></div>
+<p>DaemonSet 的 desired 是 0:一個 pod 都不打算跑,而「0 個裡面 0 個就緒」在 rollout status 眼中是圓滿達成。真正的原因藏在 chart 預設的 nodeAffinity 裡,完整的診斷過程與修法見<a href="#mine-1">地雷 1</a>。結論是給 node pool 補一個 NFD 風格的標籤——注意要在 <strong>pool 層級</strong>補,節點重建時才會自動帶回來:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>update<span class="w"> </span>-g<span class="w"> </span>&lt;resource-group&gt;<span class="w"> </span>--cluster-name<span class="w"> </span>&lt;cluster&gt;<span class="w"> </span>-n<span class="w"> </span>gpuspot<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">    </span>--subscription<span class="w"> </span>&lt;subscription-id&gt;<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span>--labels<span class="w"> </span><span class="nv">pool</span><span class="o">=</span>gpu<span class="w"> </span><span class="s2">&quot;nvidia.com/gpu.present=true&quot;</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>nodes<span class="w"> </span>-l<span class="w"> </span><span class="nv">pool</span><span class="o">=</span>gpu<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">    </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .items[*]}{.metadata.name}: gpu={.status.allocatable.nvidia\.com/gpu}{&quot;\n&quot;}{end}&#39;</span>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="go">aks-gpuspot-21249019-vmss000000: gpu=1</span>
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="go">aks-gpuspot-21249019-vmss000001: gpu=1</span>
+</span></code></pre></div>
+<p>兩台節點各廣告出一張 GPU,device plugin 的日誌也印出 <code>Detected platform: nvml</code>——AKS 預裝的 driver 有被正確找到。</p>
+<h3 id="7-cuda-pod">步驟 7:第一個 CUDA pod<a class="headerlink" href="#7-cuda-pod" title="Permanent link">&para;</a></h3>
+<p>驗收整條鏈:排程器 → spot toleration → device plugin → driver → 真的卡。</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># gpu-smoke.yaml</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Pod</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="nt">metadata</span><span class="p">:</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gpu-smoke</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="nt">spec</span><span class="p">:</span>
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="w">  </span><span class="nt">restartPolicy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Never</span>
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span>
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="w">    </span><span class="nt">pool</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gpu</span>
+</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="w">  </span><span class="nt">tolerations</span><span class="p">:</span>
+</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kubernetes.azure.com/scalesetpriority</span>
+</span><span id="__span-10-12"><a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="w">      </span><span class="nt">operator</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Equal</span>
+</span><span id="__span-10-13"><a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="w">      </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">spot</span>
+</span><span id="__span-10-14"><a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="w">      </span><span class="nt">effect</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">NoSchedule</span>
+</span><span id="__span-10-15"><a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="w">  </span><span class="nt">containers</span><span class="p">:</span>
+</span><span id="__span-10-16"><a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cuda</span>
+</span><span id="__span-10-17"><a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nvcr.io/nvidia/cuda:12.4.1-base-ubuntu22.04</span>
+</span><span id="__span-10-18"><a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;nvidia-smi&quot;</span><span class="p p-Indicator">]</span>
+</span><span id="__span-10-19"><a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a><span class="w">      </span><span class="nt">resources</span><span class="p">:</span>
+</span><span id="__span-10-20"><a id="__codelineno-10-20" name="__codelineno-10-20" href="#__codelineno-10-20"></a><span class="w">        </span><span class="nt">limits</span><span class="p">:</span>
+</span><span id="__span-10-21"><a id="__codelineno-10-21" name="__codelineno-10-21" href="#__codelineno-10-21"></a><span class="w">          </span><span class="nt">nvidia.com/gpu</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+</span></code></pre></div>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>gpu-smoke.yaml
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="gp">$ </span>kubectl<span class="w"> </span><span class="nb">wait</span><span class="w"> </span>pod/gpu-smoke<span class="w"> </span>--for<span class="o">=</span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.phase}&#39;</span><span class="o">=</span>Succeeded<span class="w"> </span>--timeout<span class="o">=</span>180s
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="gp">$ </span>kubectl<span class="w"> </span>logs<span class="w"> </span>gpu-smoke
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="go">+-----------------------------------------------------------------------------------------+</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="go">| NVIDIA-SMI 580.159.04             Driver Version: 580.159.04     CUDA Version: 13.0     |</span>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="go">|=========================================+========================+======================|</span>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="go">|   0  Tesla T4                       Off |   00000001:00:00.0 Off |                  Off |</span>
+</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="go">| N/A   36C    P8             15W /   70W |       0MiB /  16384MiB |      0%      Default |</span>
+</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="go">+-----------------------------------------+------------------------+----------------------+</span>
+</span></code></pre></div>
+<p>Tesla T4、16 GB VRAM 、driver 580 系列。地基完工。</p>
+<h3 id="8scale">步驟 8:收工循環——scale 歸零,再拉回來驗一次<a class="headerlink" href="#8scale" title="Permanent link">&para;</a></h3>
+<p>每次下課的標準動作是把 GPU pool 縮到 0(spot 節點刪掉就不計費)。但「縮得回去」只值一半,「拉回來一切如常」才算數——尤其我們在步驟 6 補的標籤,是不是真的會跟著新節點回來?實測一輪:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>delete<span class="w"> </span>pod<span class="w"> </span>gpu-smoke
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>scale<span class="w"> </span>-g<span class="w"> </span>&lt;resource-group&gt;<span class="w"> </span>--cluster-name<span class="w"> </span>&lt;cluster&gt;<span class="w"> </span>-n<span class="w"> </span>gpuspot<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">    </span>--subscription<span class="w"> </span>&lt;subscription-id&gt;<span class="w"> </span>--node-count<span class="w"> </span><span class="m">0</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>scale<span class="w"> </span>-g<span class="w"> </span>&lt;resource-group&gt;<span class="w"> </span>--cluster-name<span class="w"> </span>&lt;cluster&gt;<span class="w"> </span>-n<span class="w"> </span>gpuspot<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">    </span>--subscription<span class="w"> </span>&lt;subscription-id&gt;<span class="w"> </span>--node-count<span class="w"> </span><span class="m">2</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>nodes<span class="w"> </span>-l<span class="w"> </span><span class="nv">pool</span><span class="o">=</span>gpu<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="w">    </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{range .items[*]}{.metadata.name}: gpu={.status.allocatable.nvidia\.com/gpu} labels-ok={.metadata.labels.nvidia\.com/gpu\.present}{&quot;\n&quot;}{end}&#39;</span>
+</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="go">aks-gpuspot-21249019-vmss000002: gpu=1 labels-ok=true</span>
+</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="go">aks-gpuspot-21249019-vmss000003: gpu=1 labels-ok=true</span>
+</span></code></pre></div>
+<p>注意節點名稱從 <code>vmss000000/000001</code> 變成了 <code>vmss000002/000003</code>——這是兩台全新的 VM,不是原機重開。pool 層級的標籤自動補上、device plugin 的 DaemonSet 自動排上、driver 隨新節點的映像就位,全程不需要人工介入。驗完把 pool 縮回 0,收工。</p>
+<h2 id="checkpoint">驗收 checkpoint<a class="headerlink" href="#checkpoint" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>檢查項</th>
+<th>指令</th>
+<th>期待結果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>三維度 quota 到位</td>
+<td><code>az vm list-usage -o table</code></td>
+<td>T4 家族 ≥8、spot ≥8、區域總額有餘裕</td>
+</tr>
+<tr>
+<td>叢集版本</td>
+<td><code>kubectl get nodes</code></td>
+<td>v1.35.x,system 節點 Ready</td>
+</tr>
+<tr>
+<td>DRA API</td>
+<td><code>kubectl api-resources \| grep resource.k8s.io</code></td>
+<td>四個 <code>resource.k8s.io/v1</code> 資源</td>
+</tr>
+<tr>
+<td>GPU 資源廣告</td>
+<td>節點 allocatable</td>
+<td>每台 GPU 節點 <code>nvidia.com/gpu: 1</code></td>
+</tr>
+<tr>
+<td>CUDA 煙霧測試</td>
+<td><code>kubectl logs gpu-smoke</code></td>
+<td><code>nvidia-smi</code> 印出 Tesla T4</td>
+</tr>
+<tr>
+<td>收工循環</td>
+<td>scale 0 → 2</td>
+<td>新節點自帶標籤、GPU 資源自動回來</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_3">地雷記錄<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<h3 id="mine-1">地雷 1:device plugin 的 rollout「成功」,desired 卻是 0<a class="headerlink" href="#mine-1" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:Helm 安裝正常、<code>rollout status</code> 回報 successfully rolled out,但 namespace 裡沒有任何 pod,節點也沒有 <code>nvidia.com/gpu</code> 資源。</p>
+<p><strong>診斷</strong>:看 DaemonSet 實際 render 出來的排程條件——</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>nvidia-device-plugin<span class="w"> </span>get<span class="w"> </span>ds<span class="w"> </span>nvdp-nvidia-device-plugin<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">    </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;desired={.status.desiredNumberScheduled}{&quot;\n&quot;}affinity={.spec.template.spec.affinity}&#39;</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="go">desired=0</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="go">affinity={&quot;nodeAffinity&quot;:{&quot;requiredDuringSchedulingIgnoredDuringExecution&quot;:{&quot;nodeSelectorTerms&quot;:[</span>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="go">  {&quot;matchExpressions&quot;:[{&quot;key&quot;:&quot;feature.node.kubernetes.io/pci-10de.present&quot;,&quot;operator&quot;:&quot;In&quot;,&quot;values&quot;:[&quot;true&quot;]}]},</span>
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="go">  {&quot;matchExpressions&quot;:[{&quot;key&quot;:&quot;feature.node.kubernetes.io/cpu-model.vendor_id&quot;,&quot;operator&quot;:&quot;In&quot;,&quot;values&quot;:[&quot;NVIDIA&quot;]}]},</span>
+</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="go">  {&quot;matchExpressions&quot;:[{&quot;key&quot;:&quot;nvidia.com/gpu.present&quot;,&quot;operator&quot;:&quot;In&quot;,&quot;values&quot;:[&quot;true&quot;]}]}]}}}</span>
+</span></code></pre></div>
+<p>chart 預設帶了一組 nodeAffinity,要求節點有 NFD(Node Feature Discovery)風格的標籤才肯排。AKS 的素節點沒裝 NFD,三個條件全落空,DaemonSet 於是「合理地」認為全叢集沒有它該去的地方。而 desired=0 的 DaemonSet 在 rollout status 看來毫無問題——<strong>檢查 DaemonSet 永遠要看 desired 數字,不能只看 rollout 結果</strong>。</p>
+<p><strong>修法</strong>:補上三個條件之一的 <code>nvidia.com/gpu.present=true</code>。關鍵是用 <code>az aks nodepool update --labels</code> 在 pool 層級補,不要 <code>kubectl label node</code>——spot 節點會被回收重建、scale 歸零再回來也是全新 VM,節點層級的標籤活不過任何一次重建。注意 <code>--labels</code> 是整組覆蓋,原有的標籤要一起帶上。</p>
+<h3 id="mine-2">地雷 2:quota 有三個維度,停機的 VM 還在佔額度<a class="headerlink" href="#mine-2" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:確認過 GPU 家族 quota 核准了,VM 還是開不出來;或反過來,區域總額看起來夠,GPU 就是起不來。</p>
+<p><strong>原因</strong>:<code>az vm list-usage</code> 裡至少三個維度同時生效——VM 家族額度、<code>Total Regional vCPUs</code>、spot 專用的 <code>Total Regional Low-priority vCPUs</code>。GPU 節點要同時通過家族與區域兩關,用 spot 再多一關。更陰的是:<strong>已停機(deallocated)的 VM 在這份帳上仍然佔著區域額度</strong>——本課程開場時區域總額 50/50,全是幾台停機多月的舊 lab VM 佔的,刪掉 resource group 才拿回 34 個 vCPU。停機省的是計算費,不是 quota。</p>
+<h3 id="mine-3">地雷 3:B2B guest 身分送不動 quota API<a class="headerlink" href="#mine-3" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:<code>az quota create</code> 直接回 <code>(Unauthorized) Request failed</code>,連錯誤細節都不給。</p>
+<p><strong>原因與繞法</strong>:訂閱掛在別的 tenant、你的帳號是 B2B guest 時,quota 的 ARM API 常常不放行,而且 CSP 型訂閱的 quota 有時只有代理商後台能調。先用 Portal 的 Quotas 頁試,不行就直接找代理商,附齊四樣東西:訂閱名稱、訂閱 ID、區域、quota 項目與目標值。另外在 Portal 開 support request 時,<strong>確認訂閱下拉選單選的是目標訂閱</strong>——帳號下掛著多個訂閱時,預設選中的往往不是你要的那個。</p>
+<h3 id="mine-4">地雷 4:kubectl 不帶 context,打到別人的叢集<a class="headerlink" href="#mine-4" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:指令下對了,叢集是錯的。</p>
+<p><strong>原因</strong>:current-context 是 kubeconfig 裡的一個共享可變狀態,<code>az aks get-credentials</code> 會改它,任何一個終端機、任何一個自動化腳本也都可能改它。本課程實際發生過:一次例行的 <code>kubectl get nodes</code> 沒帶 <code>--context</code>,打到了 kubeconfig 裡另一個生產叢集——那次只是唯讀查詢,沒造成損害,但同一個失誤配上 <code>delete</code> 就是事故。</p>
+<p><strong>修法</strong>:在多叢集環境裡工作時,把「kubectl 一律帶 <code>--context</code>、helm 一律帶 <code>--kube-context</code>」當成肌肉記憶,不依賴、也不去改 current-context。(本課的教學指令為了好讀沒有帶這個旗標,照做前請先確認 <code>kubectl config current-context</code> 指向的是你打算操作的叢集。)</p>
+<h2 id="_4">帶得走的東西<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Azure 的 vCPU quota 至少三個維度同時在管:家族、區域總額、spot。查的時候三個都看,申請的時候想好未來量一次要足。</li>
+<li>停機的 VM 仍佔區域 quota。清環境要刪資源,不是關機。</li>
+<li>託管 K8s 的 GPU 棧是分層的:driver 一層、device plugin 一層、(未來的)DRA driver 一層。誰管哪層要在最開始拍板,因為換手等於重建 node pool。</li>
+<li>DaemonSet 的健康不能看 rollout status,要看 desired 數字——0 個目標的部署永遠「成功」。</li>
+<li>會被重建的節點(spot、scale-to-0)身上不能放手工狀態,標籤、taint 都要下在 pool 層級。</li>
+<li>current-context 是共享可變狀態。顯式 <code>--context</code> 是一行的成本,換掉一整類事故。</li>
+</ul>
+<h2 id="_5">延伸閱讀<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<p>想往下深挖,從這幾份開始:</p>
+<ul>
+<li><a href="https://learn.microsoft.com/en-us/azure/aks/spot-node-pool">Add an Azure Spot node pool to an AKS cluster</a> —— spot pool 的 taint/label 行為、限制與 max price 機制</li>
+<li><a href="https://learn.microsoft.com/en-us/azure/aks/supported-kubernetes-versions">Supported Kubernetes versions in AKS</a> —— 版本支援週期與 N-2 政策</li>
+<li><a href="https://github.com/NVIDIA/k8s-device-plugin">NVIDIA device plugin for Kubernetes</a> —— Helm 部署選項與 GFD 標籤機制</li>
+<li><a href="https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/">Dynamic Resource Allocation | Kubernetes</a> —— DRA 概念與 API 物件(現行文件標示 v1.35 stable)</li>
+</ul>
+<h2 id="_6">下一步<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
+<p>地基有了:一個 1.35 的叢集、兩張隨叫隨到的 T4、一套收工不燒錢的循環。Day 1 把第一位主角請上台——KAI Scheduler,NVIDIA 開源的批次排程器。先讓它以 secondary scheduler 的身分與預設排程器共存,跑通第一個 GPU 任務,然後建立兩個 Queue,看排程公平性怎麼在「線上推論」與「離線批次」之間分 GPU。</p>
+<hr />
+<div class="admonition quote">
+<p>Kubernetes 標誌為 CNCF 之官方資產,此處作社群教學用途。</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到頂端
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="頁腳" >
+        
+          
+          <a href="../../sprints/sprint2/" class="md-footer__link md-footer__link--prev" aria-label="上一頁: Sprint 2 · eBPF 與執行期安全 介紹">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                上一頁
+              </span>
+              <div class="md-ellipsis">
+                Sprint 2 · eBPF 與執行期安全 介紹
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../sprint1-day1-kai-queue-basics/" class="md-footer__link md-footer__link--next" aria-label="下一頁: Day 1 · KAI 安裝與 Queue 基礎">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                下一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 1 · KAI 安裝與 Queue 基礎
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      KAI Scheduler、HAMi、Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,作社群教學用途
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.code.annotate", "content.code.select", "content.tabs.link", "search.suggest", "search.highlight", "search.share"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u8907\u88fd", "clipboard.copy": "\u8907\u88fd", "search.result.more.one": "\u6b64\u9801\u5c1a\u6709 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.more.other": "\u6b64\u9801\u5c1a\u6709 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.none": "\u6c92\u6709\u7b26\u5408\u7684\u9805\u76ee", "search.result.one": "\u627e\u5230 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.other": "\u627e\u5230 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.placeholder": "\u6253\u5b57\u9032\u884c\u641c\u5c0b", "search.result.term.missing": "\u7f3a\u5c11\u5b57\u8a5e", "select.version": "\u9078\u64c7\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

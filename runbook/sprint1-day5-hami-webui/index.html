@@ -1,0 +1,2568 @@
+
+<!doctype html>
+<html lang="zh-TW" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="雲原生實作課程 —— GPU 排程 runbook、踩雷解法與反思">
+      
+      
+      
+        <link rel="canonical" href="https://deepwavelab.github.io/CloudNativePracticing/runbook/sprint1-day5-hami-webui/">
+      
+      
+        <link rel="prev" href="../sprint1-day4-hami-kai-integration/">
+      
+      
+        <link rel="next" href="../sprint1-day6-dra-simulated-devices/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Day 5 · HAMi-WebUI 觀測介面 - Cloud Native Lab Course</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/terminal.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#day-5-hami-webuigpu" class="md-skip">
+          跳轉到
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="頁首">
+    <a href="../.." title="Cloud Native Lab Course" class="md-header__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Cloud Native Lab Course
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Day 5 · HAMi-WebUI 觀測介面
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換深色模式"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="切換深色模式" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換淺色模式"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="切換淺色模式" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜尋" placeholder="搜尋" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="搜尋">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="分享" aria-label="分享" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="清除" aria-label="清除" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜尋引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="標籤" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  首頁
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../sprint1-day0-azure-aks-foundation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 1 · GPU 排程三部曲
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint2-day0-ebpf-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 2 · eBPF 與執行期安全
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="導覽列" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Cloud Native Lab Course" class="md-nav__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Cloud Native Lab Course
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首頁
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    首頁
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day0-azure-aks-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 環境建置與成本紀律
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day1-kai-queue-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · KAI 安裝與 Queue 基礎
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day2-gang-scheduling-preemption/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Gang Scheduling 與搶占
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day3-hami-memory-isolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · HAMi 安裝與 VRAM 硬隔離
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day4-hami-kai-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · HAMi 進階與 KAI 整合
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · HAMi-WebUI 觀測介面
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · HAMi-WebUI 觀測介面
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        原理與架構
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="原理與架構">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prometheus-operator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        真正的前置條件:一整套 Prometheus Operator
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        配額與用量走的是兩條不同的鏈
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        今天要走的路
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-hami-day-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1:重裝 HAMi,順便驗一次 Day 4 的殘留清單
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-webui-prometheus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2:把 WebUI 連同一套剝到最小的 Prometheus 裝起來
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3:佈六顆配額不對稱的切卡負載
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-curl" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4:不開瀏覽器,先用 curl 把數字對一次
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5:把用量那條鏈接通
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6:四個面板逐頁走讀
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-spot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 7:讀一次真實 spot 回收在畫面上留下的痕跡
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8-0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 8:縮回 0,並確認畫面歸零是預期行為
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收 checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷記錄
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="地雷記錄">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 1:自帶的 Prometheus 裝好了,後端卻連不上——那個位址是 chart 用舊規則算出來的
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 2:helm upgrade 改了 ConfigMap,pod 完全不知道
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 3:每個任務的用量永遠是 0——Prometheus 把標籤改了名
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 4:dcgm-exporter 的 tolerations 預設是空的,在 spot GPU pool 上一顆都不裝
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 5:資料 API 全是 POST,而且 filters 不可省略——送 {} 回 500
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 6:2 vCPU 的 system pool 塞得下這三套,卻塞不下任何一次滾動更新
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的東西
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day6-dra-simulated-devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · DRA 概念與模擬裝置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day7-dra-aks-real-gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · DRA 真卡實測
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day8-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 綜合:三者分工決策表
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day0-ebpf-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · eBPF 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day1-bpftrace-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · bpftrace 三支經典工具
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day2-bpftrace-kubernetes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · 把核心事件接回 Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day3-falco-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Falco 安裝與出廠規則
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day4-falco-custom-rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · 自訂規則、誤報調校與告警路由
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day5-tetragon-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Tetragon 與 TracingPolicy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day6-tetragon-enforcement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · 從偵測到攔截
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day7-cilium-kubeproxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Cilium 與 kube-proxy replacement
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day8-cilium-network-policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · CiliumNetworkPolicy(L3/L4 → L7)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day9-hubble/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Hubble 可觀測性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 綜合:四套工具的分工
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        原理與架構
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="原理與架構">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prometheus-operator" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        真正的前置條件:一整套 Prometheus Operator
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        配額與用量走的是兩條不同的鏈
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        今天要走的路
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-hami-day-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1:重裝 HAMi,順便驗一次 Day 4 的殘留清單
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-webui-prometheus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2:把 WebUI 連同一套剝到最小的 Prometheus 裝起來
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3:佈六顆配額不對稱的切卡負載
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-curl" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4:不開瀏覽器,先用 curl 把數字對一次
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5:把用量那條鏈接通
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6:四個面板逐頁走讀
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-spot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 7:讀一次真實 spot 回收在畫面上留下的痕跡
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8-0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 8:縮回 0,並確認畫面歸零是預期行為
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收 checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷記錄
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="地雷記錄">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 1:自帶的 Prometheus 裝好了,後端卻連不上——那個位址是 chart 用舊規則算出來的
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 2:helm upgrade 改了 ConfigMap,pod 完全不知道
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 3:每個任務的用量永遠是 0——Prometheus 把標籤改了名
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 4:dcgm-exporter 的 tolerations 預設是空的,在 spot GPU pool 上一顆都不裝
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 5:資料 API 全是 POST,而且 filters 不可省略——送 {} 回 500
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 6:2 vCPU 的 system pool 塞得下這三套,卻塞不下任何一次滾動更新
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的東西
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="day-5-hami-webuigpu">Day 5: 安裝 HAMi-WebUI——GPU 配額與用量的儀表板<a class="headerlink" href="#day-5-hami-webuigpu" title="Permanent link">&para;</a></h1>
+<p><img align="right" alt="HAMi 官方標誌(WebUI 為其子專案)" src="../../assets/logos/hami-icon-color.svg" width="100" /></p>
+<blockquote>
+<p>Day 4 結束時,「誰拿了多少 VRAM 」這件事散在三個地方:pod 的 <code>hami.io/vgpu-devices-allocated</code> annotation、節點的 <code>hami.io/node-nvidia-register</code>,以及 scheduler extender 那支只能 port-forward 才讀得到的 <code>/metrics</code>。三處都要自己 <code>kubectl</code> 或 <code>curl</code> 撈一次才拼得出全貌,而其中一處還掛著一個刪掉一小時的 namespace 的舊數字。今天把這些數字接到一個現成的網頁介面上,讓「哪張卡剩多少、哪顆 pod 佔了哪一塊」變成打開就看得到的一頁。路上會遇到裝任何觀測介面都躲不掉的同一個問題:畫面上顯示 0,到底是真的沒人用,還是資料根本沒送到。</p>
+</blockquote>
+<div class="admonition abstract">
+<p class="admonition-title">你在課程的哪裡</p>
+<ul>
+<li><strong>Day 3–4</strong>:切卡會了,但帳本散在 annotation、節點物件與 metrics 三處。</li>
+<li><strong>今天</strong>:裝 HAMi-WebUI 和一套剝到最小的 Prometheus。驗收:四個面板都有真資料,配額鏈與用量鏈都接通。</li>
+<li><strong>Day 6</strong>:離開 device plugin 的整數世界,學下一代的資源表達。</li>
+</ul>
+</div>
+<h2 id="_1">原理與架構<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<p>Day 3 到 Day 4 為止,查一次帳的成本是這樣的:<code>kubectl get pod -o jsonpath</code> 撈 annotation 知道誰配到哪張卡、<code>kubectl get node -o json</code> 撈 <code>capacity</code> 與 <code>hami.io/node-nvidia-register</code> 知道卡本身多大、再 port-forward 一次 <code>hami-scheduler</code> 的 9395 埠讀 device 維度的 metrics。三道指令、三種輸出格式,而且每加一台節點就要重來一次。這種查法拿來追一顆跑錯的 pod 還行,拿來回答「現在整座叢集的卡滿了沒」就不夠用。</p>
+<p>HAMi 官方為這件事另外開了一個子專案。它跟 HAMi 本體不在同一個 repo、不在同一條版本線、也不是 HAMi chart 的一部分——是獨立的 chart、獨立的 release,名字叫 <strong>HAMi-WebUI</strong>(本課程用 chart / appVersion <code>1.2.0</code>)。它把上面那三道指令的結果包成一組 HTTP API,前面接一個 SPA 前端,分成四個面板:</p>
+<table>
+<thead>
+<tr>
+<th>面板</th>
+<th>回答的問題</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Overview</td>
+<td>整座叢集配出去多少、實際用掉多少</td>
+</tr>
+<tr>
+<td>Nodes</td>
+<td>哪一台節點的卡快滿了</td>
+</tr>
+<tr>
+<td>Accelerators</td>
+<td>每一張實體卡的配額、用量、溫度、功耗</td>
+</tr>
+<tr>
+<td>Workloads</td>
+<td>每一顆 pod 拿了哪張卡的哪一塊</td>
+</tr>
+</tbody>
+</table>
+<h3 id="prometheus-operator">真正的前置條件:一整套 Prometheus Operator<a class="headerlink" href="#prometheus-operator" title="Permanent link">&para;</a></h3>
+<p>官方安裝文件的前置條件寫著「Prometheus &gt; 2.8.0」,照字面讀會以為叢集裡有一顆 Prometheus 就夠了。把 chart 拉下來讀 <code>templates/</code> 會看到另一件事:chart 產出三份 <strong>ServiceMonitor</strong>(webui 自己、HAMi device plugin、dcgm-exporter),而 ServiceMonitor 是 <code>monitoring.coreos.com/v1</code> 的 CRD。沒有 Prometheus Operator,這個 CRD 就不存在,三份物件建不出來,<code>helm install</code> 在第一次 apply 就會失敗。</p>
+<p>所以真正的前置條件是一整套 Prometheus Operator。chart 給了兩條路:</p>
+<table>
+<thead>
+<tr>
+<th>路</th>
+<th>開關</th>
+<th>意思</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>(a) 外接</td>
+<td><code>externalPrometheus.enabled=true</code> 加 <code>address</code></td>
+<td>叢集裡已經有 Prometheus Operator 那一套,指過去</td>
+</tr>
+<tr>
+<td>(b) 自帶</td>
+<td><code>kube-prometheus-stack.enabled=true</code></td>
+<td>用 subchart 現拉一套</td>
+</tr>
+</tbody>
+</table>
+<p>本叢集一套都沒有,所以只剩 (b);剩下的自由度是「這套 stack 能剝到多小」,步驟 2 會把它剝到只有兩顆 pod。</p>
+<h3 id="_2">配額與用量走的是兩條不同的鏈<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h3>
+<p>畫面上每個數字都有出處,而出處分成兩群——今天大半的地雷都長在其中一群上。</p>
+<pre class="mermaid"><code>flowchart TB
+    subgraph Q["配額鏈"]
+        Q1["pod annotation&lt;br/&gt;hami.io/vgpu-devices-allocated"] --&gt; Q2["Kubernetes API"]
+        Q2 --&gt; Q3["webui 後端"]
+    end
+    subgraph U["用量鏈"]
+        U1["dcgm-exporter&lt;br/&gt;hami device plugin 的 /metrics"] --&gt; U2["Prometheus"]
+        U2 --&gt; U3["webui 後端的 PromQL 查詢"]
+    end
+    Q3 --&gt; UI["四個面板"]
+    U3 --&gt; UI</code></pre>
+<p>配額鏈短、同步、一裝就對:HAMi 排程當下寫進 pod annotation 的數字,後端讀一次 Kubernetes API 就拿得到。用量鏈長:節點上的 exporter 產生指標、Prometheus 定期抓走、後端再下 PromQL 把它算成每張卡與每顆 pod 的用量。長鏈的每一環都有自己的失敗方式,而它們共用同一種外顯症狀——<strong>畫面顯示 0</strong>。DaemonSet 沒鋪到 GPU 節點是 0,標籤被改名讓查詢命中不到是 0,後端連不上 Prometheus 也是 0,真的沒人用卡當然還是 0。這四種情況在畫面上長得一模一樣,分辨它們的方法卻各不相同,步驟 4 與步驟 5 就是在做這件事。</p>
+<h3 id="_3">今天要走的路<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h3>
+<p>環境沿用 Day 0 蓋的 AKS <code>&lt;cluster&gt;</code>(K8s v1.35.6)、<code>gpuspot</code> pool 兩台 <code>Standard_NC4as_T4_v3</code>(各一張 16 GB T4,spot)、system pool 一台 2 vCPU 的 <code>Standard_D2as_v5</code>,Day 1 裝的 KAI Scheduler v0.16.8 全程保留但不參與。六段:重裝 HAMi 並驗 Day 4 留下的殘留、把 WebUI 連同它剝小的 Prometheus 裝起來、佈六顆不對稱的切卡負載、不開瀏覽器先用 curl 驗資料、把用量那條鏈接通、最後逐頁走讀畫面。收尾前還有一次真實的 spot 回收——兩台 GPU 節點被 Azure 平台收走,前後過程完整留在趨勢圖上,拿來看這個介面在節點消失時顯示什麼剛剛好。workload 全部放在 <code>day5-lab</code> namespace。</p>
+<h2 id="_4">步驟<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<h3 id="1-hami-day-4">步驟 1:重裝 HAMi,順便驗一次 Day 4 的殘留清單<a class="headerlink" href="#1-hami-day-4" title="Permanent link">&para;</a></h3>
+<p>照 Day 0 的開機循環把 GPU pool 拉回兩台:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>scale<span class="w"> </span>-g<span class="w"> </span>&lt;resource-group&gt;<span class="w"> </span>--cluster-name<span class="w"> </span>&lt;cluster&gt;<span class="w"> </span>-n<span class="w"> </span>gpuspot<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span>--subscription<span class="w"> </span>&lt;subscription-id&gt;<span class="w"> </span>--node-count<span class="w"> </span><span class="m">2</span>
+</span></code></pre></div>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>11:44:44  scale 0→2 下達
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>11:49:56  兩台 Ready(5 分 12 秒)
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>          aks-gpuspot-21249019-vmss00000d
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>          aks-gpuspot-21249019-vmss00000e
+</span></code></pre></div>
+<p><a href="../sprint1-day4-hami-kai-integration/#mine-5">Day 4 地雷 5</a> 記錄了 <code>helm uninstall hami</code> 之後留在叢集裡的四樣東西,今天正好是「下一次」,逐項回查:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>hami 相關 secret         → 一個都沒有(Day 4 收工時已刪 hami-scheduler-tls)
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>namespace                → 只剩 default／kai-*／kube-*,空殼 ns 已清
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>webhook                  → 只剩 mutating-kai-admission 加 AKS 自己的三個
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>節點 hami.io/* annotation → 兩台都是空的
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>節點 nvidia.com/gpu       → capacity 與 allocatable 都不存在
+</span></code></pre></div>
+<p>五項全乾淨,但原因分兩種。secret 與空 namespace 是 Day 4 收工時手動刪的;節點 annotation 與 <code>capacity</code> 這兩項則是因為節點根本是新的——Day 4 那兩台 <code>…00000b</code>／<code>…00000c</code> 連同殘留一起被 scale-to-0 銷毀,今天開起來的是 <code>…00000d</code>／<code>…00000e</code>。</p>
+<p>這給了一條在 spot 或可縮放節點池上很省事的規則:<strong>寫在 node 物件上的髒東西,把池子縮到 0 就免費清掉了</strong>。長生命週期的固定節點沒有這個機制,那些 annotation 會一直躺著騙下一套方案。</p>
+<p>裝 HAMi 之前沿用 Day 3 那道映像存在性預檢,先問一次阿里雲 registry 有沒有對應 K8s 版本的 <code>kube-scheduler</code>:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nv">TOK</span><span class="o">=</span><span class="k">$(</span>curl<span class="w"> </span>-s<span class="w"> </span><span class="s2">&quot;https://dockerauth.cn-hangzhou.aliyuncs.com/auth?service=registry.aliyuncs.com:cn-hangzhou:26842&amp;scope=repository:google_containers/kube-scheduler:pull&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span>.token<span class="k">)</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s2">&quot;%{http_code}\n&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$TOK</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Accept: application/vnd.docker.distribution.manifest.list.v2+json&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span>https://registry.cn-hangzhou.aliyuncs.com/v2/google_containers/kube-scheduler/manifests/v1.35.6
+</span></code></pre></div>
+<p>回 <code>200</code>,預設值可用。安裝值 <code>01-hami-values.yaml</code> 與 Day 3 一字未改(device plugin 帶 spot toleration,scheduler 與 patch job 釘 system pool):</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span><span class="m">01</span>-hami-values.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="s">devicePlugin:</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="s">  tolerations:</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="s">    - key: kubernetes.azure.com/scalesetpriority</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="s">      operator: Equal</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="s">      value: spot</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="s">      effect: NoSchedule</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="s">scheduler:</span>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="s">  nodeSelector:</span>
+</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="s">    agentpool: system</span>
+</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="s">  patch:</span>
+</span><span id="__span-4-13"><a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="s">    nodeSelector:</span>
+</span><span id="__span-4-14"><a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="s">      agentpool: system</span>
+</span><span id="__span-4-15"><a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="s">EOF</span>
+</span><span id="__span-4-16"><a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>
+</span><span id="__span-4-17"><a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>helm<span class="w"> </span>install<span class="w"> </span>hami<span class="w"> </span>hami-charts/hami<span class="w"> </span>--version<span class="w"> </span><span class="m">2</span>.9.0<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-4-18"><a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a><span class="w">  </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-f<span class="w"> </span><span class="m">01</span>-hami-values.yaml
+</span></code></pre></div>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>11:50:27  install 下達
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>11:50:44  install 返回(17 秒)
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>11:51:00  hami-device-plugin ×2 ContainerCreating／hami-scheduler 已 2/2 Running
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>11:51:40  兩台節點 allocatable nvidia.com/gpu = 10   ← install 到切片就緒共 73 秒
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>hami.io/node-nvidia-register =
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>  [{&quot;id&quot;:&quot;GPU-3a42fadb-…&quot;,&quot;count&quot;:10,&quot;devmem&quot;:16384,&quot;devcore&quot;:100,
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>    &quot;type&quot;:&quot;NVIDIA-Tesla T4&quot;,&quot;mode&quot;:&quot;hami-core&quot;,&quot;health&quot;:true}]
+</span></code></pre></div>
+<p>同一份值,換到全新的節點上、在 KAI 已經佔著一個 admission webhook 的叢集裡,73 秒把兩張 T4 切成 20 份 vGPU。</p>
+<h3 id="2-webui-prometheus">步驟 2:把 WebUI 連同一套剝到最小的 Prometheus 裝起來<a class="headerlink" href="#2-webui-prometheus" title="Permanent link">&para;</a></h3>
+<p><code>helm pull hami-webui/hami-webui --version 1.2.0 --untar</code> 之後,<code>Chart.yaml</code> 的相依講得很白:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nt">dependencies</span><span class="p">:</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name: dcgm-exporter          version: 3.5.0    condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dcgm-exporter.enabled</span><span class="w">          </span><span class="c1"># default true</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name: kube-prometheus-stack  version: 62.6.0   condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kube-prometheus-stack.enabled</span><span class="w">  </span><span class="c1"># default false</span>
+</span></code></pre></div>
+<p>chart 自己的 values 已經先關掉 alertmanager、grafana、nodeExporter、defaultRules 與 kubernetesServiceMonitors。要跑起來還得補三刀,兩刀是打開(否則根本裝不成)、一刀是關掉:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span><span class="m">02</span>-hami-webui-values.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="s">nodeSelector:</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="s">  agentpool: system</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="s">kube-prometheus-stack:</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="s">  enabled: true</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="s">  crds:</span>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="s">    enabled: true                      # chart default false; without it there is no ServiceMonitor CRD</span>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="s">  kubeStateMetrics:</span>
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="s">    enabled: false</span>
+</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="s">  prometheusOperator:</span>
+</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="s">    enabled: true                      # chart default false; without it nobody reconciles the Prometheus CR</span>
+</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="s">    admissionWebhooks:</span>
+</span><span id="__span-7-14"><a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="s">      enabled: false</span>
+</span><span id="__span-7-15"><a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="s">    tls:</span>
+</span><span id="__span-7-16"><a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="s">      enabled: false</span>
+</span><span id="__span-7-17"><a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="s">    nodeSelector:</span>
+</span><span id="__span-7-18"><a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a><span class="s">      agentpool: system</span>
+</span><span id="__span-7-19"><a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a><span class="s">  prometheus:</span>
+</span><span id="__span-7-20"><a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a><span class="s">    prometheusSpec:</span>
+</span><span id="__span-7-21"><a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a><span class="s">      nodeSelector:</span>
+</span><span id="__span-7-22"><a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a><span class="s">        agentpool: system</span>
+</span><span id="__span-7-23"><a id="__codelineno-7-23" name="__codelineno-7-23" href="#__codelineno-7-23"></a><span class="s">      retention: 6h</span>
+</span><span id="__span-7-24"><a id="__codelineno-7-24" name="__codelineno-7-24" href="#__codelineno-7-24"></a><span class="s">      resources:</span>
+</span><span id="__span-7-25"><a id="__codelineno-7-25" name="__codelineno-7-25" href="#__codelineno-7-25"></a><span class="s">        requests:</span>
+</span><span id="__span-7-26"><a id="__codelineno-7-26" name="__codelineno-7-26" href="#__codelineno-7-26"></a><span class="s">          cpu: 100m</span>
+</span><span id="__span-7-27"><a id="__codelineno-7-27" name="__codelineno-7-27" href="#__codelineno-7-27"></a><span class="s">          memory: 400Mi</span>
+</span><span id="__span-7-28"><a id="__codelineno-7-28" name="__codelineno-7-28" href="#__codelineno-7-28"></a><span class="s">        limits:</span>
+</span><span id="__span-7-29"><a id="__codelineno-7-29" name="__codelineno-7-29" href="#__codelineno-7-29"></a><span class="s">          memory: 1Gi</span>
+</span><span id="__span-7-30"><a id="__codelineno-7-30" name="__codelineno-7-30" href="#__codelineno-7-30"></a><span class="s">EOF</span>
+</span></code></pre></div>
+<p>這是安裝當下的版本。<a href="#mine-1">地雷 1</a> 的 <code>externalPrometheus</code>、<a href="#mine-3">地雷 3</a> 的 <code>hamiServiceMonitor.honorLabels</code>、<a href="#mine-4">地雷 4</a> 的 <code>dcgm-exporter.tolerations</code>(連同一段明寫整卡視野的 <code>dcgm-exporter.extraEnv</code>:<code>NVIDIA_VISIBLE_DEVICES=all</code> 與 <code>NVIDIA_DRIVER_CAPABILITIES=all</code>)都是後面才補進同一份檔案的——照這一版裝,才會依序撞到那三顆雷。</p>
+<p>chart 內建的 <code>prometheus.prometheusSpec.serviceMonitorSelector.matchLabels.jobRelease=hami-webui-prometheus</code> 保留不動。這一行是 stack 剝小之後仍然安全的關鍵:這顆 Prometheus 只撿本 chart 打了那個標籤的三份 ServiceMonitor,不會去掃整座叢集的每一個 Service,所以它的記憶體用量與叢集規模無關。</p>
+<p>裝完的相依足跡:</p>
+<table>
+<thead>
+<tr>
+<th>元件</th>
+<th>數量／落位</th>
+<th>說明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>hami-webui</code>(fe + be)</td>
+<td>1 pod／2 容器,system pool</td>
+<td>前端 node server:3000、後端 Go:8000</td>
+</tr>
+<tr>
+<td><code>hami-webui-kube-prometheus-operator</code></td>
+<td>1 pod,system pool</td>
+<td>只為了 reconcile 那顆 Prometheus</td>
+</tr>
+<tr>
+<td><code>prometheus-hami-webui-kube-prometheus-prometheus-0</code></td>
+<td>1 pod／2 容器,system pool</td>
+<td>單副本、emptyDir、6h retention</td>
+</tr>
+<tr>
+<td><code>hami-webui-dcgm-exporter</code></td>
+<td>DaemonSet 2 pod,GPU 節點</td>
+<td>真實使用率／溫度／功耗</td>
+</tr>
+<tr>
+<td>CRD</td>
+<td>10 個(kube-prometheus-stack 的)</td>
+<td>隨 release 生滅</td>
+</tr>
+</tbody>
+</table>
+<p>多出來的常駐 pod 共 4 顆,其中 2 顆在 GPU 節點上,system pool 沒有加開節點。</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>helm<span class="w"> </span>repo<span class="w"> </span>add<span class="w"> </span>hami-webui<span class="w"> </span>https://project-hami.github.io/HAMi-WebUI<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>helm<span class="w"> </span>repo<span class="w"> </span>update<span class="w"> </span>hami-webui
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>helm<span class="w"> </span>install<span class="w"> </span>hami-webui<span class="w"> </span>hami-webui/hami-webui<span class="w"> </span>--version<span class="w"> </span><span class="m">1</span>.2.0<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-f<span class="w"> </span><span class="m">02</span>-hami-webui-values.yaml
+</span></code></pre></div>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>11:51:16  install 下達
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>11:51:30  install 返回(14 秒)
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>11:51:35  五份物件全部建立,三份 ServiceMonitor 也在
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>11:51:58  operator 1/1、prometheus 2/2、dcgm-exporter 2 顆 Running
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>11:52:15  hami-webui 2/2 Running
+</span></code></pre></div>
+<p>pod 全綠,Prometheus 五個 target 也全部 <code>up</code>,但後端 log 每秒噴一行 <code>no such host</code>——chart 算給後端的 Prometheus 位址與 subchart 實際建出來的 Service 名字對不上,詳見<a href="#mine-1">地雷 1</a>。把位址改成明寫的那一版之後 <code>helm upgrade</code> 成功、ConfigMap 也確實更新了,後端卻繼續噴同一個舊 host 的錯(<a href="#mine-2">地雷 2</a>)。補一道 <code>kubectl -n kube-system rollout restart deploy/hami-webui</code> 才算數,而這道 restart 又卡了三分鐘(<a href="#mine-6">地雷 6</a>)——2 vCPU 的 system pool 裝得下這三套,卻放不下任何一次預設策略的滾動更新。</p>
+<h3 id="3">步驟 3:佈六顆配額不對稱的切卡負載<a class="headerlink" href="#3" title="Permanent link">&para;</a></h3>
+<p>畫面上有東西可看的前提是負載本身有層次。六顆 pod 的 VRAM 配額刻意做成不對稱,兩張卡的滿度差一倍:</p>
+<table>
+<thead>
+<tr>
+<th>節點</th>
+<th>pod</th>
+<th>VRAM 配額(MiB)</th>
+<th>卡上合計</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>…00000d</code></td>
+<td>webui-a1 / a2 / a3 / a4</td>
+<td>4096 / 4096 / 4096 / 2048</td>
+<td>14336 / 16384,4/10 vGPU</td>
+</tr>
+<tr>
+<td><code>…00000e</code></td>
+<td>webui-b1 / b2</td>
+<td>4096 / 2048</td>
+<td>6144 / 16384,2/10 vGPU</td>
+</tr>
+</tbody>
+</table>
+<p>每顆容器持續跑 4096×4096 的 matmul 並常駐一塊 VRAM ,用量那條鏈才有真實數字可算,而不是零負載的空殼。manifest 用 <code>nodeSelector: kubernetes.io/hostname</code> 把 pod 釘在指定節點上,而節點名每次重建都會變,所以檔案裡寫的是佔位符,套用前先換掉:</p>
+<p>六顆的規格只差四個值(名字、節點、常駐 VRAM、配額),用一張表配一段迴圈生出來:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="k">while</span><span class="w"> </span><span class="nb">read</span><span class="w"> </span>-r<span class="w"> </span>name<span class="w"> </span>node<span class="w"> </span>hold<span class="w"> </span>mem<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span>cat<span class="w"> </span><span class="s">&lt;&lt;EOF</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="s">---</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="s">kind: Pod</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="s">metadata:</span>
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="s">  name: $name</span>
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="s">  namespace: day5-lab</span>
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="s">  labels: { demo: hami-webui }</span>
+</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="s">spec:</span>
+</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="s">  restartPolicy: Never</span>
+</span><span id="__span-10-12"><a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="s">  nodeSelector: { kubernetes.io/hostname: $node }</span>
+</span><span id="__span-10-13"><a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="s">  tolerations:</span>
+</span><span id="__span-10-14"><a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="s">    - key: kubernetes.azure.com/scalesetpriority</span>
+</span><span id="__span-10-15"><a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="s">      operator: Equal</span>
+</span><span id="__span-10-16"><a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a><span class="s">      value: spot</span>
+</span><span id="__span-10-17"><a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a><span class="s">      effect: NoSchedule</span>
+</span><span id="__span-10-18"><a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a><span class="s">  containers:</span>
+</span><span id="__span-10-19"><a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a><span class="s">    - name: app</span>
+</span><span id="__span-10-20"><a id="__codelineno-10-20" name="__codelineno-10-20" href="#__codelineno-10-20"></a><span class="s">      image: pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime</span>
+</span><span id="__span-10-21"><a id="__codelineno-10-21" name="__codelineno-10-21" href="#__codelineno-10-21"></a><span class="s">      env: [{ name: HOLD_MIB, value: &quot;$hold&quot; }]</span>
+</span><span id="__span-10-22"><a id="__codelineno-10-22" name="__codelineno-10-22" href="#__codelineno-10-22"></a><span class="s">      command: [&quot;python&quot;, &quot;-u&quot;, &quot;-c&quot;, &quot;import torch,os,time\nprint(&#39;total_MiB =&#39;, torch.cuda.get_device_properties(0).total_memory//1024//1024, flush=True)\nhold = torch.empty(int(os.environ[&#39;HOLD_MIB&#39;])*1024*1024//4, dtype=torch.float32, device=&#39;cuda&#39;)\nhold.fill_(1.0)\na = torch.randn(4096,4096, device=&#39;cuda&#39;); b = torch.randn(4096,4096, device=&#39;cuda&#39;)\ni = 0\nwhile True:\n    for _ in range(20):\n        c = a @ b\n    torch.cuda.synchronize(); i += 1\n    if i % 20 == 0:\n        print(&#39;iter&#39;, i, &#39;reserved_MiB&#39;, torch.cuda.memory_reserved()//1024//1024, flush=True)\n    time.sleep(0.2)\n&quot;]</span>
+</span><span id="__span-10-23"><a id="__codelineno-10-23" name="__codelineno-10-23" href="#__codelineno-10-23"></a><span class="s">      resources:</span>
+</span><span id="__span-10-24"><a id="__codelineno-10-24" name="__codelineno-10-24" href="#__codelineno-10-24"></a><span class="s">        limits:</span>
+</span><span id="__span-10-25"><a id="__codelineno-10-25" name="__codelineno-10-25" href="#__codelineno-10-25"></a><span class="s">          nvidia.com/gpu: 1</span>
+</span><span id="__span-10-26"><a id="__codelineno-10-26" name="__codelineno-10-26" href="#__codelineno-10-26"></a><span class="s">          nvidia.com/gpumem: $mem</span>
+</span><span id="__span-10-27"><a id="__codelineno-10-27" name="__codelineno-10-27" href="#__codelineno-10-27"></a><span class="s">EOF</span>
+</span><span id="__span-10-28"><a id="__codelineno-10-28" name="__codelineno-10-28" href="#__codelineno-10-28"></a><span class="k">done</span><span class="w"> </span>&gt;<span class="w"> </span><span class="m">03</span>-webui-workloads.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;TABLE&#39;</span>
+</span><span id="__span-10-29"><a id="__codelineno-10-29" name="__codelineno-10-29" href="#__codelineno-10-29"></a><span class="s">webui-a1 NODE_A_PLACEHOLDER 1024 4096</span>
+</span><span id="__span-10-30"><a id="__codelineno-10-30" name="__codelineno-10-30" href="#__codelineno-10-30"></a><span class="s">webui-a2 NODE_A_PLACEHOLDER 1024 4096</span>
+</span><span id="__span-10-31"><a id="__codelineno-10-31" name="__codelineno-10-31" href="#__codelineno-10-31"></a><span class="s">webui-a3 NODE_A_PLACEHOLDER 1024 4096</span>
+</span><span id="__span-10-32"><a id="__codelineno-10-32" name="__codelineno-10-32" href="#__codelineno-10-32"></a><span class="s">webui-a4 NODE_A_PLACEHOLDER 512  2048</span>
+</span><span id="__span-10-33"><a id="__codelineno-10-33" name="__codelineno-10-33" href="#__codelineno-10-33"></a><span class="s">webui-b1 NODE_B_PLACEHOLDER 1024 4096</span>
+</span><span id="__span-10-34"><a id="__codelineno-10-34" name="__codelineno-10-34" href="#__codelineno-10-34"></a><span class="s">webui-b2 NODE_B_PLACEHOLDER 512  2048</span>
+</span><span id="__span-10-35"><a id="__codelineno-10-35" name="__codelineno-10-35" href="#__codelineno-10-35"></a><span class="s">TABLE</span>
+</span></code></pre></div>
+<p>兩個佔位符換成自己叢集當下的兩台 GPU 節點 hostname(<code>kubectl get nodes</code> 查),再送進 <code>kubectl</code>:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>sed<span class="w"> </span>-e<span class="w"> </span><span class="s1">&#39;s/NODE_A_PLACEHOLDER/aks-gpuspot-21249019-vmss00000d/&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">    </span>-e<span class="w"> </span><span class="s1">&#39;s/NODE_B_PLACEHOLDER/aks-gpuspot-21249019-vmss00000e/&#39;</span><span class="w"> </span><span class="m">03</span>-webui-workloads.yaml<span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>-
+</span></code></pre></div>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>11:52:10  apply(映像已由 prepuller DaemonSet 預熱)
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>11:52:59  六顆全部 Running(49 秒)
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>容器裡看到的是切片:
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>  webui-a1  total_MiB = 4096      webui-a4  total_MiB = 2048
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>  webui-b1  total_MiB = 4096
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>pod annotation(HAMi 的帳本):
+</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>  webui-a1  GPU-3a42fadb-…,NVIDIA,4096,0:;
+</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>  webui-a4  GPU-3a42fadb-…,NVIDIA,2048,0:;
+</span><span id="__span-12-11"><a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>  webui-b1  GPU-361043c7-…,NVIDIA,4096,0:;
+</span></code></pre></div>
+<h3 id="4-curl">步驟 4:不開瀏覽器,先用 curl 把數字對一次<a class="headerlink" href="#4-curl" title="Permanent link">&para;</a></h3>
+<p>畫面對不對,先不看畫面。前端與後端各開一個埠(<code>3000</code> 與 <code>8000</code>),兩邊直接打都會給人錯覺:對前端打 <code>/api/v1/nodes</code> 回 200 加一整頁 HTML,那是 SPA 的 fallback;對後端打 <code>/v1/nodes</code> 回 404。兩邊都有回應,兩邊都不是答案。</p>
+<p>真正的路由表要從兩個地方湊出來:後端的 proto 定義(<code>server/api/v1/*.proto</code>)給路徑與方法,前端容器裡的 proxy 設定給前綴。</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># /apps/dist/config/production/proxy.js, inside the frontend container</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="nt">vgpu</span><span class="p">:</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span><span class="nt">target</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;http://127.0.0.1:8000&#39;</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">  </span><span class="nt">pathRewrite</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="w"> </span><span class="s">&#39;^/api/vgpu&#39;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="s">&#39;&#39;</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span></code></pre></div>
+<table>
+<thead>
+<tr>
+<th>瀏覽器實際打的路徑(:3000)</th>
+<th>後端路由</th>
+<th>方法</th>
+<th>用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/api/vgpu/v1/summary</code></td>
+<td><code>/v1/summary</code></td>
+<td>POST</td>
+<td>首頁統計</td>
+</tr>
+<tr>
+<td><code>/api/vgpu/v1/nodes</code></td>
+<td><code>/v1/nodes</code></td>
+<td>POST</td>
+<td>節點列表</td>
+</tr>
+<tr>
+<td><code>/api/vgpu/v1/gpus</code></td>
+<td><code>/v1/gpus</code></td>
+<td>POST</td>
+<td>顯卡列表</td>
+</tr>
+<tr>
+<td><code>/api/vgpu/v1/containers</code></td>
+<td><code>/v1/containers</code></td>
+<td>POST</td>
+<td>任務列表</td>
+</tr>
+<tr>
+<td><code>/api/vgpu/v1/monitor/query/instant-vector</code></td>
+<td>同左</td>
+<td>POST</td>
+<td>圖表用的 PromQL 代打</td>
+</tr>
+<tr>
+<td><code>/health_check</code></td>
+<td>—(前端自己)</td>
+<td>GET</td>
+<td>存活探測</td>
+</tr>
+</tbody>
+</table>
+<p>全部是 POST,而且請求體不能是空物件——送 <code>{}</code> 會回 500,看起來像伺服器故障(<a href="#mine-5">地雷 5</a>)。帶上空的 <code>filters</code> 就通了:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>kubectl<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>port-forward<span class="w"> </span>svc/hami-webui<span class="w"> </span><span class="m">13000</span>:3000
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;Content-Type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;filters&quot;:{}}&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">  </span>http://127.0.0.1:13000/api/vgpu/v1/summary
+</span></code></pre></div>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="p">{</span><span class="nt">&quot;vgpuUsed&quot;</span><span class="p">:</span><span class="mi">6</span><span class="p">,</span><span class="nt">&quot;vgpuTotal&quot;</span><span class="p">:</span><span class="mi">20</span><span class="p">,</span><span class="nt">&quot;coreUsed&quot;</span><span class="p">:</span><span class="mi">600</span><span class="p">,</span><span class="nt">&quot;coreTotal&quot;</span><span class="p">:</span><span class="mi">200</span><span class="p">,</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="w"> </span><span class="nt">&quot;memoryUsed&quot;</span><span class="p">:</span><span class="mi">20480</span><span class="p">,</span><span class="nt">&quot;memoryTotal&quot;</span><span class="p">:</span><span class="mi">32768</span><span class="p">,</span><span class="nt">&quot;gpuCount&quot;</span><span class="p">:</span><span class="mi">2</span><span class="p">,</span><span class="nt">&quot;nodeCount&quot;</span><span class="p">:</span><span class="mi">2</span><span class="p">}</span>
+</span></code></pre></div>
+<p>六顆任務、20 份 vGPU 用掉 6 份、32768 MiB 配出 20480 MiB、兩張卡兩台節點,跟步驟 3 的表格逐格對得上(4096×3 + 2048 + 4096 + 2048 = 20480)。節點與顯卡兩個端點也一樣:</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="p">{</span><span class="nt">&quot;list&quot;</span><span class="p">:[</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w"> </span><span class="p">{</span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="s2">&quot;aks-gpuspot-21249019-vmss00000d&quot;</span><span class="p">,</span><span class="nt">&quot;ip&quot;</span><span class="p">:</span><span class="s2">&quot;10.224.0.5&quot;</span><span class="p">,</span><span class="nt">&quot;isSchedulable&quot;</span><span class="p">:</span><span class="kc">true</span><span class="p">,</span><span class="nt">&quot;isReady&quot;</span><span class="p">:</span><span class="kc">true</span><span class="p">,</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:[</span><span class="s2">&quot;NVIDIA-Tesla T4&quot;</span><span class="p">],</span><span class="nt">&quot;cardCnt&quot;</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span>
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">  </span><span class="nt">&quot;vgpuUsed&quot;</span><span class="p">:</span><span class="mi">4</span><span class="p">,</span><span class="nt">&quot;vgpuTotal&quot;</span><span class="p">:</span><span class="mi">10</span><span class="p">,</span><span class="nt">&quot;memoryUsed&quot;</span><span class="p">:</span><span class="mi">14336</span><span class="p">,</span><span class="nt">&quot;memoryTotal&quot;</span><span class="p">:</span><span class="mi">16384</span><span class="p">,</span>
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="w">  </span><span class="nt">&quot;osImage&quot;</span><span class="p">:</span><span class="s2">&quot;Ubuntu 24.04.4 LTS&quot;</span><span class="p">,</span><span class="nt">&quot;kubeletVersion&quot;</span><span class="p">:</span><span class="s2">&quot;v1.35.6&quot;</span><span class="p">},</span>
+</span><span id="__span-16-6"><a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="w"> </span><span class="p">{</span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="s2">&quot;aks-gpuspot-21249019-vmss00000e&quot;</span><span class="p">,</span><span class="nt">&quot;ip&quot;</span><span class="p">:</span><span class="s2">&quot;10.224.0.6&quot;</span><span class="p">,</span>
+</span><span id="__span-16-7"><a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="w">  </span><span class="nt">&quot;vgpuUsed&quot;</span><span class="p">:</span><span class="mi">2</span><span class="p">,</span><span class="nt">&quot;vgpuTotal&quot;</span><span class="p">:</span><span class="mi">10</span><span class="p">,</span><span class="nt">&quot;memoryUsed&quot;</span><span class="p">:</span><span class="mi">6144</span><span class="p">,</span><span class="nt">&quot;memoryTotal&quot;</span><span class="p">:</span><span class="mi">16384</span><span class="p">,</span><span class="w"> </span><span class="err">…</span><span class="p">}]}</span>
+</span><span id="__span-16-8"><a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a>
+</span><span id="__span-16-9"><a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="p">{</span><span class="nt">&quot;list&quot;</span><span class="p">:[</span>
+</span><span id="__span-16-10"><a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="w"> </span><span class="p">{</span><span class="nt">&quot;uuid&quot;</span><span class="p">:</span><span class="s2">&quot;GPU-361043c7-…&quot;</span><span class="p">,</span><span class="nt">&quot;nodeName&quot;</span><span class="p">:</span><span class="s2">&quot;…00000e&quot;</span><span class="p">,</span><span class="nt">&quot;vgpuUsed&quot;</span><span class="p">:</span><span class="mi">2</span><span class="p">,</span><span class="nt">&quot;vgpuTotal&quot;</span><span class="p">:</span><span class="mi">10</span><span class="p">,</span>
+</span><span id="__span-16-11"><a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="w">  </span><span class="nt">&quot;memoryUsed&quot;</span><span class="p">:</span><span class="mi">6144</span><span class="p">,</span><span class="nt">&quot;memoryTotal&quot;</span><span class="p">:</span><span class="mi">16384</span><span class="p">,</span><span class="nt">&quot;mode&quot;</span><span class="p">:</span><span class="s2">&quot;hami-core&quot;</span><span class="p">,</span><span class="nt">&quot;health&quot;</span><span class="p">:</span><span class="kc">true</span><span class="p">},</span>
+</span><span id="__span-16-12"><a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a><span class="w"> </span><span class="p">{</span><span class="nt">&quot;uuid&quot;</span><span class="p">:</span><span class="s2">&quot;GPU-3a42fadb-…&quot;</span><span class="p">,</span><span class="nt">&quot;nodeName&quot;</span><span class="p">:</span><span class="s2">&quot;…00000d&quot;</span><span class="p">,</span><span class="nt">&quot;vgpuUsed&quot;</span><span class="p">:</span><span class="mi">4</span><span class="p">,</span><span class="nt">&quot;vgpuTotal&quot;</span><span class="p">:</span><span class="mi">10</span><span class="p">,</span>
+</span><span id="__span-16-13"><a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a><span class="w">  </span><span class="nt">&quot;memoryUsed&quot;</span><span class="p">:</span><span class="mi">14336</span><span class="p">,</span><span class="nt">&quot;memoryTotal&quot;</span><span class="p">:</span><span class="mi">16384</span><span class="p">,</span><span class="nt">&quot;mode&quot;</span><span class="p">:</span><span class="s2">&quot;hami-core&quot;</span><span class="p">,</span><span class="nt">&quot;health&quot;</span><span class="p">:</span><span class="kc">true</span><span class="p">}]}</span>
+</span></code></pre></div>
+<p><code>mode: "hami-core"</code> 這個欄位是 Day 3 與 Day 4 一路追的那個 <code>libvgpu.so</code> 攔截模式,它一路傳到了 UI 上。任務列表要多帶一個 <code>pageSize</code>:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;Content-Type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;filters&quot;:{},&quot;pageSize&quot;:{&quot;pageSize&quot;:50,&quot;pageNo&quot;:1}}&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="w">  </span>http://127.0.0.1:13000/api/vgpu/v1/containers
+</span></code></pre></div>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>count = 6
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a> webui-a1  …00000d  ns=day5-lab  mem= 4096  cores=100  success  GPU-3a42fadb…
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a> webui-a2  …00000d  ns=day5-lab  mem= 4096  cores=100  success  GPU-3a42fadb…
+</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a> webui-a3  …00000d  ns=day5-lab  mem= 4096  cores=100  success  GPU-3a42fadb…
+</span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a> webui-a4  …00000d  ns=day5-lab  mem= 2048  cores=100  success  GPU-3a42fadb…
+</span><span id="__span-18-6"><a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a> webui-b1  …00000e  ns=day5-lab  mem= 4096  cores=100  success  GPU-361043c7…
+</span><span id="__span-18-7"><a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a> webui-b2  …00000e  ns=day5-lab  mem= 2048  cores=100  success  GPU-361043c7…
+</span></code></pre></div>
+<p>到這裡為止,配額鏈完整驗過一遍,而且是逐格對帳,不是看畫面猜。這個做法在沒有瀏覽器的環境(跳板機、CI)一樣能用,而且比截圖精確。</p>
+<h3 id="5">步驟 5:把用量那條鏈接通<a class="headerlink" href="#5" title="Permanent link">&para;</a></h3>
+<p>上面那份任務列表裡,<code>cores</code> 與 <code>mem</code> 都是配額。用量在另一組欄位,而它們此刻全是 0。Prometheus 五個 target 全部 <code>up</code>:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>hami-webui-dcgm-exporter    10.244.1.250:9400  up
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>hami-webui-dcgm-exporter    10.244.2.44:9400   up
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>hami-device-plugin-monitor  10.244.1.143:9394  up
+</span><span id="__span-19-4"><a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>hami-device-plugin-monitor  10.244.2.201:9394  up
+</span><span id="__span-19-5"><a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>hami-webui                  10.244.0.135:8000  up
+</span></code></pre></div>
+<p>而且 <code>hami_vgpu_memory_used_bytes</code> 在 Prometheus 裡查得到真實數值。指標有、target 有、後端也活著,數字卻是 0——問題出在後端那句 PromQL 的標籤條件與實際存進 Prometheus 的標籤對不上,原因與修法見<a href="#mine-3">地雷 3</a>。打開 <code>hamiServiceMonitor.honorLabels</code> 約 90 秒後,同一組指標長出真值:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>webui-a1 =&gt; 1410.1 MiB    webui-a2 =&gt; 1410.1 MiB    webui-a3 =&gt; 1410.1 MiB
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>webui-a4 =&gt;  898.1 MiB    webui-b1 =&gt; 1410.1 MiB    webui-b2 =&gt;  898.1 MiB
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>hami_container_core_util:webui-a1/a3/a4 = 100、b1/b2 = 96
+</span></code></pre></div>
+<p>用量鏈上另一環是 dcgm-exporter,它負責溫度、功耗與整卡使用率。chart 預設的 <code>nodeSelector</code> 剛好對上我們的節點標籤,<code>tolerations</code> 卻是空的,而 GPU 節點帶著 spot taint——這一環壞掉的方式特別安靜,連 Pending pod 都不會有(<a href="#mine-4">地雷 4</a>)。本次的安裝值已經先補上 toleration,所以沒有實際發作,另用一份探針 DaemonSet 把它的樣子複現出來。透過 UI 自己的 PromQL 代打端點查整卡使用率:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;Content-Type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;query&quot;:&quot;DCGM_FI_DEV_GPU_UTIL&quot;}&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="w">  </span>http://127.0.0.1:13000/api/vgpu/v1/monitor/query/instant-vector
+</span></code></pre></div>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>aks-gpuspot-…00000d  gpu 0 =&gt; 100
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>aks-gpuspot-…00000e  gpu 0 =&gt; 100
+</span></code></pre></div>
+<p>兩張卡都被 matmul 壓在 100%。至此節點、顯卡、任務三個層級都有真實數字,可以看畫面了。</p>
+<p>看之前先記一件事,免得誤讀首頁:<code>/v1/summary</code> 回的是 <code>coreUsed=600 / coreTotal=200</code>,也就是 300%。六顆 pod 都沒有寫 <code>nvidia.com/gpucores</code>,HAMi 對未宣告的 pod 一律以 100 計(等於不限制),UI 就把六個 100 加起來,分母則是卡數。<strong>算力那一欄在沒有明寫 <code>gpucores</code> 的叢集裡是「請求數 × 100」</strong>,拿它做容量規劃會得到很奇怪的結論; VRAM 那一欄才是硬帳。</p>
+<h3 id="6">步驟 6:四個面板逐頁走讀<a class="headerlink" href="#6" title="Permanent link">&para;</a></h3>
+<p>以下五張畫面取自同一組工作負載的第二輪佈署,節點是 <code>…00000f</code>／<code>…00000g</code>,配額組成與前面完全相同,只有節點名與 GPU UUID 換了。為什麼會有第二輪,下一節說明。</p>
+<p><img alt="HAMi-WebUI Overview 頁面,顯示五張比率卡、資源總覽與兩張趨勢圖" src="../../assets/screenshots/day5/overview.png" /></p>
+<p><em>Overview:上排把「配出去多少」與「實際用掉多少」分成兩組並排,下方兩張趨勢圖記著本日的回收事件。</em></p>
+<p>第一排五張卡就是兩條資料鏈的分界線。左邊三張是配額鏈:<code>vGPU Alloc 30.0%</code>(6/20)、<code>Compute Alloc 300.0%</code>(6/2,就是上面那個「請求數 × 100」)、<code>Memory Alloc 62.5%</code>(20.0/32 GiB)。右邊兩張是用量鏈:<code>Compute Usage 100.0%</code>(2.0/2)、<code>Memory Usage 23.0%</code>(7.4/32 GiB)。兩條鏈並排在同一排的好處是斷線一眼看得出來——右邊歸零而左邊正常,問題一定在 Prometheus 那一段,不必先懷疑 HAMi。<code>Resource Overview</code> 六格則與 <code>/v1/summary</code> 逐格對得上;其中 <code>Total CPU Cores</code> 與 <code>Total Memory</code> 是 0,這兩格與 GPU 無關,而本次剝掉的 node-exporter 與 kube-state-metrics 正是這類指標的供應者。</p>
+<p><img alt="HAMi-WebUI Node Management 頁面,兩台節點的分配率排行與清單" src="../../assets/screenshots/day5/nodes.png" /></p>
+<p><em>Nodes:兩張 Top5 排行榜直接指出負載偏在哪一台,清單只留五個欄位。</em></p>
+<p><code>Node Compute Top5</code> 與 <code>Node Memory Top5</code> 是排行榜而非總量:<code>…00000f</code> 是 400%／88%,<code>…00000g</code> 是 200%／38%。同一組 pod 刻意分得不平均,這裡就直接看得到偏斜。下方清單只有五欄——名稱、狀態、IP、兩個分配率,節點頁要回答的問題只有「哪台快滿了」,再細的東西在卡片頁。</p>
+<p><img alt="HAMi-WebUI Accelerators 頁面,兩張 T4 的分配率排行與清單" src="../../assets/screenshots/day5/accelerators.png" /></p>
+<p><em>Accelerators:排行榜右上角的 Allocation／Usage 切換,切的就是兩條資料鏈。</em></p>
+<p>排行榜右上角那組 <code>Allocation Rate</code>／<code>Usage Rate</code> 按鈕值得停一下:同一份排行榜、同一組卡,切換的是資料來源。<code>GPU Compute Top5</code> 的 400% 與 200% 沿用步驟 5 那條規則:一張卡上四顆 pod 各記 100 得到 400,另一張兩顆得到 200,分母都是一張卡。這個數字不代表卡被佔用了四倍,只代表卡上有四顆 pod 而且都沒宣告算力上限。<code>GPU Memory Top5</code> 的 88% 與 38% 才是硬帳,對應清單裡 <code>Memory Remaining/Total</code> 的 <code>2/16 GiB</code> 與 <code>10/16 GiB</code>,也就是 14336/16384 與 6144/16384。</p>
+<p><img alt="HAMi-WebUI Workloads 頁面,六顆 pod 的清單與請求排行" src="../../assets/screenshots/day5/workloads.png" /></p>
+<p><em>Workloads:六顆 pod 各自拿到幾張卡、幾份 vGPU、多少 VRAM ,以及那個 400% 拆開之後的樣子。</em></p>
+<p>清單每一列的 <code>GPUs</code> 欄有三個數字:整卡數、vGPU 份數、 VRAM 配額,<code>webui-a2</code> 是 <code>1 / 1 / 4 GiB</code>,<code>webui-a4</code> 是 <code>1 / 1 / 2 GiB</code>,與 manifest 一致。右上 <code>Workload Requests Top5</code> 切到 <code>Compute</code> 之後全部是 100,這就是 400% 拆開來的樣子;順帶一提這份排行榜列的是容器 ID 而不是 pod 名稱,要對到具體哪顆 pod 得回清單查。</p>
+<p><img alt="HAMi-WebUI 單張顯卡詳情頁,含溫度、功耗、配額與用量對照" src="../../assets/screenshots/day5/card-detail.png" /></p>
+<p><em>卡片詳情:配額與用量在同一格上下並排,溫度與功耗則整格依賴 dcgm-exporter。</em></p>
+<p><code>Basic Info</code> 的 <code>67 °C</code> 與 <code>68.266 W</code> 只有 dcgm-exporter 供得出來,這兩格空白就等於<a href="#mine-4">地雷 4</a>。<code>Resource Overview</code> 把四個數字上下並排:算力 <code>Allocated 2 / 200%</code> 對 <code>Used 1 / 100%</code>, VRAM <code>Allocated 6 GiB / 37.5%</code> 對 <code>Used 2.3 GiB / 14.32%</code>。同一格裡看配額與用量的落差,是這個介面比 <code>kubectl</code> 好用的地方——配額吃掉 37.5%,實際只用 14.32%,超配的空間有多大一目瞭然。左邊那個 <code>2 / 10 Workloads</code> 儀表的分母 10,則是 HAMi 的 <code>deviceSplitCount</code>。</p>
+<h3 id="7-spot">步驟 7:讀一次真實 spot 回收在畫面上留下的痕跡<a class="headerlink" href="#7-spot" title="Permanent link">&para;</a></h3>
+<p>驗證做完約一個半小時後,兩台 GPU spot 節點被 Azure 回收。Day 2 那次是 <code>az vmss simulate-eviction</code> 模擬出來的,這次是平台自己發起的。</p>
+<table>
+<thead>
+<tr>
+<th>時間(CST)</th>
+<th>發生的事</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>13:54:04</td>
+<td>受管 resource group 的 activity log 出現 <code>Microsoft.Compute/virtualMachineScaleSets/evictSpotVM/action</code>,平台發起,沒有任何人下過指令</td>
+</tr>
+<tr>
+<td>14:44 前後</td>
+<td>第二台也走了,趨勢圖上兩條線同時落到 0</td>
+</tr>
+<tr>
+<td>其後</td>
+<td>pool 的 <code>count</code> 收斂為 0、<code>provisioningState: Succeeded</code>;放叢集的那個 resource group,activity log 上一道操作都沒有</td>
+</tr>
+<tr>
+<td>15:08</td>
+<td>scale 回 2,新節點 <code>…00000f</code>／<code>…00000g</code></td>
+</tr>
+</tbody>
+</table>
+<p>第一台走掉之後、第二台還在的那段時間,Accelerators 頁上只剩一張卡,配額與用量都照常更新——一半的叢集不見了,而畫面本身沒有任何異常標記。這是<a href="../sprint1-day2-gang-scheduling-preemption/#mine-4">Day 2 地雷 4</a> 的自然重演:pool 沒有開 cluster autoscaler,沒有人負責把 <code>count</code> 補回期望值;而放叢集的 resource group 上零 ARM 操作,事後翻自己的 activity log 也查不到任何線索。當時那條結論是用模擬做出來的,這次沒有人動手,結果一模一樣。</p>
+<p>回頭看 Overview 那兩張趨勢圖,整段過程都在上面:</p>
+<ul>
+<li>14:11 到 14:43 之間,<code>Compute Alloc</code> 是 200%、<code>Memory Alloc</code> 是 37.5%——那是只剩一張卡、上面掛兩顆 pod 的中間態,不是正常值。</li>
+<li>14:44 兩條線一起掉到 0,並且在 0 上維持了二十多分鐘。</li>
+<li>15:08 之後跳到 300% 與 62.5%,六顆 pod 全部回來。</li>
+</ul>
+<p>一張圖上同時看得到三個狀態,是這種缺口最有用的地方:光看當下的數字沒辦法分辨「本來就這麼少」和「剛剛掉下去」,而趨勢圖把時間軸補上了。卡片詳情頁則是另一種痕跡——那張卡的兩條線在 15:08 之前完全是平的 0,因為節點重建之後 GPU UUID 是新的,舊卡的歷史不會跟著搬過來。<strong>要看事件跨越回收前後,得看叢集或節點層級的圖,不要看單卡的圖。</strong></p>
+<p>復原本身很快:pool scale 回 2,HAMi 的 device plugin 靠 pool 層級的 <code>gpu=on</code> 標籤自動接手,<code>vgpuTotal</code> 立刻回到 20,控制面一個字都不用改。要重來一次的是那六顆 workload。<code>03-webui-workloads.yaml</code> 裡的 <code>NODE_A_PLACEHOLDER</code>／<code>NODE_B_PLACEHOLDER</code> 是刻意的佔位符,沒有先 <code>sed</code> 換成當下的 hostname 就直接 apply,得到的是六顆永遠 Pending 的 pod,而 <code>hami-scheduler</code> 給的事件只有一句 <code>didn't match Pod's node affinity/selector</code>——它不會告訴你那個 hostname 已經不存在了。</p>
+<p>這是把 pod 用 <code>kubernetes.io/hostname</code> 釘死在 spot 節點上的天然代價。本課程這樣寫是為了讓兩張卡的配額不對稱,畫面才有層次;正式環境要指定放置位置,用 pool 層級的標籤(<code>agentpool</code>、<code>gpu=on</code>)或<a href="../sprint1-day4-hami-kai-integration/">Day 4 步驟 1</a> 那組 <code>hami.io/node-scheduler-policy</code> annotation,兩者都活得過節點重建。</p>
+<h3 id="8-0">步驟 8:縮回 0,並確認畫面歸零是預期行為<a class="headerlink" href="#8-0" title="Permanent link">&para;</a></h3>
+<p>GPU pool 縮回 0,WebUI 與 HAMi 兩個 release 都留著。控制面全部釘在 system pool,資料面(device plugin、dcgm-exporter)跟著 GPU 節點生滅,所以跨日重開機的操作成本是零——這一點從 Day 3 到今天沒變過。</p>
+<p>縮容之後 UI 上節點、顯卡、任務會全部歸零,配額鏈與用量鏈同時斷在同一個地方(節點沒了,device plugin 與 exporter 也沒了)。這是預期行為,不是安裝壞掉。另外 <code>hami-webui</code> 的 Deployment 上帶著一道手動 patch 的 <code>maxSurge: 0</code>,下一次 <code>helm upgrade</code> 會把它打回預設值,要記得重下(<a href="#mine-6">地雷 6</a>)。</p>
+<h2 id="checkpoint">驗收 checkpoint<a class="headerlink" href="#checkpoint" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>檢查項</th>
+<th>指令</th>
+<th>期待結果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>三份 ServiceMonitor 真的建出來</td>
+<td><code>kubectl -n kube-system get servicemonitor</code></td>
+<td>webui／hami／dcgm 三份都在,缺任一份就是 CRD 沒開</td>
+</tr>
+<tr>
+<td>後端連得到 Prometheus</td>
+<td><code>kubectl -n kube-system get cm hami-webui-config -o yaml</code> 對照 <code>get svc</code></td>
+<td>ConfigMap 裡的 host 與實際 Service 名稱逐字相同</td>
+</tr>
+<tr>
+<td>dcgm-exporter 鋪到每台 GPU 節點</td>
+<td><code>kubectl -n kube-system get ds hami-webui-dcgm-exporter</code></td>
+<td><code>DESIRED</code> 等於 GPU 節點數,不是 0</td>
+</tr>
+<tr>
+<td>配額鏈正確</td>
+<td><code>curl -X POST -d '{"filters":{}}' …/v1/summary</code></td>
+<td><code>memoryUsed</code> 等於各 pod 配額總和(本課 20480/32768)</td>
+</tr>
+<tr>
+<td>用量鏈正確</td>
+<td>任務列表的用量欄位</td>
+<td>六顆都是非 0(本課 1410.1／898.1 MiB),全 0 就去查 <code>honorLabels</code></td>
+</tr>
+<tr>
+<td>整卡使用率有讀數</td>
+<td><code>curl -X POST -d '{"query":"DCGM_FI_DEV_GPU_UTIL"}' …/monitor/query/instant-vector</code></td>
+<td>每張卡一筆,壓力測試下為 100</td>
+</tr>
+<tr>
+<td>算力那一欄看得懂</td>
+<td>Overview 的 <code>Compute Alloc</code></td>
+<td>等於「有 GPU 的 pod 數 × 100 ÷ 卡數」,不是實際佔用比例</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_5">地雷記錄<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<h3 id="mine-1">地雷 1:自帶的 Prometheus 裝好了,後端卻連不上——那個位址是 chart 用舊規則算出來的<a class="headerlink" href="#mine-1" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:所有 pod <code>Running</code>、Prometheus 五個 target 全 <code>up</code>,UI 打得開、節點與任務清單也對,只有跟用量有關的數字全是 0。後端 log 每秒一行:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>Error querying Prometheus: Post &quot;http://hami-webui-kube-prometh-prometheus.kube-system.svc.cluster.local:9090/api/v1/query&quot;:
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>dial tcp: lookup ... no such host
+</span></code></pre></div>
+<p><strong>根因</strong>:<code>externalPrometheus.enabled=false</code> 時,chart 的 <code>templates/configmap.yaml</code> 用一段寫死的字串去湊自帶 Prometheus 的位址:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>printf &quot;http://%s-kube-prometh-prometheus.%s.svc.cluster.local:9090&quot; (fullname) (namespace)
+</span></code></pre></div>
+<p>kube-prometheus-stack 62.6.0 實際建出來的 Service 叫 <code>hami-webui-kube-prometheus-prometheus</code>。<code>kube-prometh</code> 對 <code>kube-prometheus</code>——chart 抄的是舊版 kube-prometheus-stack 的名稱截斷規則,而 subchart 早就換了。兩邊都不會報錯,因為 ConfigMap 裡那只是一段文字。</p>
+<p><strong>修法</strong>:即使用的就是自帶那一套,也改走外接開關,把位址明寫出來:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="nt">externalPrometheus</span><span class="p">:</span>
+</span><span id="__span-25-2"><a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-25-3"><a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="w">  </span><span class="nt">address</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;http://hami-webui-kube-prometheus-prometheus.kube-system.svc.cluster.local:9090&quot;</span>
+</span></code></pre></div>
+<p><strong>教訓</strong>:pod 全綠與元件互相找得到是兩件事。裝完任何有內部呼叫的套件,先看被呼叫端的 log,或把 <code>kubectl get cm &lt;x&gt;-config -o yaml</code> 算出來的位址跟 <code>kubectl get svc</code> 的實際名字對一次。這種名字漂移在「chart 內嵌 subchart」的組合裡特別常見,因為兩邊的版本各自演進。</p>
+<h3 id="mine-2">地雷 2:<code>helm upgrade</code> 改了 ConfigMap,pod 完全不知道<a class="headerlink" href="#mine-2" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:位址改完 <code>helm upgrade</code> 成功(REVISION 2),<code>kubectl get cm hami-webui-config</code> 也確實是新位址,後端卻繼續噴同一個舊 host 的錯誤,pod 的 <code>AGE</code> 也沒歸零。</p>
+<p><strong>根因</strong>:後端的設定是以檔案掛進去的(<code>--conf /apps/config/config.yaml</code>),而 chart 的 Deployment 沒有 <code>checksum/config</code> 這類 annotation。pod template 一個字都沒變,Kubernetes 認為沒事發生,不重建 pod,容器裡那份設定還是啟動當下讀進去的。</p>
+<p><strong>修法</strong>:<code>kubectl -n kube-system rollout restart deploy/hami-webui</code>。</p>
+<p><strong>教訓</strong>:這與 DeepWave 既有的 terraform 慣例是同一條規則的另一個面貌——改了 ConfigMap 或 Secret 就要自己重啟消費者。判斷方式很機械:<code>helm get manifest</code> 看 Deployment 的 pod template 裡有沒有任何會隨設定改變的欄位(annotation 或 env),沒有就一定要手動 rollout。</p>
+<h3 id="mine-3">地雷 3:每個任務的用量永遠是 0——Prometheus 把標籤改了名<a class="headerlink" href="#mine-3" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:位址修好、target 全 <code>up</code>、<code>hami_vgpu_memory_used_bytes</code> 在 Prometheus 裡查得到真實數值(1.38 GiB),但後端輸出的 <code>hami_container_memory_used</code> 與 <code>hami_container_core_util</code> 每一筆都是 0。UI 上每個任務的用量欄位因此全空,只有配額是對的。</p>
+<p><strong>根因</strong>:後端對 Prometheus 下的查詢長這樣:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>avg(hami_vgpu_memory_used_bytes{device_uuid=&quot;GPU-…&quot;, namespace=&quot;day5-lab&quot;, pod=&quot;webui-a1&quot;, container=&quot;app&quot;})
+</span></code></pre></div>
+<p>但 chart 的 <code>hamiServiceMonitor.honorLabels</code> 預設 <code>false</code>。Prometheus 抓 HAMi device plugin 的 metrics 時,會把 exporter 自己帶的 <code>namespace</code>／<code>pod</code> 標籤改名成 <code>exported_namespace</code>／<code>exported_pod</code>,再把 <code>namespace</code>／<code>pod</code> 換成「被抓的那顆 pod」:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a>{ namespace=&quot;kube-system&quot;, pod=&quot;hami-device-plugin-l9d9m&quot;,
+</span><span id="__span-27-2"><a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a>  exported_namespace=&quot;day5-lab&quot;, exported_pod=&quot;webui-a1&quot;, container=&quot;app&quot; } =&gt; 1478624256
+</span></code></pre></div>
+<p>查詢條件與實際標籤永遠對不上,命中 0 筆,後端老實地寫 0。</p>
+<p><strong>修法</strong>:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-28-1"><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="nt">hamiServiceMonitor</span><span class="p">:</span>
+</span><span id="__span-28-2"><a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="w">  </span><span class="nt">honorLabels</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span></code></pre></div>
+<p>套下去約 90 秒後(Prometheus 重載加上後端下一輪計算),六顆任務的用量全部出現真值。</p>
+<p><strong>教訓</strong>:「數字是 0」跟「查不到資料」在 Prometheus 這條鏈上長得一模一樣。分辨方法是把後端那句 PromQL 原封不動貼到 Prometheus 自己查一次:查得到,問題在後端;查不到,就去比對 exporter 輸出的標籤與存進去之後的標籤。只要看到 <code>exported_</code> 前綴,就是 <code>honorLabels</code> 在作用。</p>
+<h3 id="mine-4">地雷 4:dcgm-exporter 的 <code>tolerations</code> 預設是空的,在 spot GPU pool 上一顆都不裝<a class="headerlink" href="#mine-4" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:配額都對,真實使用率、溫度、功耗全空。chart 的 <code>dcgm-exporter.nodeSelector</code> 預設就是 <code>gpu: "on"</code>,剛好對上我們的節點標籤,看起來什麼都不用改。</p>
+<p><strong>根因</strong>:<code>tolerations</code> 預設 <code>[]</code>,而 GPU 節點帶著 <code>kubernetes.azure.com/scalesetpriority=spot:NoSchedule</code>。DaemonSet 遇到不能容忍的 taint 不會產生 Pending pod,它直接把那些節點算成「不需要」。複製一份同樣 <code>nodeSelector: gpu=on</code>、不帶 toleration 的 DaemonSet 上去驗證:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-29-1"><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>NAME               DESIRED   CURRENT   READY   NODE SELECTOR
+</span><span id="__span-29-2"><a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a>toleration-probe   0         0         0       gpu=on
+</span></code></pre></div>
+<p><code>DESIRED</code> 就是 0。<code>kubectl get pods</code> 什麼都看不到,<code>kubectl describe</code> 也沒有事件,沒有任何東西會提醒你少裝了。</p>
+<p><strong>修法</strong>:補上與 HAMi device plugin 同一段 toleration。</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-30-1"><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="nt">dcgm-exporter</span><span class="p">:</span>
+</span><span id="__span-30-2"><a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a><span class="w">  </span><span class="nt">tolerations</span><span class="p">:</span>
+</span><span id="__span-30-3"><a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">kubernetes.azure.com/scalesetpriority</span><span class="p p-Indicator">,</span><span class="nt"> operator</span><span class="p">:</span><span class="w"> </span><span class="nv">Equal</span><span class="p p-Indicator">,</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="nv">spot</span><span class="p p-Indicator">,</span><span class="nt"> effect</span><span class="p">:</span><span class="w"> </span><span class="nv">NoSchedule</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span></code></pre></div>
+<p><strong>教訓</strong>:驗 DaemonSet 不要看 pod,要看 <code>DESIRED</code> 對不對——應該有 N 台就要是 N。<code>0</code> 與「有 Pending」是完全不同的病:前者代表排程器根本沒被問到,後者才是資源不夠。這條與 <a href="../sprint1-day0-azure-aks-foundation/#mine-1">Day 0 地雷 1</a> 是同一個判準的兩次應用。</p>
+<h3 id="mine-5">地雷 5:資料 API 全是 POST,而且 <code>filters</code> 不可省略——送 <code>{}</code> 回 500<a class="headerlink" href="#mine-5" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:<code>curl -X POST -d '{}' …/v1/nodes</code> 回 <code>{"code":500,"reason":"UNKNOWN","message":"unknown request error"}</code>。500 看起來像伺服器壞了,於是開始查後端 log、查 Prometheus、查 RBAC,而那些地方都沒問題。</p>
+<p><strong>根因</strong>:proto 定義的請求體是 <code>GetAllNodesReq { Filters filters = 1; }</code>。送 <code>{}</code> 時 <code>filters</code> 是 nil,後端沒有防呆就往下取值。送 <code>{"filters":{}}</code> 立刻 200。</p>
+<p><strong>修法</strong>:所有列表端點一律帶空的 <code>filters</code> 物件;<code>/v1/containers</code> 另外要 <code>pageSize</code>:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-31-1"><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;Content-Type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-31-2"><a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;filters&quot;:{},&quot;pageSize&quot;:{&quot;pageSize&quot;:50,&quot;pageNo&quot;:1}}&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-31-3"><a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a><span class="w">  </span>http://127.0.0.1:13000/api/vgpu/v1/containers
+</span></code></pre></div>
+<p><strong>教訓</strong>:對 gRPC-gateway 或 Kratos 這類「proto 產生 HTTP」的服務,500 常常是請求體結構不合,而不是伺服器故障。與其猜,直接去 repo 讀 <code>.proto</code>——路由、方法、每個欄位的名字都在裡面,比翻文件快。順帶一提 <code>/v1/monitor/summary</code> 在 v1.2.0 回 <code>501 method Summary not implemented</code>,那是官方還沒實作。</p>
+<h3 id="mine-6">地雷 6:2 vCPU 的 system pool 塞得下這三套,卻塞不下任何一次滾動更新<a class="headerlink" href="#mine-6" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:<code>rollout restart deploy/hami-webui</code> 之後卡了三分鐘,新 pod 一直 Pending,舊 pod 好好地跑著,<code>rollout status</code> 直接 timeout。</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-32-1"><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a>0/3 nodes are available: 1 Insufficient cpu, 2 node(s) had untolerated taint(s).
+</span><span id="__span-32-2"><a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a>preemption: 0/3 nodes are available: 1 No preemption victims found for incoming pod.
+</span></code></pre></div>
+<p><strong>根因</strong>:裝完 HAMi、WebUI 與 Prometheus 之後,system 節點的 CPU requests 是 1779m / 1900m(93%)。Deployment 預設的 RollingUpdate 是 <code>maxSurge: 25%</code>,單副本時等於「先起新的、再殺舊的」,而 webui 一顆就要 250m。兩份同時存在放不下,新的排不進去,舊的不會被殺,於是互相卡住。裝的當下完全看不出來,要等第一次更新才發作。</p>
+<p><strong>修法</strong>:兩選一。加開一台 system 節點(每台約 NT$3.5/hr),或把策略改成先殺後起:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-33-1"><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a>kubectl<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>patch<span class="w"> </span>deploy<span class="w"> </span>hami-webui<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-33-2"><a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="w">  </span>-p<span class="w"> </span><span class="s1">&#39;{&quot;spec&quot;:{&quot;strategy&quot;:{&quot;type&quot;:&quot;RollingUpdate&quot;,&quot;rollingUpdate&quot;:{&quot;maxSurge&quot;:0,&quot;maxUnavailable&quot;:1}}}}&#39;</span>
+</span></code></pre></div>
+<p>本次採後者,代價是更新期間有幾十秒空窗,對觀測介面完全可以接受。這道 patch 是 <code>kubectl</code> 直接下的,下一次 <code>helm upgrade</code> 會被打回預設值,要重下一次。</p>
+<p><strong>教訓</strong>:單節點控制面要看的不是「還剩多少」,而是「最大的那顆 pod 能不能複製一份」。判準寫成一行:<code>最大 pod 的 requests × 2 ≤ 剩餘可配置量</code>,不成立就代表所有預設 RollingUpdate 都會卡住。</p>
+<h2 id="_6">帶得走的東西<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
+<ul>
+<li>觀測介面上的 0 有很多種來源。今天遇到的就有四種:後端連不上 Prometheus、標籤被改名讓查詢命中不到、DaemonSet 靜默沒鋪、以及真的沒人用卡。要分辨它們,得先知道每個數字走的是哪一條鏈——短鏈(annotation 到 Kubernetes API)出問題會整片壞掉很明顯,長鏈(exporter 到 Prometheus 到 PromQL)出問題只會安靜地少一塊。</li>
+<li>前置條件寫「需要 Prometheus」時,先確認需要的是一顆 Prometheus 還是一整套 Operator。判斷方法很直接:去 chart 的 <code>templates/</code> 看有沒有 CRD 型別的物件。有 ServiceMonitor 就代表要 Operator,而這件事很少寫在前置條件那一段。</li>
+<li>內嵌 subchart 的 chart 有一類特有的老化方式:父 chart 用寫死的規則去猜子 chart 建出來的資源名稱,子 chart 改版之後就對不上,而兩邊都不會報錯。裝完先把設定裡算出來的位址跟 <code>kubectl get svc</code> 對一次,比讀完整份 values 划算。</li>
+<li>儀表板上的比率不一定是佔用率。HAMi 的算力欄在沒有明寫 <code>gpucores</code> 的叢集裡是請求數的加總,400% 只代表卡上有四顆 pod, VRAM 欄才是真正會擋住下一顆 pod 的那本帳。拿任何一個新介面做容量決策之前,先找一個已知答案的場景把數字對過。</li>
+<li>spot 節點被回收之後,趨勢圖比即時數字有用。當下的數字沒辦法告訴你叢集本來就這麼小還是剛剛少了一半,而缺口的形狀會。不過歷史是綁在物件身上的:節點重建之後 GPU UUID 就換了,單卡那張圖看不到回收前的自己。</li>
+</ul>
+<h2 id="_7">延伸閱讀<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h2>
+<p>想往下深挖,從這幾份開始:</p>
+<ul>
+<li><strong><a href="https://github.com/Project-HAMi/HAMi-WebUI">HAMi-WebUI 專案首頁</a></strong> —— 本章主角的原始碼,後端 <code>server/api/v1/*.proto</code> 的路由定義與 <code>server/internal/exporter/exporter.go</code> 的 PromQL 查詢都在裡面,對應<a href="#mine-3">地雷 3</a> 與<a href="#mine-5">地雷 5</a>。</li>
+<li><strong><a href="https://github.com/Project-HAMi/HAMi-WebUI/blob/main/docs/installation/helm/index.md">HAMi-WebUI Helm 安裝指南</a></strong> —— 官方的前置條件(Prometheus &gt; 2.8.0)與 <code>externalPrometheus.address</code> 的寫法,本章步驟 2 兩條路的出處。</li>
+<li><strong><a href="https://prometheus.io/docs/prometheus/latest/configuration/configuration/">Prometheus scrape_config 設定說明</a></strong> —— <code>honor_labels</code> 的完整定義,包含「設為 false 時衝突標籤會被改名成 <code>exported_&lt;原名&gt;</code>」這句話,<a href="#mine-3">地雷 3</a> 的根因就在這一段。</li>
+<li><strong><a href="https://github.com/NVIDIA/dcgm-exporter">NVIDIA dcgm-exporter</a></strong> —— <code>DCGM_FI_DEV_GPU_UTIL</code> 等指標的定義與 DaemonSet 部署方式,卡片詳情頁的溫度、功耗、整卡使用率全部由它供應。</li>
+</ul>
+<h2 id="_8">下一步<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h2>
+<p>今天畫面上每一個 GPU 相關的數字,追到底都是同一組東西撐起來的:一個整數型的擴充資源 <code>nvidia.com/gpu</code>、幾條寫在 pod annotation 裡的自訂字串、外加一支 exporter 把執行期的真實狀況補上。Day 3 到 Day 5 一路看到的限制也都長在這個基礎上——VRAM 要靠資源名或 annotation 夾帶、卡的規格要靠節點標籤推導、一個節點上的 <code>nvidia.com/gpu</code> 只能有一個供應者,而 UI 想講清楚「這顆 pod 拿了哪張卡的哪一塊」,得自己把三個來源拼起來。</p>
+<p>Kubernetes 為此準備了一套新的表達方式,叫 Dynamic Resource Allocation。裝置不再是節點上的一個整數,而是可以被描述、被挑選、被宣告用途的物件。Day 6 先在不燒 GPU 的環境把它的概念與物件模型走一遍,看它把今天這些繞路各自搬到了哪裡。</p>
+<hr />
+<div class="admonition quote">
+<p>HAMi 與 HAMi-WebUI 標誌為該專案之官方資產,此處作社群教學用途。</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到頂端
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="頁腳" >
+        
+          
+          <a href="../sprint1-day4-hami-kai-integration/" class="md-footer__link md-footer__link--prev" aria-label="上一頁: Day 4 · HAMi 進階與 KAI 整合">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                上一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 4 · HAMi 進階與 KAI 整合
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../sprint1-day6-dra-simulated-devices/" class="md-footer__link md-footer__link--next" aria-label="下一頁: Day 6 · DRA 概念與模擬裝置">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                下一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 6 · DRA 概念與模擬裝置
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      KAI Scheduler、HAMi、Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,作社群教學用途
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.code.annotate", "content.code.select", "content.tabs.link", "search.suggest", "search.highlight", "search.share"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u8907\u88fd", "clipboard.copy": "\u8907\u88fd", "search.result.more.one": "\u6b64\u9801\u5c1a\u6709 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.more.other": "\u6b64\u9801\u5c1a\u6709 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.none": "\u6c92\u6709\u7b26\u5408\u7684\u9805\u76ee", "search.result.one": "\u627e\u5230 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.other": "\u627e\u5230 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.placeholder": "\u6253\u5b57\u9032\u884c\u641c\u5c0b", "search.result.term.missing": "\u7f3a\u5c11\u5b57\u8a5e", "select.version": "\u9078\u64c7\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

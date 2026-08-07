@@ -1,0 +1,2513 @@
+
+<!doctype html>
+<html lang="zh-TW" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="雲原生實作課程 —— GPU 排程 runbook、踩雷解法與反思">
+      
+      
+      
+        <link rel="canonical" href="https://deepwavelab.github.io/CloudNativePracticing/runbook/sprint2-day9-hubble/">
+      
+      
+        <link rel="prev" href="../sprint2-day8-cilium-network-policy/">
+      
+      
+        <link rel="next" href="../sprint2-day10-decision-matrix/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Day 9 · Hubble 可觀測性 - Cloud Native Lab Course</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/terminal.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#day-9-hubble" class="md-skip">
+          跳轉到
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="頁首">
+    <a href="../.." title="Cloud Native Lab Course" class="md-header__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Cloud Native Lab Course
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Day 9 · Hubble 可觀測性
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換深色模式"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="切換深色模式" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換淺色模式"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="切換淺色模式" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜尋" placeholder="搜尋" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="搜尋">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="分享" aria-label="分享" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="清除" aria-label="清除" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜尋引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="標籤" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  首頁
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint1-day0-azure-aks-foundation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 1 · GPU 排程三部曲
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../sprint2-day0-ebpf-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 2 · eBPF 與執行期安全
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="導覽列" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Cloud Native Lab Course" class="md-nav__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Cloud Native Lab Course
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首頁
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    首頁
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day0-azure-aks-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 環境建置與成本紀律
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day1-kai-queue-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · KAI 安裝與 Queue 基礎
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day2-gang-scheduling-preemption/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Gang Scheduling 與搶占
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day3-hami-memory-isolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · HAMi 安裝與 VRAM 硬隔離
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day4-hami-kai-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · HAMi 進階與 KAI 整合
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day5-hami-webui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · HAMi-WebUI 觀測介面
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day6-dra-simulated-devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · DRA 概念與模擬裝置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day7-dra-aks-real-gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · DRA 真卡實測
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day8-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 綜合:三者分工決策表
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day0-ebpf-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · eBPF 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day1-bpftrace-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · bpftrace 三支經典工具
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day2-bpftrace-kubernetes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · 把核心事件接回 Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day3-falco-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Falco 安裝與出廠規則
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day4-falco-custom-rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · 自訂規則、誤報調校與告警路由
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day5-tetragon-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Tetragon 與 TracingPolicy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day6-tetragon-enforcement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · 從偵測到攔截
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day7-cilium-kubeproxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Cilium 與 kube-proxy replacement
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day8-cilium-network-policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · CiliumNetworkPolicy(L3/L4 → L7)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Hubble 可觀測性
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Hubble 可觀測性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#hubble" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        「開 Hubble」這個說法並不準確
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1: 復原,並重驗兩道前幾天的驗收
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-relay-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2: 開 relay 與 UI
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 2: 開 relay 與 UI">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#chart-resources-priorityclassname" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        chart 有沒有替你想過 resources 與 priorityClassName
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hubble_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        那個決定 Hubble 有沒有用的數字
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3: 三種 flow 各長什麼樣
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 3: 三種 flow 各長什麼樣">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一次成功的 GET
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l7-post" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一次被 L7 擋掉的 POST
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一次 L4 丟包
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-ui-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4: 驗收——UI 半邊與 CLI 半邊
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 4: 驗收——UI 半邊與 CLI 半邊">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI 半邊
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CLI 半邊
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5: 三個探針
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 5: 三個探針">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#probe-a" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        探針 A:L7 的拒絕在應用日誌裡真的一行都沒有
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#probe-b" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        探針 B:Hubble 分不出誰違規,而且會指名受害者
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#probe-c" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        探針 C:政策層最大的破口,在監控上長得像合法轉發
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-service-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6: service map——它擅長什麼,會誤導你哪裡
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        誠實的差距
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收 checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷記錄
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="地雷記錄">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 1:緩衝區只有幾千筆、per-node、環狀覆蓋——實測歷史只有兩三分鐘
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 2:L7 的拒絕沒有丟棄原因,UI 上直接寫「Unknown drop reason」
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 3:UI 的網址要用 ?namespace=,而且過濾狀態不在網址裡
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 4:HTTP request header 原文進 flow buffer,而 relay 出廠不開 TLS
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的東西
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 綜合:四套工具的分工
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#hubble" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        「開 Hubble」這個說法並不準確
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1: 復原,並重驗兩道前幾天的驗收
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-relay-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2: 開 relay 與 UI
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 2: 開 relay 與 UI">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#chart-resources-priorityclassname" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        chart 有沒有替你想過 resources 與 priorityClassName
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hubble_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        那個決定 Hubble 有沒有用的數字
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3: 三種 flow 各長什麼樣
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 3: 三種 flow 各長什麼樣">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一次成功的 GET
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l7-post" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一次被 L7 擋掉的 POST
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一次 L4 丟包
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-ui-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4: 驗收——UI 半邊與 CLI 半邊
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 4: 驗收——UI 半邊與 CLI 半邊">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI 半邊
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CLI 半邊
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5: 三個探針
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 5: 三個探針">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#probe-a" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        探針 A:L7 的拒絕在應用日誌裡真的一行都沒有
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#probe-b" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        探針 B:Hubble 分不出誰違規,而且會指名受害者
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#probe-c" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        探針 C:政策層最大的破口,在監控上長得像合法轉發
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-service-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6: service map——它擅長什麼,會誤導你哪裡
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        誠實的差距
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收 checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷記錄
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="地雷記錄">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 1:緩衝區只有幾千筆、per-node、環狀覆蓋——實測歷史只有兩三分鐘
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 2:L7 的拒絕沒有丟棄原因,UI 上直接寫「Unknown drop reason」
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 3:UI 的網址要用 ?namespace=,而且過濾狀態不在網址裡
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 4:HTTP request header 原文進 flow buffer,而 relay 出廠不開 TLS
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的東西
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="day-9-hubble">Day 9: Hubble——它看得見什麼,以及它看不見的那三件事<a class="headerlink" href="#day-9-hubble" title="Permanent link">&para;</a></h1>
+<p><img align="right" alt="Cilium 官方標誌" src="../../assets/logos/cilium-icon-color.svg" width="95" /></p>
+<blockquote>
+<p><a href="../sprint2-day8-cilium-network-policy/">Day 8</a> 留下兩種被擋下的流量:L4 丟包(沉默,呼叫端只看到逾時)與 L7 拒絕(403,而被保護的應用一行日誌都沒有)。今天換上 Hubble,問一個很直接的問題——<strong>這些東西看得見嗎?</strong> 答案是「一個漂亮、一個難看、一個很難看」,而最後那個難看的答案是本 sprint 最值得帶走的一句話。</p>
+</blockquote>
+<div class="admonition abstract">
+<p class="admonition-title">你在課程的哪裡</p>
+<ul>
+<li><strong>Day 7–8</strong>:自管的 Cilium 資料平面、kube-proxy 已換掉,以及一組從命名空間隔離寫到 HTTP 方法的網路政策。</li>
+<li><strong>今天</strong>:開 Hubble 的 CLI 與 UI,在 UI 上找到 Day 8 那條被 L7 擋掉的流量並用 CLI 印出對應事件。然後拿它去問前幾天留下的三個懸案。</li>
+<li><strong>接下來</strong>:Sprint 2 的動手部分到今天為止,剩下的是四套工具的分工總結。</li>
+</ul>
+</div>
+<h2 id="hubble">「開 Hubble」這個說法並不準確<a class="headerlink" href="#hubble" title="Permanent link">&para;</a></h2>
+<p>先講一件會改變你對這一天的預期的事:<strong>Day 7 裝好 Cilium 的那一刻起,每一顆 agent 就一直在記 flow 了。</strong></p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">#</span><span class="c1">## helm upgrade 之前,什麼都還沒改</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="gp">$ </span>cilium-dbg<span class="w"> </span>status<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-i<span class="w"> </span>hubble
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="go">Hubble:   Ok   Current/Max Flows: 2285/4095 (55.80%), Flows/s: 19.36   Metrics: Disabled</span>
+</span></code></pre></div>
+<p><code>hubble.enabled</code> 在 chart 裡出廠就是 <code>true</code>。今天的 Helm 變更只加了兩個<strong>消費端</strong>:relay(把各節點的 agent 聚合起來)與 UI。所以今天要走的路是:</p>
+<table>
+<thead>
+<tr>
+<th>步驟</th>
+<th>做什麼</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>復原,並重驗兩道前幾天的驗收</td>
+</tr>
+<tr>
+<td>2</td>
+<td>開 relay 與 UI,量它的成本——以及那個<strong>決定它有沒有用的數字</strong></td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>hubble observe</code>:正常請求、L7 被擋、L4 丟包各長什麼樣</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>驗收:UI 上找到那條被擋的流量,CLI 印出對應事件</strong></td>
+</tr>
+<tr>
+<td>5</td>
+<td>三個探針:前幾天的三個懸案</td>
+</tr>
+<tr>
+<td>6</td>
+<td>service map:它擅長什麼、會誤導你哪裡</td>
+</tr>
+</tbody>
+</table>
+<h2 id="1">步驟 1: 復原,並重驗兩道前幾天的驗收<a class="headerlink" href="#1" title="Permanent link">&para;</a></h2>
+<p><strong>kube-proxy replacement 第三次撐過停機重啟。</strong></p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>get<span class="w"> </span>ds<span class="w"> </span>kube-proxy<span class="w"> </span>-o<span class="w"> </span>custom-columns<span class="o">=</span>…
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="go">kube-proxy   0   0   0   map[lab.local/no-kube-proxy:true]     ← 修改存活了(第三次)</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="gp">$ </span>cilium-dbg<span class="w"> </span>status<span class="w"> </span>--verbose<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-A3<span class="w"> </span>KubeProxyReplacement
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="go">KubeProxyReplacement:   True</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="go">Host firewall:          Disabled          ← 步驟 5 的探針 C 要用到這一行</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="go">  Socket LB:            Enabled</span>
+</span></code></pre></div>
+<p>三次觀察、三次存活。這只是三次觀察,不是保證——<strong>版本升級之後仍然要重驗</strong>,因為它本來就是受管控制面的行為,而那不在你的變更紀錄裡。</p>
+<p><strong>Day 8 的政策也還在,而且還在執行:</strong></p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>cnp<span class="w"> </span>-A
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">NAMESPACE   NAME                   AGE   VALID</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="go">netlab      default-deny-ingress   36m   True</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="go">netlab      echo7-get-only         31m   True</span>
+</span></code></pre></div>
+<p><code>AGE</code> 是真相——那個時間點是 Day 8 收工前建立的,<strong>這些物件不是重建的,是同一批</strong>。不過「物件在」不等於「在執行」(<a href="../sprint2-day8-cilium-network-policy/#mine-3">Day 8 地雷 3</a> 的教訓),所以要打一次:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="gp">$ </span>GET<span class="w">  </span><span class="nv">http_code</span><span class="o">=</span><span class="m">200</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="gp">$ </span>POST<span class="w"> </span><span class="nv">http_code</span><span class="o">=</span><span class="m">403</span><span class="w">   </span>body:<span class="w"> </span>Access<span class="w"> </span>denied<span class="w">   </span>header:<span class="w"> </span>server:<span class="w"> </span>envoy
+</span></code></pre></div>
+<p><strong>今天要在 UI 上找的,就是這一筆。</strong></p>
+<h2 id="2-relay-ui">步驟 2: 開 relay 與 UI<a class="headerlink" href="#2-relay-ui" title="Permanent link">&para;</a></h2>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="gp">$ </span>helm<span class="w"> </span>upgrade<span class="w"> </span>cilium<span class="w"> </span>cilium/cilium<span class="w"> </span>--version<span class="w"> </span><span class="m">1</span>.20.0<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>-f<span class="w"> </span>cilium-values-hubble.yaml
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="go">Release &quot;cilium&quot; has been upgraded.  REVISION: 3</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="go">（從指令到 relay 與 UI 都就緒:27 秒）</span>
+</span></code></pre></div>
+<p>而<strong>沒有</strong>發生的事更重要:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-o<span class="w"> </span>custom-columns<span class="o">=</span>N:…,RESTARTS:…
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="go">cilium-mvrd5           0</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="go">cilium-envoy-xxbzc     0</span>
+</span></code></pre></div>
+<p><strong>cilium-agent 一次都沒有重啟,資料平面完全沒有被碰到。</strong> 這跟 Day 7 開 kube-proxy replacement 是完全不同的操作等級——那次改的是 BPF 程式的行為,今天只是多兩顆讀取端的 Deployment。</p>
+<p><strong>開觀測面不需要冒動資料平面的險</strong>,而這是它跟前面兩套工具都不一樣的地方:Falco 要裝核心驅動、Tetragon 要換 agent。</p>
+<h3 id="chart-resources-priorityclassname">chart 有沒有替你想過 resources 與 priorityClassName<a class="headerlink" href="#chart-resources-priorityclassname" title="Permanent link">&para;</a></h3>
+<p>Day 3、5、7 都問過同一組問題,今天的答案<strong>跟同一張 chart 上的 agent 完全相反</strong>:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>requests</th>
+<th>QoS</th>
+<th>priority</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cilium</code> agent(Day 7)</td>
+<td><code>{}</code>(但有 init container 借來的)</td>
+<td>Burstable</td>
+<td><strong>2000001000</strong></td>
+</tr>
+<tr>
+<td><code>cilium-envoy</code>(Day 7)</td>
+<td><code>{}</code></td>
+<td>—</td>
+<td><strong>2000001000</strong></td>
+</tr>
+<tr>
+<td><strong><code>hubble-relay</code></strong></td>
+<td><code>{}</code></td>
+<td><strong>BestEffort</strong></td>
+<td><strong>0</strong></td>
+</tr>
+<tr>
+<td><strong><code>hubble-ui</code></strong></td>
+<td><code>{}</code></td>
+<td><strong>BestEffort</strong></td>
+<td><strong>0</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>同一個 Helm chart、同一個維護團隊,agent 是 <code>system-node-critical</code>,relay 與 UI 是 priority 0 加 BestEffort。</strong></p>
+<p>這個差別其實是對的——<strong>agent 掛掉節點斷網,relay 掛掉只是看不到東西</strong>。但後果要講清楚:在滿載節點上,搶佔演算法第一個挑中的就是 BestEffort 加 priority 0,<strong>也就是 Hubble 最容易在節點壓力最大的時候消失,而那正是你最需要它的時候</strong>。</p>
+<p>資源本身很便宜:relay 2m CPU / 20Mi,UI 兩個容器合計 9m / 28Mi,<strong>兩者加起來 11m CPU、48Mi</strong>。對照同一顆節點上的 agent 是 28m / 222Mi。</p>
+<h3 id="hubble_1">那個決定 Hubble 有沒有用的數字<a class="headerlink" href="#hubble_1" title="Permanent link">&para;</a></h3>
+<p>見<a href="#mine-1">地雷 1</a>。這是本章最重要的一段,而它不在任何一份入門文件的第一頁。</p>
+<h2 id="3-flow">步驟 3: 三種 flow 各長什麼樣<a class="headerlink" href="#3-flow" title="Permanent link">&para;</a></h2>
+<h3 id="get">一次成功的 GET<a class="headerlink" href="#get" title="Permanent link">&para;</a></h3>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="gp">$ </span>hubble<span class="w"> </span>observe<span class="w"> </span>--follow<span class="w"> </span>--namespace<span class="w"> </span>netlab<span class="w"> </span>-o<span class="w"> </span>compact
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="go">09:27:35.116  client:52314 (ID:6874) -&gt; echo7:8080 (ID:42793)  policy-verdict:none … ALLOWED (SYN)</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="go">09:27:35.116  client:52314 -&gt; echo7:8080  to-proxy      FORWARDED (SYN)</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="go">09:27:35.117  client:52314 -&gt; echo7:8080  http-request  FORWARDED (HTTP/1.1 GET http://svc-echo7.netlab/)</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="go">09:27:35.117  10.244.0.69:48550 -&gt; echo7:8080  to-endpoint FORWARDED (SYN)    ← 第二段:proxy → 應用</span>
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="go">09:27:35.117  10.244.0.69:48550 -&gt; echo7:8080  to-endpoint FORWARDED (ACK, PSH)</span>
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="go">09:27:35.118  client:52314 &lt;- echo7:8080  http-response FORWARDED (HTTP/1.1 200 1ms)</span>
+</span></code></pre></div>
+<p><strong>一次 <code>curl</code> 在 Hubble 上是 15 筆 flow,而且是兩段連線。</strong> <code>10.244.0.69</code> 那幾筆是 Envoy 代理出去的那一段——<strong>這件事在客戶端與應用端都完全看不到,只有在這裡看得到。</strong>(那個 <code>to-proxy</code> 事件型別,就是 <a href="../sprint2-day8-cilium-network-policy/#step-6">Day 8</a> 那條 <code>PROXY PORT 12286</code> 在觀測面的樣子。)</p>
+<h3 id="l7-post">一次被 L7 擋掉的 POST<a class="headerlink" href="#l7-post" title="Permanent link">&para;</a></h3>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="go">09:27:35.125  client:52324 -&gt; echo7:8080  policy-verdict:none … ALLOWED (SYN)   ← L4 放行</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="go">09:27:35.125  client:52324 -&gt; echo7:8080  to-proxy      FORWARDED (SYN)</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="go">09:27:35.126  client:52324 -&gt; echo7:8080  http-request  DROPPED (HTTP/1.1 POST http://svc-echo7.netlab/)</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="go">09:27:35.126  client:52324 &lt;- echo7:8080  http-response FORWARDED (HTTP/1.1 403 0ms)</span>
+</span></code></pre></div>
+<p><strong>只有 10 筆,而且沒有 <code>10.244.0.69 → echo7</code> 那一段。</strong> 步驟 5 的探針 A 會回來用這個形狀。</p>
+<p>另外注意第一行:<strong>同一條連線的 L4 判定是 <code>ALLOWED</code>,L7 判定才是 <code>DROPPED</code>。</strong> 一個只看「有沒有連線被拒」的儀表板,會把這次違規算成正常連線。</p>
+<h3 id="l4">一次 L4 丟包<a class="headerlink" href="#l4" title="Permanent link">&para;</a></h3>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="go">09:27:35.132  client:57822 &lt;&gt; multiport:9090  policy-verdict:none … DENIED (SYN)</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="go">09:27:35.132  client:57822 &lt;&gt; multiport:9090  Policy denied DROPPED (SYN)</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="go">09:27:36.177  …（TCP 重送,同樣兩筆）×3</span>
+</span></code></pre></div>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">&quot;verdict&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;DROPPED&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;Type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;L3_L4&quot;</span><span class="p">,</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="nt">&quot;drop_reason&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">133</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;drop_reason_desc&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;POLICY_DENIED&quot;</span><span class="w"> </span><span class="p">}</span>
+</span></code></pre></div>
+<p>同一個欄位在 L7 那筆上不存在,那是<a href="#mine-2">地雷 2</a>。</p>
+<h2 id="4-ui-cli">步驟 4: 驗收——UI 半邊與 CLI 半邊<a class="headerlink" href="#4-ui-cli" title="Permanent link">&para;</a></h2>
+<p>打開 UI 之前有兩個純操作的坑:網址寫法(<a href="#mine-3">地雷 3</a>),以及<strong>必須先有人在發流量</strong>,否則表是空的(<a href="#mine-1">地雷 1</a> 的直接後果)。本課為此加了一顆每 5 秒發三個請求的 pod,剛好產出三種不同顏色的 flow。</p>
+<h3 id="ui">UI 半邊<a class="headerlink" href="#ui" title="Permanent link">&para;</a></h3>
+<p><img alt="Hubble UI 的服務圖與 flow 表:echo7:8080 是紅色虛線(GET 過、POST 擋),multiport:9090 是紅色實線(全擋)" src="../../assets/screenshots/sprint2-day9/05-service-map-l7-dashed-vs-l4-solid.png" /></p>
+<p>服務圖上那兩條線的<strong>顏色本身就有資訊</strong>:<code>echo7:8080</code> 是<strong>虛線</strong>(有通有不通),<code>multiport:9090</code> 是<strong>實線紅</strong>(全擋)。</p>
+<p>點開 flow 表裡那筆 <code>→ POST / 0ms</code> 的列:</p>
+<p><img alt="Flow Details 側欄:Verdict 是 dropped,而 Drop reason 寫著 Unknown drop reason" src="../../assets/screenshots/sprint2-day9/06-flow-detail-l7-unknown-drop-reason.png" /></p>
+<p><code>Verdict: dropped</code> ——<strong>驗收的 UI 半邊過了</strong>。而它下面那一格寫著 <code>Unknown drop reason</code>,那是<a href="#mine-2">地雷 2</a>,對照組長這樣:</p>
+<p><img alt="同一個側欄,L4 被擋的那筆寫的是 Policy denied,還帶 TCP flags" src="../../assets/screenshots/sprint2-day9/07-flow-detail-l4-policy-denied.png" /></p>
+<p><strong>同一個 UI、同一個面板,L4 那筆說得出理由(<code>Policy denied</code>),L7 那筆說不出。</strong></p>
+<p>側欄裡<strong>沒有</strong>的東西也值得記:它有判定、丟棄原因、identity、標籤、IP、埠、流量方向,<strong>但沒有 HTTP 的方法、URL 或 header</strong>。表格的 <code>L7 info</code> 欄只給 <code>→ POST / 0ms</code>。<strong>要看那次請求長什麼樣,只能回 CLI。</strong></p>
+<h3 id="cli">CLI 半邊<a class="headerlink" href="#cli" title="Permanent link">&para;</a></h3>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="gp">$ </span><span class="nb">export</span><span class="w"> </span><span class="nv">HUBBLE_SERVER</span><span class="o">=</span>localhost:4245
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="gp">$ </span>hubble<span class="w"> </span>observe<span class="w"> </span>--namespace<span class="w"> </span>netlab<span class="w"> </span>--protocol<span class="w"> </span>http<span class="w"> </span>--verdict<span class="w"> </span>DROPPED<span class="w"> </span>--last<span class="w"> </span><span class="m">500</span><span class="w"> </span>-o<span class="w"> </span>compact
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="go">Aug  7 13:02:19.180: netlab/flowgen-…:39002 (ID:51695)</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="go">    -&gt; netlab/echo7-…:8080 (ID:42793)</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="go">    http-request DROPPED (HTTP/1.1 POST http://svc-echo7.netlab/)</span>
+</span></code></pre></div>
+<p>完整 JSON(節錄):</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="p">{</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span><span class="nt">&quot;verdict&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;DROPPED&quot;</span><span class="p">,</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">  </span><span class="nt">&quot;Type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;L7&quot;</span><span class="p">,</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">  </span><span class="nt">&quot;source&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;identity&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">6874</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;namespace&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;netlab&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;pod_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;client&quot;</span><span class="p">,</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">             </span><span class="nt">&quot;labels&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;k8s:app=client&quot;</span><span class="p">,</span><span class="w"> </span><span class="err">…</span><span class="p">]},</span>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">  </span><span class="nt">&quot;destination&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;identity&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">42793</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;pod_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;echo7-…&quot;</span><span class="p">,</span>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="w">                  </span><span class="nt">&quot;workloads&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;echo7&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;kind&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Deployment&quot;</span><span class="p">}]},</span>
+</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="w">  </span><span class="nt">&quot;l7&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;REQUEST&quot;</span><span class="p">,</span>
+</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="w">         </span><span class="nt">&quot;http&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;method&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;POST&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;http://svc-echo7.netlab/&quot;</span><span class="p">,</span>
+</span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="w">                  </span><span class="nt">&quot;protocol&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;HTTP/1.1&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;headers&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="err">...</span><span class="p">]}},</span>
+</span><span id="__span-11-11"><a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="w">  </span><span class="nt">&quot;traffic_direction&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;INGRESS&quot;</span>
+</span><span id="__span-11-12"><a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a><span class="p">}</span>
+</span></code></pre></div>
+<p><strong>兩半都過。</strong> 而那個 <code>headers</code> 欄位藏著今天最後一顆地雷(<a href="#mine-4">地雷 4</a>)。</p>
+<h2 id="5">步驟 5: 三個探針<a class="headerlink" href="#5" title="Permanent link">&para;</a></h2>
+<h3 id="probe-a">探針 A:L7 的拒絕在應用日誌裡真的一行都沒有<a class="headerlink" href="#probe-a" title="Permanent link">&para;</a></h3>
+<p><a href="../sprint2-day8-cilium-network-policy/#mine-7">Day 8 地雷 7</a> 的宣稱是推論出來的(「請求在 proxy 就被截了」)。今天直接量:打三次 POST、兩次 GET,應用日誌<strong>一行都沒有增加</strong>。</p>
+<p><strong>誠實記一筆</strong>:被測的那支程式出廠不記存取日誌,所以那兩次成功的 GET 也沒有留下痕跡——<strong>這個對照本身不能證明「只有被擋的看不到」。</strong></p>
+<p>真正乾淨的證據在 flow 的形狀裡:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th><code>client → proxy</code> 那一段</th>
+<th><code>proxy → echo7</code> 那一段</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET(放行)</td>
+<td>有</td>
+<td><strong>有</strong>(5 筆)</td>
+</tr>
+<tr>
+<td>POST(被擋)</td>
+<td>有</td>
+<td><strong>完全沒有</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Hubble 用「第二段不存在」證明了應用真的沒有收到那個請求。</strong> 這比查日誌強得多:<strong>查日誌只能得到「沒看到」,這裡得到的是「它沒被送過去」。</strong></p>
+<p>順帶一個 Day 8 沒注意到的細節:那筆 403 在 Hubble 上記成 <code>&lt;- netlab/echo7-… http-response FORWARDED</code>。<strong><code>echo7</code> 從來沒有產生過這個回應,是 Envoy 產的</strong>,但 flow 的方向與來源都掛在 <code>echo7</code> 名下。看報表的人會得到「echo7 回了 403」這個結論,而 <code>echo7</code> 完全無辜。</p>
+<h3 id="probe-b">探針 B:Hubble 分不出誰違規,而且會指名受害者<a class="headerlink" href="#probe-b" title="Permanent link">&para;</a></h3>
+<p>條件對齊到逐字相同——都用 pod IP、都是 POST,一次由 <code>client</code> 自己發,一次由攻擊者 <code>nsenter</code> 進 <code>client</code> 的網路命名空間之後發。兩筆 flow 在 Hubble 上:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="go">time      : …09:29:50.541Z            time      : …09:29:53.168Z</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="go">  source  : netlab/client               source  : netlab/client</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="go">  identity= 6874                        identity= 6874</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="go">  IP= 10.244.0.191                      IP= 10.244.0.191</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="go">  labels  : [&#39;k8s:app=client&#39;]          labels  : [&#39;k8s:app=client&#39;]</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="go">  行程欄位: 無                           行程欄位: 無</span>
+</span></code></pre></div>
+<p><strong>逐欄相同。</strong> 唯一不同的是 <code>Content-Length</code>,而那是兩次 payload 字數不同的巧合,不是歸屬資訊。整份 flow JSON 的頂層欄位裡<strong>沒有任何一個與行程、PID、cgroup 或執行檔有關</strong>。</p>
+<p>Day 8 對這件事的說法是「光看丟包分不出誰違規」。今天要說得更重:<strong>Hubble 不是保持沉默,它是主動把攻擊者的請求記名在 <code>netlab/client</code> 身上。</strong> 事故報告上那一行「是 client 幹的」會是錯的,UI 上那個標籤會是錯的,而<strong>工具本身沒有任何表達「我不確定」的方式</strong>。</p>
+<p>這也把本 sprint 四套工具的分工釘死了:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>看得到 <code>nsenter</code> 這個動作</th>
+<th>擋得住這個封包</th>
+<th>說得出是<strong>誰</strong>做的</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Falco(Day 3–4)</td>
+<td>✅</td>
+<td>❌</td>
+<td>✅ 行程</td>
+</tr>
+<tr>
+<td>Tetragon(Day 5–6)</td>
+<td>✅</td>
+<td>✅ 但被繞</td>
+<td>✅ 行程</td>
+</tr>
+<tr>
+<td>Cilium 政策(Day 8)</td>
+<td>❌</td>
+<td>✅ 繞不過</td>
+<td>❌</td>
+</tr>
+<tr>
+<td><strong>Hubble(Day 9)</strong></td>
+<td>❌</td>
+<td>—</td>
+<td>❌ <strong>而且會給錯名字</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Hubble 是網路的鏡子,不是行程的鏡子。</strong> 要把一條 flow 對應到一個行程,需要的是 Tetragon 那條線的資料,而<strong>這兩份資料在本 sprint 的四套工具裡沒有任何一個地方會合。</strong></p>
+<h3 id="probe-c">探針 C:政策層最大的破口,在監控上長得像合法轉發<a class="headerlink" href="#probe-c" title="Permanent link">&para;</a></h3>
+<p><a href="../sprint2-day8-cilium-network-policy/#mine-9">Day 8 地雷 9</a>:<code>Host firewall: Disabled</code> 之下,任何 <code>hostNetwork</code> pod 穿透全部網路政策。今天問:Hubble 看得到嗎?</p>
+<p><strong>看得到封包,看不出那是繞過。</strong> 三個過濾器全部失手:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="gp">#</span><span class="c1">## 1) 維運找「哪個命名空間在亂打」會這樣濾</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="gp">$ </span>hubble<span class="w"> </span>observe<span class="w"> </span>--namespace<span class="w"> </span>attacker<span class="w"> </span>--since<span class="w"> </span>&lt;mark&gt;
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="go">（空）</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="gp">#</span><span class="c1">## 2) 找違規會這樣濾</span>
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="gp">$ </span>hubble<span class="w"> </span>observe<span class="w"> </span>--verdict<span class="w"> </span>DROPPED<span class="w"> </span>--since<span class="w"> </span>&lt;mark&gt;
+</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="go">（空）                    ← 繞過的流量記成 ALLOWED / FORWARDED</span>
+</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>
+</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="gp">#</span><span class="c1">## 3) 找 HTTP 層的事會這樣濾</span>
+</span><span id="__span-13-10"><a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="gp">$ </span>hubble<span class="w"> </span>observe<span class="w"> </span>--protocol<span class="w"> </span>http<span class="w"> </span>--since<span class="w"> </span>&lt;mark&gt;
+</span><span id="__span-13-11"><a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="go">0 筆                      ← 沒經過 Envoy 就沒有 L7 事件,那次 POST 在 HTTP 視圖裡不存在</span>
+</span></code></pre></div>
+<p>不加任何過濾、只用時間才看得到,而來源欄位是:</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="nt">&quot;source&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;identity&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;labels&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;reserved:host&quot;</span><span class="p">]</span><span class="w"> </span><span class="p">}</span>
+</span></code></pre></div>
+<p><strong>沒有 pod 名稱、沒有命名空間、沒有容器——只有 <code>reserved:host</code>。</strong> 而那個位址:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="gp">$ </span>cilium-dbg<span class="w"> </span>status<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-i<span class="w"> </span><span class="s2">&quot;proxy status&quot;</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="go">Proxy Status:   OK, ip 10.244.0.69, 1 redirects active on ports 10000-20000</span>
+</span></code></pre></div>
+<p><strong>那正是 Cilium 自己 Envoy proxy 的位址。</strong> 也就是說,步驟 3 裡那幾筆「Envoy 把合法 GET 轉給應用」的 flow,和這裡「攻擊者繞過全部政策打進去」的 flow,<strong>在 Hubble 的來源欄位裡是同一個位址、同一個 identity、同一組標籤。</strong></p>
+<p><strong>這座叢集最大的政策破口,在監控工具上長得跟 Cilium 自己的合法轉發一模一樣,而且不會出現在任何一個「找違規」的視圖裡。</strong></p>
+<p>這不是因為它壞了,而是因為<strong>它的視角就是 endpoint 的視角,而那個破口的定義就是「不經過 endpoint 政策」</strong>。工具的盲點跟它的執行點是同一件事的兩面——Day 6 的 Tetragon 是 cgroup、Day 8 的政策是網路命名空間、今天的 Hubble 是 endpoint。</p>
+<h2 id="6-service-map">步驟 6: service map——它擅長什麼,會誤導你哪裡<a class="headerlink" href="#6-service-map" title="Permanent link">&para;</a></h2>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="go">SOURCE                      DESTINATION                        PORT    FLOWS  VERDICTS</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="go">reserved:host               reserved:world                       80      784  FORWARDED=784</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="go">reserved:host               kube-system/metrics-server         4443      364  FORWARDED=364</span>
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="go">netlab/flowgen              netlab/echo7                       8080      204  REDIRECTED=34, FORWARDED=153, DROPPED=17</span>
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="go">reserved:host               kube-system/hubble-relay           4222      136  FORWARDED=136</span>
+</span><span id="__span-16-6"><a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="go">netlab/flowgen              netlab/multiport                   9090      106  DROPPED=106</span>
+</span></code></pre></div>
+<p><strong>擅長什麼</strong>:<code>flowgen → echo7:8080</code> 那一列同時有 <code>FORWARDED=153</code> 與 <code>DROPPED=17</code>,一眼看得出「這條邊有通有不通」——<strong>這是靜態讀政策讀不出來的,因為政策寫的是規則,這裡寫的是實際發生的事</strong>。同理 <code>multiport:9090</code> 那列全部 DROPPED 且沒有任何 FORWARDED,代表那條政策確實在擋、而且有人一直在撞它。要回答「這條規則刪掉會不會出事」,service map 是最快的路。</p>
+<p><strong>會誤導你哪裡</strong>,四件:</p>
+<ol>
+<li><strong>只有最近說過話的東西才在圖上。</strong> 這份匯出裡完全沒有 <code>client</code>、<code>probe</code>、<code>svc-backend</code>——它們全都還活著,只是最近兩分鐘沒發流量。<strong>service map 是「最近的通聯紀錄」,不是「拓撲」。</strong> 把它當拓撲用,就會刪掉一個每天只跑一次的批次任務所需要的規則。而「最近」有多近由<a href="#mine-1">地雷 1</a> 決定。</li>
+<li><strong>會被節點噪音淹沒。</strong> 排名第一的是節點自己對外的流量,前十名裡有六列是 <code>reserved:host</code> 出發的。<strong>應用流量在自己的服務圖上是少數。</strong></li>
+<li><strong>觀測工具會出現在自己的圖上。</strong> relay、UI、metrics-server 加起來佔掉可觀的篇幅,<strong>而且同時在消耗那個本來就很淺的緩衝區</strong>。</li>
+<li><strong><code>reserved:host</code> 是個黑洞。</strong> 探針 C 的全部繞過流量都聚在那一列裡,跟 Envoy 的合法轉發混在一起,verdict 全是 FORWARDED。<strong>在服務圖上,那次繞過看起來就是節點在正常工作。</strong></li>
+</ol>
+<h2 id="_1">誠實的差距<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>緩衝區容量的預設值,文件與實測對不上。</strong> 見<a href="#mine-1">地雷 1</a>。本課只能確定「這座叢集是 4095」,不能宣稱那是所有版本的預設。</li>
+<li><strong>沒有開匯出。</strong> 要把 Hubble 當事後鑑識工具就得把 flow 落地或送 Prometheus,兩者都是額外的 Helm 變更與儲存成本,本課刻意沒開(會改資料平面設定,而且要另外驗證)。<strong>所以「接出去之後歷史有多深、成本多少」本課沒有答案。</strong></li>
+<li><strong>探針 A 的對照組不完整。</strong> 被測程式出廠不記存取日誌,所以「成功的請求有沒有留下日誌」這一半沒有對照。結論只涵蓋「被擋的請求在應用端沒有痕跡」。</li>
+<li><strong>host firewall 從頭到尾沒開。</strong> 探針 C 的破口在本課環境是開著的,而堵法(<code>hostFirewall.enabled=true</code> 加叢集範圍政策)沒有實作也沒有驗證。</li>
+<li><strong>單節點。</strong> relay 的價值是把多個節點的 agent 聚合起來,而這座叢集只有一顆節點——<strong>跨節點聚合這件事本課等於沒測。</strong></li>
+</ul>
+<h2 id="checkpoint">驗收 checkpoint<a class="headerlink" href="#checkpoint" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>驗證</th>
+<th>判準</th>
+<th>本課環境的結果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>前幾天的驗收仍成立</td>
+<td>kube-proxy 仍為 0,Day 8 的 L7 政策仍在執行</td>
+<td>第三次存活;GET 200 / POST 403</td>
+</tr>
+<tr>
+<td>開 Hubble 不動資料平面</td>
+<td>cilium-agent 的重啟次數</td>
+<td><strong>0</strong>,relay 與 UI 27 秒就緒</td>
+</tr>
+<tr>
+<td>緩衝區深度可量化</td>
+<td>現在時間與緩衝區裡最舊那筆的差</td>
+<td>閒置 <strong>3 分 02 秒</strong>;加一顆小流量 pod 後 <strong>2 分 24 秒</strong></td>
+</tr>
+<tr>
+<td><strong>驗收:UI 半邊</strong></td>
+<td>在 UI 上指出那條被 L7 拒絕的流量</td>
+<td>Flow Details 顯示 <code>Verdict: dropped</code>,擷圖入庫</td>
+</tr>
+<tr>
+<td><strong>驗收:CLI 半邊</strong></td>
+<td>印出同一筆的事件</td>
+<td><code>http-request DROPPED (HTTP/1.1 POST …)</code>,JSON 含 method 與 URL</td>
+</tr>
+<tr>
+<td>探針 A</td>
+<td>應用日誌的行數變化,以及 flow 的段數</td>
+<td>日誌 0 增加;放行有兩段、被擋只有一段</td>
+</tr>
+<tr>
+<td>探針 B</td>
+<td>兩種來源的 flow 欄位是否可區分</td>
+<td><strong>逐欄相同</strong>,且無任何行程欄位</td>
+</tr>
+<tr>
+<td>探針 C</td>
+<td>三個常用過濾器能否找到繞過流量</td>
+<td><strong>三個全部回空</strong></td>
+</tr>
+</tbody>
+</table>
+<h2 id="_2">地雷記錄<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<h3 id="mine-1">地雷 1:緩衝區只有幾千筆、per-node、環狀覆蓋——實測歷史只有兩三分鐘<a class="headerlink" href="#mine-1" title="Permanent link">&para;</a></h3>
+<p><strong>這是本章最重要的數字,而它不在任何一份入門文件的第一頁。</strong></p>
+<p>事件的來源是每顆 cilium-agent 自己的環狀緩衝區,滿了就覆蓋最舊的,<strong>不落地、不外送</strong>。這座叢集的 agent 自己回報容量是 <strong>4095</strong>:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="gp">$ </span>cilium-dbg<span class="w"> </span>status<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-i<span class="w"> </span>hubble
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="go">Hubble:   Ok   Current/Max Flows: 2508/4095 (61.25%), Flows/s: 19.49</span>
+</span></code></pre></div>
+<p><strong>先講一個必須誠實處理的落差</strong>:官方 Helm 參考文件對 <code>hubble.eventBufferCapacity</code> 列出的預設值是 <strong>65536</strong>,而這座叢集(chart 1.20.0)實測是 <strong>4095</strong>——chart 的 <code>values.yaml</code> 裡這一行是註解掉的,<code>helm show values</code> 只看得到 <code># eventBufferCapacity: "4095"</code>。<strong>本課只能確定自己量到的數字,不能宣稱哪一個是「所有版本的預設」。</strong> 而這件事本身就是結論:<strong>這個數字要在自己的叢集上問 agent,不要相信任何一份文件上的數字,包括這一章。</strong></p>
+<p>實測填充速度(節點剛開機、八顆 pod、沒有任何業務流量):</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="go">17:25:28  Current/Max Flows: 2508/4095 (61.25%), Flows/s: 19.49</span>
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="go">17:25:59  Current/Max Flows: 3060/4095 (74.73%), Flows/s: 19.28</span>
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="go">17:27:06  Current/Max Flows: 4095/4095 (100.00%)      ← 節點開機約 7 分鐘就滿了</span>
+</span></code></pre></div>
+<p>滿了之後直接量歷史深度(現在時間對緩衝區裡最舊那一筆):</p>
+<table>
+<thead>
+<tr>
+<th>情境</th>
+<th><strong>歷史深度</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>閒置(八顆 pod,無業務流量)</td>
+<td><strong>3 分 02 秒</strong></td>
+</tr>
+<tr>
+<td>加一顆每 5 秒三個請求的 pod</td>
+<td><strong>2 分 24 秒</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>一顆每 5 秒發三個 curl 的 pod,就把整座叢集的可觀測歷史砍掉四分之一。</strong> 換算到真實環境:一個中等忙碌的節點跑幾百 flows/s,緩衝區的深度是<strong>十幾秒</strong>。</p>
+<p><strong>三個實務結論:</strong></p>
+<ol>
+<li><strong>「出事了去 Hubble 看一下」在出廠設定下不成立。</strong> 從被叫醒、連上網、port-forward 到打開瀏覽器,時間早就超過緩衝區深度了。<strong>Hubble 出廠是即時儀表板,不是事後鑑識工具。</strong></li>
+<li><strong>要當鑑識工具就得接出去</strong>(把 flow 落地或送指標系統),而那是額外的設定與儲存成本。</li>
+<li><strong><code>Current/Max Flows: 100%</code> 不是健康指標,是溢位指標。</strong> 它的意思是「你正在丟資料」,但它長得像進度條。</li>
+</ol>
+<h3 id="mine-2">地雷 2:L7 的拒絕沒有丟棄原因,UI 上直接寫「Unknown drop reason」<a class="headerlink" href="#mine-2" title="Permanent link">&para;</a></h3>
+<p>L4 丟包的 JSON 有完整的原因:</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">&quot;verdict&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;DROPPED&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;Type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;L3_L4&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;drop_reason&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">133</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;drop_reason_desc&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;POLICY_DENIED&quot;</span><span class="w"> </span><span class="p">}</span>
+</span></code></pre></div>
+<p>L7 拒絕的同一份 JSON:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="go">drop_reason      : (不存在)</span>
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="go">drop_reason_desc : (不存在)</span>
+</span></code></pre></div>
+<p><strong><code>verdict: DROPPED</code> 有,<code>Type: L7</code> 有,<code>drop_reason</code> 整個欄位不存在。</strong> UI 誠實地把這件事寫出來——那兩張並排的擷圖就是證據:同一個面板,L4 那筆寫 <code>Policy denied</code>,L7 那筆寫 <code>Unknown drop reason</code>。</p>
+<p><strong>後果分兩層:</strong></p>
+<ul>
+<li><strong>追查上</strong>:L4 丟包可以照原因分類統計,<strong>L7 拒絕全部擠在同一個「不知道」桶裡</strong>——是方法不合、路徑不合、還是 header 不合,flow 上都沒寫,你得自己回去讀政策。</li>
+<li><strong>告警上</strong>:任何「按丟棄原因分流」的規則都會<strong>漏掉全部的 L7 拒絕</strong>,而 L7 拒絕正是最需要有人看的那一種——它代表有東西正在敲你明確禁止的介面。</li>
+</ul>
+<h3 id="mine-3">地雷 3:UI 的網址要用 <code>?namespace=</code>,而且過濾狀態不在網址裡<a class="headerlink" href="#mine-3" title="Permanent link">&para;</a></h3>
+<p>直覺的 <code>http://localhost:12000/netlab</code> 會得到:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>Unexpected Application Error!
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>404 Not Found
+</span></code></pre></div>
+<p>根目錄也不是答案——它是一張只有「Choose namespace」下拉選單的歡迎頁,<strong>flow 表與服務圖都不存在</strong>。能用的寫法是查詢參數:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>http://localhost:12000/?namespace=netlab
+</span></code></pre></div>
+<p><strong>而且只有 <code>namespace</code> 這個參數會被讀。</strong> 實測 <code>?namespace=netlab&amp;verdict=dropped</code> 完全沒有作用(右上角仍是 <code>Any verdict</code>)。</p>
+<p><strong>後果</strong>:UI 的過濾狀態多半不在網址裡,<strong>一個「已經濾好的 Hubble 視圖」沒辦法用連結交給同事</strong>——只能截圖。</p>
+<p><strong>給自動化的第三個坑</strong>:Hubble UI 會一直開著 websocket,所以 headless 瀏覽器那種「等頁面 idle 之後自動截圖」的做法會<strong>永遠掛著不返回</strong>,必須改用瀏覽器的除錯協定定時抓。</p>
+<h3 id="mine-4">地雷 4:HTTP request header 原文進 flow buffer,而 relay 出廠不開 TLS<a class="headerlink" href="#mine-4" title="Permanent link">&para;</a></h3>
+<p>驗收那段 JSON 裡的 <code>headers</code> 不是摘要,是原文:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="gp">$ </span>curl<span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;Authorization: Bearer SUPERSECRET-DEMO-TOKEN-abc123&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="w">       </span>-H<span class="w"> </span><span class="s1">&#39;Cookie: session=demo-cookie-value&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="w">       </span><span class="s2">&quot;http://svc-echo7.netlab/?apikey=demo-key-in-url&quot;</span>
+</span><span id="__span-23-4"><a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>
+</span><span id="__span-23-5"><a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="gp">$ </span>hubble<span class="w"> </span>observe<span class="w"> </span>--protocol<span class="w"> </span>http<span class="w"> </span>-o<span class="w"> </span>json
+</span><span id="__span-23-6"><a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="go">url: http://svc-echo7.netlab/?apikey=demo-key-in-url</span>
+</span><span id="__span-23-7"><a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="go">     Authorization = Bearer SUPERSECRET-DEMO-TOKEN-abc123      ← 原文</span>
+</span><span id="__span-23-8"><a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a><span class="go">     Cookie = session=demo-cookie-value                        ← 原文</span>
+</span></code></pre></div>
+<p>而 <code>helm upgrade</code> 自己印出來的警告是:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>WARNING: TLS is not enabled for the Hubble Relay server (hubble.relay.tls.server.enabled=false).
+</span></code></pre></div>
+<p><strong>把兩件事疊起來:任何能 port-forward 到 relay 的人,就能明文讀到叢集裡每一個走 L7 政策的請求的認證標頭。</strong></p>
+<p>三層要分開講:</p>
+<ul>
+<li><strong>它只發生在有 L7 政策的路徑上。</strong> 沒有 HTTP 規則就沒有 Envoy,沒有 Envoy 就沒有 <code>l7</code> 區段。<strong>也就是說「把政策寫細一點」這個安全決定,順便打開了一份明文的認證標頭日誌</strong>——兩件事在文件裡分屬不同章節。</li>
+<li><strong>RBAC 上它不是一個「機密」。</strong> relay 是一個普通的 ClusterIP Service,能做 <code>pods/portforward</code> 的人就讀得到,<strong>而那個權限在多數叢集裡是給「維運」而不是給「資料存取」的</strong>。</li>
+<li><strong>緩衝區淺這件事在這裡反而是保護。</strong> 只留兩三分鐘代表這份明文不會累積——但那也代表<strong>你沒辦法既要鑑識深度又不要這份風險</strong>:一旦把 flow 落地,落下去的就是含 token 的原文。要兩者兼得得自己設定標頭遮罩,而那不是預設值。</li>
+</ul>
+<h2 id="_3">帶得走的東西<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>一個工具的盲點,跟它的執行點是同一件事的兩面。</strong> Hubble 看不見 hostNetwork 的繞過,不是因為它壞了,是因為它的視角就是 endpoint 的視角,而那個破口的定義就是「不經過 endpoint 政策」。同樣的邏輯解釋了 Tetragon 為什麼被 <code>nsenter</code> 繞過(它綁 cgroup),以及網路政策為什麼繞不過(它綁網路命名空間)。</li>
+<li><strong>Hubble 是網路的鏡子,不是行程的鏡子——而且它會給錯名字。</strong> 攻擊者鑽進別人的網路命名空間之後,flow 逐欄記在受害者身上,而工具沒有任何表達「我不確定」的方式。要把一條 flow 對應到一個行程,需要另一條資料線。</li>
+<li><strong>「第二段不存在」比「日誌裡沒有」是強得多的證據。</strong> 查日誌只能得到「沒看到」;flow 的兩段結構可以證明「它沒被送過去」。這是 Hubble 最站得住的用途:<strong>任何在 proxy 被截掉的東西,客戶端與應用端各只看得到半個故事。</strong></li>
+<li><strong>先問緩衝區有多深,再決定它在你的事故流程裡是什麼角色。</strong> 幾千筆、每節點、環狀覆蓋,在閒置的實驗叢集上是三分鐘,在忙碌的節點上是十幾秒。這個數字決定了 Hubble 是「即時儀表板」還是「鑑識工具」,而它預設是前者。</li>
+<li><strong>服務圖是最近的通聯紀錄,不是拓撲。</strong> 最近沒說過話的東西不在圖上,而那個「最近」由緩衝區深度決定。把它當拓撲用會刪掉一天只跑一次的批次任務所需要的規則。</li>
+</ul>
+<h2 id="_4">延伸閱讀<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<p>想往下深挖,從這幾份開始:</p>
+<ul>
+<li><strong><a href="https://docs.cilium.io/en/stable/observability/hubble/">Hubble 的組成</a></strong> —— 官方對 relay(跨節點與跨叢集聚合)與 UI(L3/L4 到 L7 的服務相依圖)的定位說明,以及設定 TLS、匯出 flow 等子頁的入口。</li>
+<li><strong><a href="https://docs.cilium.io/en/stable/helm-reference/">Cilium Helm 參數表</a></strong> —— 地雷 1 的另一半:<code>hubble.eventBufferCapacity</code> 在這裡列的數字與本課實測不同,<strong>兩邊並讀正好說明為什麼這個值要在自己的叢集上量</strong>。</li>
+<li><strong><a href="https://docs.cilium.io/en/stable/security/host-firewall/">Host Firewall</a></strong> —— 探針 C 那個破口的堵法。開了它,節點層的流量才會有政策判定,Hubble 才有東西可以標成 DROPPED。</li>
+<li><strong><a href="https://docs.cilium.io/en/stable/security/policy/layer7/">L7 政策</a></strong> —— 步驟 3 那個「兩段連線」的來源:官方說明 L7 政策會把流量導進節點上的 Envoy,而違反規則不會丟包、是回一個 403。</li>
+</ul>
+<h2 id="_5">下一步<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<p>Sprint 2 的動手部分到這裡結束。九天下來,同一批核心事件被四套工具用四種方式取用過:bpftrace 臨場追、Falco 用規則判斷、Tetragon 在核心裡攔、Cilium 在網路層擋與看。</p>
+<p>而最值得回頭看的,是它們<strong>各自看不見的東西剛好是別人的長處</strong>——<code>nsenter</code> 那一題四套工具給了四個不同的答案,<code>hostNetwork</code> 那個破口有三套工具完全沒有提過。<a href="../sprint2-day10-decision-matrix/">Day 10</a> 不動手,把這些散在九章裡的實測數字收攏成一張分工決策表,每一格都要能追溯到某一天的某一個量測。</p>
+<hr />
+<div class="admonition quote">
+<p>Cilium 標誌為 Cilium 專案之官方資產(CNCF artwork),此處作社群教學用途。Hubble UI 擷圖為本課程實測畫面。</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到頂端
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="頁腳" >
+        
+          
+          <a href="../sprint2-day8-cilium-network-policy/" class="md-footer__link md-footer__link--prev" aria-label="上一頁: Day 8 · CiliumNetworkPolicy(L3/L4 → L7)">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                上一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 8 · CiliumNetworkPolicy(L3/L4 → L7)
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../sprint2-day10-decision-matrix/" class="md-footer__link md-footer__link--next" aria-label="下一頁: Day 10 · 綜合:四套工具的分工">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                下一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 10 · 綜合:四套工具的分工
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      KAI Scheduler、HAMi、Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,作社群教學用途
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.code.annotate", "content.code.select", "content.tabs.link", "search.suggest", "search.highlight", "search.share"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u8907\u88fd", "clipboard.copy": "\u8907\u88fd", "search.result.more.one": "\u6b64\u9801\u5c1a\u6709 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.more.other": "\u6b64\u9801\u5c1a\u6709 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.none": "\u6c92\u6709\u7b26\u5408\u7684\u9805\u76ee", "search.result.one": "\u627e\u5230 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.other": "\u627e\u5230 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.placeholder": "\u6253\u5b57\u9032\u884c\u641c\u5c0b", "search.result.term.missing": "\u7f3a\u5c11\u5b57\u8a5e", "select.version": "\u9078\u64c7\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,2874 @@
+
+<!doctype html>
+<html lang="zh-TW" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="雲原生實作課程 —— GPU 排程 runbook、踩雷解法與反思">
+      
+      
+      
+        <link rel="canonical" href="https://deepwavelab.github.io/CloudNativePracticing/runbook/sprint2-day3-falco-basics/">
+      
+      
+        <link rel="prev" href="../sprint2-day2-bpftrace-kubernetes/">
+      
+      
+        <link rel="next" href="../sprint2-day4-falco-custom-rules/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Day 3 · Falco 安裝與出廠規則 - Cloud Native Lab Course</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/terminal.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#day-3-falco" class="md-skip">
+          跳轉到
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="頁首">
+    <a href="../.." title="Cloud Native Lab Course" class="md-header__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Cloud Native Lab Course
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Day 3 · Falco 安裝與出廠規則
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換深色模式"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="切換深色模式" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換淺色模式"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="切換淺色模式" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜尋" placeholder="搜尋" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="搜尋">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="分享" aria-label="分享" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="清除" aria-label="清除" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜尋引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="標籤" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  首頁
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint1-day0-azure-aks-foundation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 1 · GPU 排程三部曲
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../sprint2-day0-ebpf-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 2 · eBPF 與執行期安全
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="導覽列" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Cloud Native Lab Course" class="md-nav__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Cloud Native Lab Course
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首頁
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    首頁
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day0-azure-aks-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 環境建置與成本紀律
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day1-kai-queue-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · KAI 安裝與 Queue 基礎
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day2-gang-scheduling-preemption/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Gang Scheduling 與搶占
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day3-hami-memory-isolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · HAMi 安裝與 VRAM 硬隔離
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day4-hami-kai-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · HAMi 進階與 KAI 整合
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day5-hami-webui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · HAMi-WebUI 觀測介面
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day6-dra-simulated-devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · DRA 概念與模擬裝置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day7-dra-aks-real-gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · DRA 真卡實測
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day8-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 綜合:三者分工決策表
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day0-ebpf-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · eBPF 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day1-bpftrace-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · bpftrace 三支經典工具
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day2-bpftrace-kubernetes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · 把核心事件接回 Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Falco 安裝與出廠規則
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Falco 安裝與出廠規則
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一個常駐元件跟一支臨場工具,差在哪裡
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-driver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1: 選 driver,而且不要讓它自己決定
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2: 安裝,以及它到底裝出了什麼
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 2: 安裝,以及它到底裝出了什麼">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#driver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        driver 的證據
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        從安裝到第一筆告警
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3: 讀懂出廠規則
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 3: 讀懂出廠規則">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        先數一數手上有幾條
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        完整解剖一條規則
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#condition-syscall" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        condition 怎麼一路收斂到 syscall 欄位
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4: 觸發第一條規則
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-day-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5: 跟 Day 2 的手工基線正面對照
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 5: 跟 Day 2 的手工基線正面對照">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        兩種偵測哲學
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6: 噪音與資源的真實數字
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 6: 噪音與資源的真實數字">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        閒置告警率
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        資源:實測與保留
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        誠實的差距
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收 checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷記錄
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="地雷記錄">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 1:chart 不設 priorityClass,Falco 在滿載節點上是第一個被踢的
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 2:出廠只有 25 條規則,而規則版本是另一條版本線
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 3:kubectl exec -t 配不到終端機,規則就靜靜地不報
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 4:出廠規則沒有任何一條在管「新的對外連線」
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 5:nsenter 進容器,Falco 看得見但認錯 pod
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 6:container_entrypoint 讓 shell 規則只抓得到第一層
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 7:那個 request 不是用量,是保留量
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的東西
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day4-falco-custom-rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · 自訂規則、誤報調校與告警路由
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day5-tetragon-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Tetragon 與 TracingPolicy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day6-tetragon-enforcement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · 從偵測到攔截
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day7-cilium-kubeproxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Cilium 與 kube-proxy replacement
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day8-cilium-network-policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · CiliumNetworkPolicy(L3/L4 → L7)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day9-hubble/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Hubble 可觀測性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 綜合:四套工具的分工
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一個常駐元件跟一支臨場工具,差在哪裡
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-driver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1: 選 driver,而且不要讓它自己決定
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2: 安裝,以及它到底裝出了什麼
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 2: 安裝,以及它到底裝出了什麼">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#driver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        driver 的證據
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        從安裝到第一筆告警
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3: 讀懂出廠規則
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 3: 讀懂出廠規則">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        先數一數手上有幾條
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        完整解剖一條規則
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#condition-syscall" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        condition 怎麼一路收斂到 syscall 欄位
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4: 觸發第一條規則
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-day-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5: 跟 Day 2 的手工基線正面對照
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 5: 跟 Day 2 的手工基線正面對照">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        兩種偵測哲學
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6: 噪音與資源的真實數字
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 6: 噪音與資源的真實數字">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        閒置告警率
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        資源:實測與保留
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        誠實的差距
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收 checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷記錄
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="地雷記錄">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 1:chart 不設 priorityClass,Falco 在滿載節點上是第一個被踢的
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 2:出廠只有 25 條規則,而規則版本是另一條版本線
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 3:kubectl exec -t 配不到終端機,規則就靜靜地不報
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 4:出廠規則沒有任何一條在管「新的對外連線」
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 5:nsenter 進容器,Falco 看得見但認錯 pod
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 6:container_entrypoint 讓 shell 規則只抓得到第一層
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 7:那個 request 不是用量,是保留量
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的東西
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="day-3-falco">Day 3: 裝上 Falco,讀懂它出廠帶的規則<a class="headerlink" href="#day-3-falco" title="Permanent link">&para;</a></h1>
+<p><img align="right" alt="Falco 官方標誌" src="../../assets/logos/falco-icon-color.svg" width="95" /></p>
+<blockquote>
+<p>Day 2 的過濾器要人架、要人看、要人比對,而且一次只認一顆 pod。今天換上一個常駐元件:同樣是 syscall 那一層的事件,但容器身分由執行期提供、規則寫成檔案、輸出送得出節點。裝完之後最重要的事不是看它報什麼,是先讀懂它憑什麼報——規則語言看不懂,就不知道自己買到了多寬的保障。</p>
+</blockquote>
+<div class="admonition abstract">
+<p class="admonition-title">你在課程的哪裡</p>
+<ul>
+<li><strong>Day 0–2</strong>:知道 eBPF 程式怎麼掛進核心、會用 bpftrace 追 syscall,也會把核心事件裡的 cgroup id 換算回 pod 名字,並替一顆 pod 手工建立行為基線。</li>
+<li><strong>今天</strong>:在叢集上裝 Falco,拆解一條出廠規則的完整結構,觸發它並指出告警裡哪個欄位認出了 pod;然後把同樣的偏離動作拿去跟 Day 2 的手工基線對打。</li>
+<li><strong>Day 4</strong>:今天會找到出廠規則的兩個具體空白,下一章自己寫規則把它們補起來。</li>
+</ul>
+</div>
+<h2 id="_1">一個常駐元件跟一支臨場工具,差在哪裡<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<p>Day 2 結尾列過手工做法辦不到的七件事。今天要關掉的是其中四件——沒有持久化、沒有告警、沒有規則語言、必須剛好在看。Falco 用一個 DaemonSet 換掉這四件:每顆節點一份、全時間執行、規則寫在檔案裡、告警印到標準輸出。</p>
+<p>代價也很具體。Day 2 那套是「要用的時候才進去跑」,不用的時候成本是零;Falco 是常駐的,節點上每一個 <code>execve</code> 都要進使用者空間比對規則,不管最後報不報警。這筆帳步驟 6 會量出實際數字。</p>
+<p>今天走六步:</p>
+<table>
+<thead>
+<tr>
+<th>步驟</th>
+<th>做什麼</th>
+<th>為什麼排在這</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>選 driver</td>
+<td>選錯的話後面全部白做,而預設值不會告訴你它選了什麼</td>
+</tr>
+<tr>
+<td>2</td>
+<td>安裝</td>
+<td>要先知道它裝出了哪些東西,才知道出事時該看哪一個</td>
+</tr>
+<tr>
+<td>3</td>
+<td>讀出廠規則</td>
+<td><strong>今天的重心</strong>;讀不懂規則語言,Day 4 寫不出規則</td>
+</tr>
+<tr>
+<td>4</td>
+<td>觸發一條規則</td>
+<td>驗收:告警裡哪個欄位認出了 pod</td>
+</tr>
+<tr>
+<td>5</td>
+<td>跟 Day 2 的基線對打</td>
+<td>同樣的偏離動作,兩種方法各抓到什麼</td>
+</tr>
+<tr>
+<td>6</td>
+<td>量噪音與資源</td>
+<td>「裝一下 Falco」實際上要付什麼</td>
+</tr>
+</tbody>
+</table>
+<h2 id="1-driver">步驟 1: 選 driver,而且不要讓它自己決定<a class="headerlink" href="#1-driver" title="Permanent link">&para;</a></h2>
+<p>Falco 需要一個 driver 把 syscall 事件從核心送到使用者空間。三個選項,受管的 AKS 節點上只有一個走得通:</p>
+<table>
+<thead>
+<tr>
+<th>driver</th>
+<th>怎麼運作</th>
+<th>在受管節點上</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kmod</code></td>
+<td>載入一個 out-of-tree 核心模組</td>
+<td>不可行——節點映像不讓你插自己的模組</td>
+</tr>
+<tr>
+<td><code>ebpf</code>(legacy)</td>
+<td>安裝時在節點上現場編譯 eBPF probe</td>
+<td>要對著節點的 GLIBC 編,節點映像換版就可能編不出來</td>
+</tr>
+<tr>
+<td><code>modern_ebpf</code></td>
+<td>CO-RE:一份預先編好的 probe,靠 BTF 在載入時自我重定位</td>
+<td>可行——<a href="../sprint2-day0-ebpf-concepts/">Day 0</a> 已經確認節點有 BTF</td>
+</tr>
+</tbody>
+</table>
+<p>Helm chart 的預設值是 <code>kind: auto</code>。auto 的問題不在於它一定選錯,而在於<strong>它選了什麼要事後才知道</strong>。所以把它釘死:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>falco-values.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="s">driver:</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="s">  enabled: true</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="s">  kind: modern_ebpf</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="s"># Without a tty, Falco&#39;s stdout is block-buffered and alerts sit in the buffer.</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="s">tty: true</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="s"># The lab node pool is Spot and carries a NoSchedule taint; the chart&#39;s default</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="s"># tolerations only cover control-plane nodes.</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="s">tolerations:</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="s">  - key: kubernetes.azure.com/scalesetpriority</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="s">    operator: Equal</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="s">    value: spot</span>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="s">    effect: NoSchedule</span>
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="s">EOF</span>
+</span></code></pre></div>
+<p>第三項不加會怎樣值得先說:DaemonSet 會<strong>安安靜靜地只跑在沒有 taint 的節點上</strong>,<code>kubectl get ds</code> 顯示 <code>DESIRED 1 / READY 1</code>,看起來完全健康——而你要觀察的那幾顆節點上根本沒有 Falco。這種失敗不報錯,只會讓實驗一直沒有資料。</p>
+<h2 id="2">步驟 2: 安裝,以及它到底裝出了什麼<a class="headerlink" href="#2" title="Permanent link">&para;</a></h2>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="gp">$ </span>helm<span class="w"> </span>repo<span class="w"> </span>add<span class="w"> </span>falcosecurity<span class="w"> </span>https://falcosecurity.github.io/charts<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>helm<span class="w"> </span>repo<span class="w"> </span>update
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="gp">$ </span>helm<span class="w"> </span>install<span class="w"> </span>falco<span class="w"> </span>falcosecurity/falco<span class="w"> </span>--version<span class="w"> </span><span class="m">9</span>.1.0<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">      </span>-n<span class="w"> </span>falco<span class="w"> </span>--create-namespace<span class="w"> </span>-f<span class="w"> </span>falco-values.yaml<span class="w"> </span>--wait<span class="w"> </span>--timeout<span class="w"> </span>8m
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="go">NAME: falco</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="go">STATUS: deployed</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="go">CHART: falco-9.1.0</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="go">APP VERSION: 0.44.1</span>
+</span></code></pre></div>
+<p>30 秒從指令到 <code>--wait</code> 返回。裝出來的是一個 DaemonSet,每個 pod 三個容器:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>falco<span class="w"> </span>get<span class="w"> </span>ds<span class="w"> </span>falco<span class="w"> </span>-o<span class="w"> </span>wide
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">NAME    DESIRED   CURRENT   READY   CONTAINERS                       IMAGES</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="go">falco   3         3         3       falco,falcoctl-artifact-follow   falcosecurity/falco:0.44.1,</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="go">                                                                     falcosecurity/falcoctl:0.13.0</span>
+</span></code></pre></div>
+<table>
+<thead>
+<tr>
+<th>容器</th>
+<th>角色</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>falcoctl-artifact-install</code>(init)</td>
+<td>開機前把規則檔與 plugin 從 OCI registry 拉下來,放進 emptyDir</td>
+</tr>
+<tr>
+<td><code>falco</code></td>
+<td>本體:載入 eBPF probe、讀規則、比對事件、吐告警</td>
+</tr>
+<tr>
+<td><code>falcoctl-artifact-follow</code>(sidecar)</td>
+<td>常駐盯著 registry,規則有新版就下載換上</td>
+</tr>
+</tbody>
+</table>
+<p><strong>規則不在映像裡</strong>,是開機時從 registry 拉的,而且會驗簽:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>falco<span class="w"> </span>logs<span class="w"> </span>-l<span class="w"> </span>app.kubernetes.io/name<span class="o">=</span>falco<span class="w"> </span>-c<span class="w"> </span>falcoctl-artifact-install<span class="w"> </span>--tail<span class="o">=</span><span class="m">20</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">{&quot;msg&quot;:&quot;Artifact successfully installed&quot;,&quot;name&quot;:&quot;ghcr.io/falcosecurity/rules/falco-rules:5&quot;,</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="go"> &quot;digest&quot;:&quot;sha256:36d143c0…&quot;,&quot;directory&quot;:&quot;/rulesfiles&quot;,&quot;type&quot;:&quot;rulesfile&quot;}</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="go">{&quot;msg&quot;:&quot;Verifying signature for artifact&quot;,&quot;ref&quot;:&quot;…/plugins/plugin/container@sha256:f3d531f3…&quot;}</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="go">{&quot;msg&quot;:&quot;Signature successfully verified!&quot;}</span>
+</span></code></pre></div>
+<p>所以規則的版本是 <code>falco-rules:5</code>,跟 Falco 本體的 0.44.1 是<strong>兩條獨立的版本線</strong>。之後追查「為什麼這條規則沒報」的時候,要問的是規則版本,不是 Falco 版本。</p>
+<h3 id="driver">driver 的證據<a class="headerlink" href="#driver" title="Permanent link">&para;</a></h3>
+<p><code>kind: modern_ebpf</code> 只是意圖,不是事實。事實要從 Falco 自己的啟動日誌拿:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>falco<span class="w"> </span>logs<span class="w"> </span>-l<span class="w"> </span>app.kubernetes.io/name<span class="o">=</span>falco<span class="w"> </span>-c<span class="w"> </span>falco<span class="w"> </span>--tail<span class="o">=</span><span class="m">30</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="go">… Falco version: 0.44.1 (x86_64)</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="go">… Loaded plugin &#39;container@0.7.1&#39; from file /usr/share/falco/plugins/libcontainer.so</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="go">… Loading rules from:</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="go">…    /etc/falco/falco_rules.yaml | schema validation: ok</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="go">… The chosen syscall buffer dimension is: 8388608 bytes (8 MBs)</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="go">… Opening &#39;syscall&#39; source with modern BPF probe.        ← 這一行就是證據</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="go">… One ring buffer every &#39;2&#39; CPUs.</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="go">… [libs]: libpman: disabled BPF iterators (not running in the root PID namespace…)</span>
+</span></code></pre></div>
+<p>第二個佐證是 Falco 自己算出來的最終設定檔——values 經過模板之後長什麼樣,看這個最準:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>falco<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>&lt;falco-pod&gt;<span class="w"> </span>-c<span class="w"> </span>falco<span class="w"> </span>--<span class="w"> </span>cat<span class="w"> </span>/etc/falco/falco.yaml
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="go">engine:</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="go">  kind: modern_ebpf</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="go">  modern_ebpf:</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="go">    buf_size_preset: 4</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="go">    cpus_for_each_buffer: 2</span>
+</span></code></pre></div>
+<p><code>buf_size_preset: 4</code> 對上日誌裡的 8 MB:<strong>每兩顆 CPU 一個 ring buffer</strong>,2 vCPU 的節點就是一個 8 MB 的環形緩衝區。這個數字決定事件洪峰時會不會掉事件。</p>
+<p>最後那行 <code>disabled BPF iterators</code> 不是錯誤:Falco 跑在 pod 的 PID namespace 裡,所以放棄用 BPF iterator 掃既有行程表,改用 <code>/proc</code>。功能沒少,只是啟動時多花一點時間建表。</p>
+<h3 id="_2">從安裝到第一筆告警<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h3>
+<p>這個數字要分兩種問法回答,而且兩個答案差很多:</p>
+<table>
+<thead>
+<tr>
+<th>問法</th>
+<th>本課環境</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>helm install</code> → 掛上 probe、開始比對事件</td>
+<td><strong>26 秒</strong></td>
+</tr>
+<tr>
+<td><code>helm install</code> → 日誌出現第一筆<strong>告警</strong></td>
+<td><strong>12 分 27 秒</strong></td>
+</tr>
+</tbody>
+</table>
+<p>第二個數字看起來很難看,其實是本章最好的消息:中間那 12 分鐘什麼都沒發生,因為預設規則集在正常運作的叢集上真的不叫。第一筆告警出現的時間,就是有人動手的時間。步驟 6 有完整量測。</p>
+<h2 id="step-3">步驟 3: 讀懂出廠規則<a class="headerlink" href="#step-3" title="Permanent link">&para;</a></h2>
+<h3 id="_3">先數一數手上有幾條<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h3>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>falco<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>&lt;falco-pod&gt;<span class="w"> </span>-c<span class="w"> </span>falco<span class="w"> </span>--<span class="w"> </span>ls<span class="w"> </span>-la<span class="w"> </span>/etc/falco/
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="go">-rw-r--r--  root     root      2909  falco.yaml</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="go">-rw-r--r--  nonroot  nonroot  63642  falco_rules.yaml</span>
+</span></code></pre></div>
+<p>只有一個規則檔,63 KB。倒出來數(截至 2026-08,規則版本 <code>falco-rules:5</code>):</p>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>數量</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>- rule:</code></td>
+<td><strong>25</strong></td>
+</tr>
+<tr>
+<td><code>- macro:</code></td>
+<td><strong>87</strong></td>
+</tr>
+<tr>
+<td><code>- list:</code></td>
+<td><strong>49</strong></td>
+</tr>
+<tr>
+<td><code>enabled: false</code></td>
+<td>0(25 條全開)</td>
+</tr>
+<tr>
+<td>maturity 標籤</td>
+<td>25 條全部是 <code>maturity_stable</code></td>
+</tr>
+</tbody>
+</table>
+<p>25 條的全貌:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a> 1 Directory traversal monitored file read      14 Packet socket created in container
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a> 2 Read sensitive file trusted after startup    15 Redirect STDOUT/STDIN to Network Connection in Container
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a> 3 Read sensitive file untrusted                16 Linux Kernel Module Injection Detected
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a> 4 Run shell untrusted                          17 Debugfs Launched in Privileged Container
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a> 5 System user interactive                      18 Detect release_agent File Container Escapes
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a> 6 Terminal shell in container                  19 PTRACE attached to process
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a> 7 Contact K8S API Server From Container        20 PTRACE anti-debug attempt
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a> 8 Netcat Remote Code Execution in Container    21 Find AWS Credentials
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a> 9 Search Private Keys or Passwords             22 Execution from /dev/shm
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>10 Clear Log Activities                         23 Drop and execute new binary in container
+</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>11 Remove Bulk Data from Disk                   24 Disallowed SSH Connection Non Standard Port
+</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>12 Create Symlink Over Sensitive Files          25 Fileless execution via memfd_create
+</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>13 Create Hardlink Over Sensitive Files
+</span></code></pre></div>
+<p>優先級分布是 CRITICAL 3、WARNING 11、NOTICE 7、INFO 1。</p>
+<p>25 這個數字為什麼重要,見<a href="#mine-2">地雷 2</a>。更值得先看的是這 25 條的<strong>取捨形狀</strong>:全部都在描述<strong>已知的攻擊手法</strong>——載入核心模組、<code>release_agent</code> 容器逃逸、<code>memfd_create</code> 無檔案執行、翻找私鑰、清日誌。沒有一條在管「這個容器今天做了以前沒做過的事」。那正是 Day 2 手工基線在做的事,而 Falco 出廠不做。步驟 5 會把這件事量出來。</p>
+<h3 id="_4">完整解剖一條規則<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
+<p>拿等一下要觸發的那條。以下逐字取自執行中容器裡的 <code>/etc/falco/falco_rules.yaml</code>:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">rule</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Terminal shell in container</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nt">desc</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">&gt;</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="no">A shell was used as the entrypoint/exec point into a container with an attached terminal.</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">    </span><span class="no">Parent process may have legitimately already exited and be null (read container_entrypoint macro).</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">    </span><span class="no">Common when using &quot;kubectl exec&quot; in Kubernetes. …</span>
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">  </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">&gt;</span>
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">    </span><span class="no">spawned_process</span>
+</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">    </span><span class="no">and container</span>
+</span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">    </span><span class="no">and shell_procs</span>
+</span><span id="__span-8-10"><a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="w">    </span><span class="no">and proc.tty != 0</span>
+</span><span id="__span-8-11"><a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="w">    </span><span class="no">and container_entrypoint</span>
+</span><span id="__span-8-12"><a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="w">    </span><span class="no">and not user_expected_terminal_shell_in_container_conditions</span>
+</span><span id="__span-8-13"><a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="w">  </span><span class="nt">output</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">A shell was spawned in a container with an attached terminal |</span>
+</span><span id="__span-8-14"><a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="w">    </span><span class="l l-Scalar l-Scalar-Plain">evt_type=%evt.type user=%user.name user_uid=%user.uid user_loginuid=%user.loginuid</span>
+</span><span id="__span-8-15"><a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="w">    </span><span class="l l-Scalar l-Scalar-Plain">process=%proc.name proc_exepath=%proc.exepath parent=%proc.pname command=%proc.cmdline</span>
+</span><span id="__span-8-16"><a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="w">    </span><span class="l l-Scalar l-Scalar-Plain">terminal=%proc.tty exe_flags=%evt.arg.flags</span>
+</span><span id="__span-8-17"><a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="w">  </span><span class="nt">priority</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">NOTICE</span>
+</span><span id="__span-8-18"><a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a><span class="w">  </span><span class="nt">tags</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">maturity_stable</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">container</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">shell</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">mitre_execution</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">T1059</span><span class="p p-Indicator">]</span>
+</span></code></pre></div>
+<p>五個欄位各有各的角色:</p>
+<table>
+<thead>
+<tr>
+<th>欄位</th>
+<th>角色</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>condition</code></td>
+<td><strong>要不要報</strong>。一個布林運算式,欄位取自當下這個事件</td>
+</tr>
+<tr>
+<td><code>output</code></td>
+<td><strong>報什麼</strong>。<code>%</code> 開頭的都是欄位取值,事件發生時填入</td>
+</tr>
+<tr>
+<td><code>priority</code></td>
+<td><strong>多嚴重</strong>。決定 Falco 要不要輸出,以及下游怎麼路由</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td><strong>怎麼分類</strong>。這裡同時帶了成熟度、作用範圍與 MITRE ATT&amp;CK 對應</td>
+</tr>
+<tr>
+<td><code>desc</code></td>
+<td>給人看的。這條的 <code>desc</code> 特別值得讀——它自己就寫明了 <code>container_entrypoint</code> 這個坑</td>
+</tr>
+</tbody>
+</table>
+<h3 id="condition-syscall">condition 怎麼一路收斂到 syscall 欄位<a class="headerlink" href="#condition-syscall" title="Permanent link">&para;</a></h3>
+<p><code>condition</code> 裡的五個名字沒有一個是欄位,全是 macro。把它們展開:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">macro</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">spawned_process</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">(evt.type in (execve, execveat))</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">macro</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">container</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">  </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">(container.id != host)</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">macro</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shell_procs</span>
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="w">  </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">(proc.name in (shell_binaries))</span>
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">list</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shell_binaries</span>
+</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="w">  </span><span class="nt">items</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">ash</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">bash</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">csh</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">ksh</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">sh</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">tcsh</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">zsh</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">dash</span><span class="p p-Indicator">]</span>
+</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>
+</span><span id="__span-9-12"><a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">macro</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">container_entrypoint</span>
+</span><span id="__span-9-13"><a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="w">  </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">(not proc.pname exists or proc.pname in (runc:[0:PARENT], runc:[1:CHILD], runc,</span>
+</span><span id="__span-9-14"><a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="w">              </span><span class="l l-Scalar l-Scalar-Plain">docker-runc, exe, docker-runc-cur, containerd-shim, systemd, crio, conmon))</span>
+</span><span id="__span-9-15"><a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>
+</span><span id="__span-9-16"><a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">macro</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">user_expected_terminal_shell_in_container_conditions</span>
+</span><span id="__span-9-17"><a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a><span class="w">  </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">(never_true)</span>
+</span><span id="__span-9-18"><a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">macro</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">never_true</span>
+</span><span id="__span-9-19"><a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a><span class="w">  </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">(evt.num=0)</span>
+</span></code></pre></div>
+<p>展開後的完整條件是這樣:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>evt.type in (execve, execveat)                       ← 有人執行了一支新的執行檔
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>and container.id != host                             ← 而且是在某個容器裡
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>and proc.name in (ash,bash,csh,ksh,sh,tcsh,zsh,dash) ← 被執行的是 shell
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>and proc.tty != 0                                    ← 而且接著一個終端機
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>and (not proc.pname exists or proc.pname in (runc, containerd-shim, …))
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>                                                     ← 而且它的父行程是容器執行期
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>and not (evt.num = 0)                                ← 使用者自訂例外(預設永不成立)
+</span></code></pre></div>
+<p>三層結構,這是整個 Falco 規則語言的形狀:</p>
+<pre class="mermaid"><code>flowchart TB
+    D["syscall 欄位&lt;br/&gt;evt.type · proc.name&lt;br/&gt;proc.tty · container.id"]
+    A["list — 純資料&lt;br/&gt;shell_binaries"]
+    B["macro — 具名條件片段&lt;br/&gt;shell_procs"]
+    C["rule — condition + output&lt;br/&gt;Terminal shell in container"]
+    D --&gt; B
+    A --&gt; B
+    B --&gt; C
+    D --&gt; C</code></pre>
+<p><code>list</code> 是純資料(不含邏輯),<code>macro</code> 是具名的條件片段(可以互相引用),<code>rule</code> 是最終判斷。87 個 macro 對 25 條 rule,比例接近 3.5 比 1——<strong>Falco 的規則庫主要不是規則,是為了讓規則讀得懂而存在的字彙表</strong>。</p>
+<p>至於欄位本身,來源分成兩類,這個區分在 Day 4 寫規則時很要緊:</p>
+<table>
+<thead>
+<tr>
+<th>欄位家族</th>
+<th>從哪來</th>
+<th>例子</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>evt.*</code> / <code>proc.*</code> / <code>fd.*</code> / <code>user.*</code></td>
+<td><strong>核心事件本身</strong>,probe 直接送上來</td>
+<td><code>evt.type=execve</code>、<code>proc.tty=34816</code>、<code>fd.name=/etc/shadow</code></td>
+</tr>
+<tr>
+<td><code>container.*</code> / <code>k8s.*</code></td>
+<td><strong>container plugin 事後查出來的</strong>,靠行程的 cgroup 反查容器執行期</td>
+<td><code>container.id</code>、<code>k8s.pod.name</code></td>
+</tr>
+</tbody>
+</table>
+<p><a href="../sprint2-day2-bpftrace-kubernetes/">Day 2</a> 是自己動手做第二類:<code>cgroup</code> builtin 拿到 inode、<code>find -inum</code> 找出路徑、從路徑裡挖出 container id 與 pod uid、<code>crictl inspect</code> 換成 pod 名字。Falco 把這整條鏈包成了 <code>container@0.7.1</code> 這個 plugin,結果就是 <code>output</code> 裡的一個 <code>%container.id</code>。</p>
+<p>這也預告了它的極限:<strong>第二類欄位仍然是靠 cgroup 查出來的,所以 <a href="../sprint2-day2-bpftrace-kubernetes/#mine-2">Day 2 的地雷 2</a>(<code>nsenter</code> 換的是命名空間,不是 cgroup)在 Falco 身上同樣成立。</strong> 步驟 5 會驗這件事。</p>
+<p>而 <code>proc.tty != 0</code> 這一行預告了另一件事:它讓「有沒有終端機」變成報不報警的分水嶺,而終端機是<strong>呼叫端</strong>決定的。這變成<a href="#mine-3">地雷 3</a>。</p>
+<h2 id="4">步驟 4: 觸發第一條規則<a class="headerlink" href="#4" title="Permanent link">&para;</a></h2>
+<p>部署一顆被觀察的 pod。這裡沿用 <a href="../sprint2-day2-bpftrace-kubernetes/">Day 2</a> 的 <code>baseline-nginx</code>,兩章比的才是同一個東西:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>kubectl<span class="w"> </span>create<span class="w"> </span>namespace<span class="w"> </span>ebpf-lab
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>baseline-nginx.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="s">kind: Pod</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="s">metadata:</span>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="s">  name: baseline-nginx</span>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="s">  namespace: ebpf-lab</span>
+</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="s">spec:</span>
+</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="s">  containers:</span>
+</span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="s">    - name: nginx</span>
+</span><span id="__span-11-11"><a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="s">      image: mcr.microsoft.com/mirror/docker/library/nginx:1.25</span>
+</span><span id="__span-11-12"><a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a><span class="s">      resources:</span>
+</span><span id="__span-11-13"><a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a><span class="s">        requests:</span>
+</span><span id="__span-11-14"><a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a><span class="s">          cpu: 20m</span>
+</span><span id="__span-11-15"><a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a><span class="s">          memory: 32Mi</span>
+</span><span id="__span-11-16"><a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a><span class="s">EOF</span>
+</span><span id="__span-11-17"><a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>baseline-nginx.yaml
+</span></code></pre></div>
+<p>接著開一個帶終端機的 shell,再讀一次 <code>/etc/shadow</code>:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="gp">$ </span>script<span class="w"> </span>-q<span class="w"> </span>/dev/null<span class="w"> </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-it<span class="w"> </span>baseline-nginx<span class="w"> </span>--<span class="w"> </span>bash<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;echo &quot;tty=$(tty)&quot;; id&#39;</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="go">tty=/dev/pts/0</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="go">uid=0(root) gid=0(root) groups=0(root)</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>baseline-nginx<span class="w"> </span>--<span class="w"> </span>bash<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;cat /etc/shadow &gt; /dev/null&#39;</span>
+</span></code></pre></div>
+<p><code>script -q /dev/null</code> 那一層不是裝飾,拿掉就不會報——原因見<a href="#mine-3">地雷 3</a>。</p>
+<p>Falco 的輸出(JSON 版):</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="p">{</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span><span class="nt">&quot;time&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-08-06T10:25:54.090901419Z&quot;</span><span class="p">,</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">  </span><span class="nt">&quot;rule&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Terminal shell in container&quot;</span><span class="p">,</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">  </span><span class="nt">&quot;priority&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Notice&quot;</span><span class="p">,</span>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">  </span><span class="nt">&quot;source&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;syscall&quot;</span><span class="p">,</span>
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="w">  </span><span class="nt">&quot;hostname&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;node-a&gt;&quot;</span><span class="p">,</span>
+</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="w">  </span><span class="nt">&quot;tags&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;T1059&quot;</span><span class="p">,</span><span class="s2">&quot;container&quot;</span><span class="p">,</span><span class="s2">&quot;maturity_stable&quot;</span><span class="p">,</span><span class="s2">&quot;mitre_execution&quot;</span><span class="p">,</span><span class="s2">&quot;shell&quot;</span><span class="p">],</span>
+</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="w">  </span><span class="nt">&quot;output_fields&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="w">    </span><span class="nt">&quot;evt.type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;execve&quot;</span><span class="p">,</span>
+</span><span id="__span-13-10"><a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="w">    </span><span class="nt">&quot;proc.name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;bash&quot;</span><span class="p">,</span>
+</span><span id="__span-13-11"><a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="w">    </span><span class="nt">&quot;proc.exepath&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/usr/bin/bash&quot;</span><span class="p">,</span>
+</span><span id="__span-13-12"><a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="w">    </span><span class="nt">&quot;proc.pname&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;containerd-shim&quot;</span><span class="p">,</span>
+</span><span id="__span-13-13"><a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="w">    </span><span class="nt">&quot;proc.cmdline&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;bash -c echo \&quot;tty=$(tty)\&quot;; id&quot;</span><span class="p">,</span>
+</span><span id="__span-13-14"><a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="w">    </span><span class="nt">&quot;proc.tty&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">34816</span><span class="p">,</span>
+</span><span id="__span-13-15"><a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="w">    </span><span class="nt">&quot;user.name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;root&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;user.uid&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;user.loginuid&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">-1</span><span class="p">,</span>
+</span><span id="__span-13-16"><a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a><span class="w">    </span><span class="nt">&quot;container.id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0cee1cad9371&quot;</span><span class="p">,</span>
+</span><span id="__span-13-17"><a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a><span class="w">    </span><span class="nt">&quot;container.name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;nginx&quot;</span><span class="p">,</span>
+</span><span id="__span-13-18"><a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a><span class="w">    </span><span class="nt">&quot;container.image.repository&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;mcr.microsoft.com/mirror/docker/library/nginx&quot;</span><span class="p">,</span>
+</span><span id="__span-13-19"><a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a><span class="w">    </span><span class="nt">&quot;container.image.tag&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1.25&quot;</span><span class="p">,</span>
+</span><span id="__span-13-20"><a id="__codelineno-13-20" name="__codelineno-13-20" href="#__codelineno-13-20"></a><span class="w">    </span><span class="nt">&quot;k8s.pod.name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;baseline-nginx&quot;</span><span class="p">,</span>
+</span><span id="__span-13-21"><a id="__codelineno-13-21" name="__codelineno-13-21" href="#__codelineno-13-21"></a><span class="w">    </span><span class="nt">&quot;k8s.ns.name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ebpf-lab&quot;</span>
+</span><span id="__span-13-22"><a id="__codelineno-13-22" name="__codelineno-13-22" href="#__codelineno-13-22"></a><span class="w">  </span><span class="p">}</span>
+</span><span id="__span-13-23"><a id="__codelineno-13-23" name="__codelineno-13-23" href="#__codelineno-13-23"></a><span class="p">}</span>
+</span></code></pre></div>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="p">{</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">  </span><span class="nt">&quot;time&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-08-06T10:25:54.539171208Z&quot;</span><span class="p">,</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">  </span><span class="nt">&quot;rule&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Read sensitive file untrusted&quot;</span><span class="p">,</span>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="w">  </span><span class="nt">&quot;priority&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Warning&quot;</span><span class="p">,</span>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="w">  </span><span class="nt">&quot;tags&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;T1555&quot;</span><span class="p">,</span><span class="s2">&quot;container&quot;</span><span class="p">,</span><span class="s2">&quot;filesystem&quot;</span><span class="p">,</span><span class="s2">&quot;host&quot;</span><span class="p">,</span><span class="s2">&quot;maturity_stable&quot;</span><span class="p">,</span><span class="s2">&quot;mitre_credential_access&quot;</span><span class="p">],</span>
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="w">  </span><span class="nt">&quot;output_fields&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="w">    </span><span class="nt">&quot;evt.type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;openat&quot;</span><span class="p">,</span>
+</span><span id="__span-14-8"><a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="w">    </span><span class="nt">&quot;fd.name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/etc/shadow&quot;</span><span class="p">,</span>
+</span><span id="__span-14-9"><a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="w">    </span><span class="nt">&quot;proc.name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;cat&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;proc.pname&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;bash&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;proc.cmdline&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;cat /etc/shadow&quot;</span><span class="p">,</span>
+</span><span id="__span-14-10"><a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="w">    </span><span class="nt">&quot;proc.aname[2]&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;containerd-shim&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;proc.aname[3]&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;systemd&quot;</span><span class="p">,</span>
+</span><span id="__span-14-11"><a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a><span class="w">    </span><span class="nt">&quot;container.id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0cee1cad9371&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;k8s.pod.name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;baseline-nginx&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;k8s.ns.name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ebpf-lab&quot;</span>
+</span><span id="__span-14-12"><a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a><span class="w">  </span><span class="p">}</span>
+</span><span id="__span-14-13"><a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a><span class="p">}</span>
+</span></code></pre></div>
+<p>一個動作,兩條規則。每個欄位都對得回剛才做的事:</p>
+<table>
+<thead>
+<tr>
+<th>告警欄位</th>
+<th>值</th>
+<th>對應哪個動作</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>evt.type</code></td>
+<td><code>execve</code></td>
+<td><code>bash -c …</code> 這個執行動作本身</td>
+</tr>
+<tr>
+<td><code>proc.name</code> / <code>proc.exepath</code></td>
+<td><code>bash</code> / <code>/usr/bin/bash</code></td>
+<td>執行的是 bash,命中 <code>shell_binaries</code></td>
+</tr>
+<tr>
+<td><code>proc.cmdline</code></td>
+<td><code>bash -c echo "tty=$(tty)"; id</code></td>
+<td><strong>逐字就是打進去的那一串</strong></td>
+</tr>
+<tr>
+<td><code>proc.tty</code></td>
+<td><code>34816</code></td>
+<td><code>script(1)</code> 配出來的 pty。34816 = 136×256+0,major 136、minor 0,對上容器裡 <code>tty</code> 回報的 <code>/dev/pts/0</code></td>
+</tr>
+<tr>
+<td><code>proc.pname</code></td>
+<td><code>containerd-shim</code></td>
+<td><code>kubectl exec</code> 的行程是 containerd 生的,命中 <code>container_entrypoint</code></td>
+</tr>
+<tr>
+<td><code>user.loginuid</code></td>
+<td><code>-1</code></td>
+<td><strong>沒有互動式登入</strong>——這是 <code>kubectl exec</code> 與「有人 SSH 進節點」最直接的區分訊號</td>
+</tr>
+<tr>
+<td><code>fd.name</code></td>
+<td><code>/etc/shadow</code></td>
+<td>第二條規則抓到的那次 <code>openat</code></td>
+</tr>
+<tr>
+<td><code>proc.aname[2]</code> / <code>[3]</code></td>
+<td><code>containerd-shim</code> / <code>systemd</code></td>
+<td>祖先鏈,往上兩層與三層</td>
+</tr>
+</tbody>
+</table>
+<p><strong>認出 pod 的是這四個欄位</strong>:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>container.id   = 0cee1cad9371      ← container plugin 從行程的 cgroup 反查出來的
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>container.name = nginx             ← pod spec 裡的容器名
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>k8s.pod.name   = baseline-nginx    ← pod 名字
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>k8s.ns.name    = ebpf-lab          ← namespace
+</span></code></pre></div>
+<p>而 <code>hostname</code> 指出是哪顆節點上的 Falco 報的。<strong>pod 身分是 Falco 自己查的</strong>——從頭到尾沒有告訴過它任何 pod 的名字。Day 2 走五個步驟的那條鏈子,在這裡是一次 plugin 呼叫。</p>
+<p>順帶收一個 Day 2 的伏筆:<a href="../sprint2-day2-bpftrace-kubernetes/#mine-7">Day 2 的地雷 7</a> 發現 <code>kubectl exec</code> 起的 bash,<code>execve</code> 事件裡的 <code>comm</code> 是<strong>舊</strong>行程的名字 <code>runc:[2:INIT]</code>。Falco 用的是 <code>proc.name</code>(新行程的名字)與 <code>proc.pname</code>(父行程),<strong>避開了那顆地雷</strong>。規則語言把「哪個欄位在什麼時候可信」這件事替你決定好了,這是規則引擎相對於手寫探針的價值之一。</p>
+<h2 id="5-day-2">步驟 5: 跟 Day 2 的手工基線正面對照<a class="headerlink" href="#5-day-2" title="Permanent link">&para;</a></h2>
+<p>同樣四個偏離動作,Day 2 用 bpftrace 加手刻基線比對,今天用 Falco 出廠規則。</p>
+<table>
+<thead>
+<tr>
+<th>偏離動作</th>
+<th>Day 2 手工基線</th>
+<th>Falco 0.44.1 出廠規則</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>容器內開互動式 shell</td>
+<td>抓到</td>
+<td>抓到,具名 <code>Terminal shell in container</code></td>
+</tr>
+<tr>
+<td>讀 <code>/etc/shadow</code></td>
+<td>抓到</td>
+<td>抓到,具名 <code>Read sensitive file untrusted</code></td>
+</tr>
+<tr>
+<td>對 8.8.8.8:53 建立連線</td>
+<td>抓到</td>
+<td><strong>沒報</strong></td>
+</tr>
+<tr>
+<td>經 <code>nsenter</code> 進容器做同樣的事</td>
+<td><strong>一筆都沒有</strong></td>
+<td>有報,但指向錯的 pod</td>
+</tr>
+</tbody>
+</table>
+<p>前兩列 Falco 完勝,而且勝在<strong>說得出名字</strong>。Day 2 的產出是「多了一個沒見過的檔案 <code>/etc/shadow</code>」,需要人去判斷這是不是壞事;Falco 的產出是「<code>Read sensitive file untrusted</code>,MITRE T1555,credential access」——分類、嚴重度、對應的攻擊技法都是現成的。</p>
+<p>後兩列才是今天的重點,分別是<a href="#mine-4">地雷 4</a> 與<a href="#mine-5">地雷 5</a>。</p>
+<h3 id="_5">兩種偵測哲學<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h3>
+<p>第三列那個「沒報」不是漏抓,是設計。回頭看 25 條規則,跟網路有關的只有三條:連 API server、netcat 反向 shell、非標準埠的 SSH——<strong>三條都在描述具體的已知手法,沒有一條在描述「這個容器以前沒連過這裡」</strong>。</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>抓什麼</th>
+<th>誤報</th>
+<th>漏抓</th>
+<th>要維護什麼</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>基線比對</strong>(Day 2)</td>
+<td>沒見過的行為</td>
+<td>高</td>
+<td>低,但只在抓過基線的那顆 pod 上</td>
+<td>每個工作負載一份基線,改版就要重抓</td>
+</tr>
+<tr>
+<td><strong>規則引擎</strong>(Day 3)</td>
+<td>已知壞的行為</td>
+<td>低</td>
+<td><strong>高——沒寫規則的事一律看不見</strong></td>
+<td>規則庫,但可以全叢集共用</td>
+</tr>
+</tbody>
+</table>
+<p>Day 2 列的七件缺失裡,「基線沒有『允許但罕見』的概念」這一件 <strong>Falco 沒有關掉,而且方向相反</strong>:Falco 連「罕見」這個概念都沒有,它只有「這件事在不在清單上」。<strong>兩種方法互補而不互相取代</strong>,這是今天最該帶走的一句話,也是 Day 4 要動手寫規則的理由。</p>
+<h2 id="6">步驟 6: 噪音與資源的真實數字<a class="headerlink" href="#6" title="Permanent link">&para;</a></h2>
+<h3 id="_6">閒置告警率<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
+<p>量測窗口 <strong>8 分 28 秒</strong>,三顆節點(其中一顆跑著 Sprint 1 完整的 KAI、HAMi、Prometheus 堆疊),期間沒有任何人為動作:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="gp">$ </span>./falco-alerts.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>wc<span class="w"> </span>-l
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="go">0</span>
+</span></code></pre></div>
+<p><strong>0 筆。</strong> 整場實驗(約 15 分鐘、三顆節點)的全部告警是:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="gp">$ </span>./falco-alerts.sh<span class="w"> </span>--rules
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="go">   4 Terminal shell in container</span>
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="go">   2 Read sensitive file untrusted</span>
+</span></code></pre></div>
+<p>6 筆,每一筆都對得上一個明確的人為動作,沒有一筆是背景噪音。</p>
+<p>抽告警的腳本很短,後面幾章都會用到:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>falco-alerts.sh<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="s">#!/usr/bin/env bash</span>
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="s"># Pull JSON alerts out of every Falco pod&#39;s stdout.</span>
+</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="s">#   --rules   histogram by rule name instead of raw lines</span>
+</span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="s">#   --since   passed straight to kubectl logs (default 1h)</span>
+</span><span id="__span-18-6"><a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="s">set -euo pipefail</span>
+</span><span id="__span-18-7"><a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="s">SINCE=1h; MODE=raw</span>
+</span><span id="__span-18-8"><a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="s">while [ $# -gt 0 ]; do</span>
+</span><span id="__span-18-9"><a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a><span class="s">  case &quot;$1&quot; in</span>
+</span><span id="__span-18-10"><a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a><span class="s">    --rules) MODE=rules ;;</span>
+</span><span id="__span-18-11"><a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a><span class="s">    --since) SINCE=&quot;$2&quot;; shift ;;</span>
+</span><span id="__span-18-12"><a id="__codelineno-18-12" name="__codelineno-18-12" href="#__codelineno-18-12"></a><span class="s">  esac</span>
+</span><span id="__span-18-13"><a id="__codelineno-18-13" name="__codelineno-18-13" href="#__codelineno-18-13"></a><span class="s">  shift</span>
+</span><span id="__span-18-14"><a id="__codelineno-18-14" name="__codelineno-18-14" href="#__codelineno-18-14"></a><span class="s">done</span>
+</span><span id="__span-18-15"><a id="__codelineno-18-15" name="__codelineno-18-15" href="#__codelineno-18-15"></a><span class="s">LINES=$(kubectl -n falco logs -l app.kubernetes.io/name=falco -c falco \</span>
+</span><span id="__span-18-16"><a id="__codelineno-18-16" name="__codelineno-18-16" href="#__codelineno-18-16"></a><span class="s">          --since=&quot;$SINCE&quot; --prefix=false 2&gt;/dev/null | grep &#39;&quot;rule&quot;&#39; || true)</span>
+</span><span id="__span-18-17"><a id="__codelineno-18-17" name="__codelineno-18-17" href="#__codelineno-18-17"></a><span class="s">if [ &quot;$MODE&quot; = rules ]; then</span>
+</span><span id="__span-18-18"><a id="__codelineno-18-18" name="__codelineno-18-18" href="#__codelineno-18-18"></a><span class="s">  echo &quot;$LINES&quot; | sed -n &#39;s/.*&quot;rule&quot;:&quot;\([^&quot;]*\)&quot;.*/\1/p&#39; | sort | uniq -c | sort -rn</span>
+</span><span id="__span-18-19"><a id="__codelineno-18-19" name="__codelineno-18-19" href="#__codelineno-18-19"></a><span class="s">else</span>
+</span><span id="__span-18-20"><a id="__codelineno-18-20" name="__codelineno-18-20" href="#__codelineno-18-20"></a><span class="s">  echo &quot;$LINES&quot;</span>
+</span><span id="__span-18-21"><a id="__codelineno-18-21" name="__codelineno-18-21" href="#__codelineno-18-21"></a><span class="s">fi</span>
+</span><span id="__span-18-22"><a id="__codelineno-18-22" name="__codelineno-18-22" href="#__codelineno-18-22"></a><span class="s">EOF</span>
+</span><span id="__span-18-23"><a id="__codelineno-18-23" name="__codelineno-18-23" href="#__codelineno-18-23"></a>chmod<span class="w"> </span>+x<span class="w"> </span>falco-alerts.sh
+</span></code></pre></div>
+<p>這個數字的適用範圍要老實講:<strong>15 分鐘、三顆節點、工作負載很單純的實驗室叢集,不能外推到生產環境。</strong> 真實叢集會有 CI 跑腳本、備份工具讀檔案、健康檢查開 shell。<code>Run shell untrusted</code> 的 <code>desc</code> 自己就寫了 "This rule can be noisier… Allocate time to tune this rule",光是它的排除清單就佔了規則檔三十幾行。</p>
+<p>但這個數字仍然推翻了一個具體的誤解:<strong>「Falco 一裝下去就淹沒在告警裡」對出廠的 25 條 stable 規則不成立</strong>,那個名聲屬於另外幾套要自己加裝的規則集。</p>
+<h3 id="_7">資源:實測與保留<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h3>
+<p><code>kubectl top</code> 每兩分鐘取樣一次,跨越整個閒置窗口:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>CPU</th>
+<th>記憶體</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>chart <code>requests</code></td>
+<td>100m</td>
+<td>512Mi</td>
+</tr>
+<tr>
+<td>chart <code>limits</code></td>
+<td>1000m</td>
+<td>1Gi</td>
+</tr>
+<tr>
+<td><strong>實測(閒置)</strong></td>
+<td><strong>14–24m</strong></td>
+<td><strong>84–90Mi</strong>(含 sidecar 約 110Mi)</td>
+</tr>
+<tr>
+<td>超額倍數</td>
+<td>約 4–7 倍</td>
+<td>約 5–6 倍</td>
+</tr>
+</tbody>
+</table>
+<p>兩個方向的觀察:</p>
+<ul>
+<li><strong>CPU 隨節點忙碌程度走。</strong> 跑著 Sprint 1 整套東西的那顆節點,Falco 用量穩定比閒置節點高 50% 到 100%。這很合理——Falco 的工作量正比於節點上發生的 syscall 數量,跟有沒有告警無關。<strong>沒有告警不等於沒有成本</strong>,每一個 <code>execve</code> 都要進使用者空間比對 25 條規則。</li>
+<li><strong>記憶體幾乎不動。</strong> 全程平坦,因為主要是 ring buffer(8 MB)與行程表這些預先配置好的結構。</li>
+</ul>
+<p>換算到規模:一座 100 節點的叢集,Falco 預設會<strong>保留</strong> 10 vCPU 與 51.2 GB 記憶體,實際用掉大約 2 vCPU 與 11 GB。這就是「裝一下 Falco」的真實帳單,而它跟 Day 2 那種「要用的時候才進去跑 bpftrace」的臨場做法是完全不同量級的承諾。反過來說,Day 2 那套的成本是<strong>人的注意力</strong>——必須剛好在看——那個成本才是真正貴的。</p>
+<h2 id="_8">誠實的差距<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>閒置零告警不能外推。</strong> 那是 15 分鐘、三顆節點、工作負載很單純的實驗室數字。真實叢集的 CI、備份、健康檢查都會踩到 <code>Read sensitive file untrusted</code> 與 <code>Run shell untrusted</code>。</li>
+<li><strong>k8saudit 不在本課範圍。</strong> Falco 除了 syscall 之外還能吃 Kubernetes 稽核日誌,但受管的 AKS 沒有本機稽核日誌,官方路徑要接 Event Hub 加 Storage Account,是實打實的常駐費用。本課只教 syscall 規則。</li>
+<li><strong>提高 priority 的效果沒有實測。</strong> <a href="#mine-1">地雷 1</a> 的結論是「priority 不會變出 CPU」,那是從節點的可配置資源推出來的;把 Falco 設成 <code>system-node-critical</code> 之後誰被踢掉,本課沒有實際做過——因為代價是 Sprint 1 的元件。</li>
+<li><strong>只驗了一種 driver。</strong> <code>kmod</code> 與 legacy <code>ebpf</code> 在受管節點上走不通的說法來自官方文件與節點映像的限制,本課沒有實際去撞。</li>
+</ul>
+<h2 id="checkpoint">驗收 checkpoint<a class="headerlink" href="#checkpoint" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>驗證</th>
+<th>判準</th>
+<th>本課環境的結果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>driver 真的是 modern eBPF</td>
+<td>Falco 啟動日誌出現 <code>Opening 'syscall' source with modern BPF probe.</code>,且容器內 <code>falco.yaml</code> 的 <code>engine.kind</code> 是 <code>modern_ebpf</code></td>
+<td>兩項都成立</td>
+</tr>
+<tr>
+<td>DaemonSet 覆蓋到所有目標節點</td>
+<td><code>kubectl get ds falco</code> 的 DESIRED 等於節點數,不是 1</td>
+<td>DESIRED 3 / READY 3</td>
+</tr>
+<tr>
+<td>規則載入無誤</td>
+<td>啟動日誌每一個規則檔後面都跟著 <code>schema validation: ok</code></td>
+<td><code>falco_rules.yaml \| schema validation: ok</code></td>
+</tr>
+<tr>
+<td><strong>規則命中並指名 pod</strong></td>
+<td>告警的 <code>rule</code> 是具名規則,且 <code>k8s.pod.name</code> 等於被操作的那顆 pod</td>
+<td><code>Terminal shell in container</code> + <code>Read sensitive file untrusted</code>,兩筆都是 <code>baseline-nginx</code></td>
+</tr>
+<tr>
+<td>出廠規則集的實際規模</td>
+<td>數 <code>- rule:</code> 的出現次數</td>
+<td>25 條(87 macro / 49 list)</td>
+</tr>
+<tr>
+<td>閒置噪音</td>
+<td>無人操作的窗口內告警數</td>
+<td>8 分 28 秒 × 3 節點 = 0 筆</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_9">地雷記錄<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h2>
+<h3 id="mine-1">地雷 1:chart 不設 priorityClass,Falco 在滿載節點上是第一個被踢的<a class="headerlink" href="#mine-1" title="Permanent link">&para;</a></h3>
+<p>裝完 40 秒後,某顆節點上的 Falco pod 不見了:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>falco<span class="w"> </span>get<span class="w"> </span>events<span class="w"> </span>--sort-by<span class="o">=</span>.lastTimestamp
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="go">Normal    Preempted          pod/falco-d82mq   Preempted by pod c240c0d4-… on node &lt;node-system&gt;</span>
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="go">Normal    Killing            pod/falco-d82mq   Stopping container falco</span>
+</span><span id="__span-19-4"><a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="go">Warning   FailedScheduling   pod/falco-jl5kz   0/3 nodes are available: 1 Insufficient cpu,</span>
+</span><span id="__span-19-5"><a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="go">                                               2 node(s) didn&#39;t satisfy plugin(s) [NodeAffinity]</span>
+</span></code></pre></div>
+<p><strong>根因</strong>是兩件事疊起來。第一,那顆節點的可配置 CPU 已經被吃掉 99%:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>describe<span class="w"> </span>node<span class="w"> </span>&lt;node-system&gt;
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="go">Allocatable:  cpu: 1900m</span>
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="go">Allocated resources:</span>
+</span><span id="__span-20-4"><a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="go">  cpu     1885m (99%)</span>
+</span></code></pre></div>
+<p>第二,<strong>誰該讓位是 priority 決定的</strong>,而 Falco chart 預設不設 <code>priorityClassName</code>:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-A<span class="w"> </span>--field-selector<span class="w"> </span>spec.nodeName<span class="o">=</span>&lt;node-system&gt;<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="w">    </span>-o<span class="w"> </span><span class="s1">&#39;custom-columns=NAME:.metadata.name,PRIO:.spec.priorityClassName,PVAL:.spec.priority&#39;</span>
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="go">NAME                        PRIO                   PVAL</span>
+</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="go">falco-jl5kz                 &lt;none&gt;                 0            ← Falco</span>
+</span><span id="__span-21-5"><a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="go">coredns-648978f94d-5nzrt    system-node-critical   2000001000</span>
+</span><span id="__span-21-6"><a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="go">csi-azuredisk-node-hvn8c    system-node-critical   2000001000</span>
+</span><span id="__span-21-7"><a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="go">…</span>
+</span></code></pre></div>
+<p>priority 0 比每一個系統元件都低,在滿載的節點上它是搶佔演算法第一個挑中的犧牲者。</p>
+<p><strong>這次的破洞是 55 秒</strong>(搶佔它的那顆 pod 跑完就走)。但要看清楚這個失敗的形狀:<strong>破洞剛好開在整座叢集最忙、最該被監控的那顆節點上</strong>,而 <code>kubectl get ds falco</code> 在事發當下顯示 <code>DESIRED 3 CURRENT 3 READY 3</code>——DaemonSet 的健康指標不會告訴你有一顆節點斷了監控。</p>
+<p><strong>修法</strong>沒有漂亮的:提高 priority 不會變出 CPU,只是換一個受害者——在這座叢集上把 Falco 設成 <code>system-node-critical</code>,代價是踢掉 KAI 或 HAMi 的元件。誠實的結論是<strong>這顆節點的規格不夠跑 Falco</strong>。「每個節點多 100m CPU、512Mi 記憶體」聽起來很少,但在 2 vCPU 的節點上那是全部容量的 5%,而且是保留量不是用量(<a href="#mine-7">地雷 7</a>)。</p>
+<h3 id="mine-2">地雷 2:出廠只有 25 條規則,而規則版本是另一條版本線<a class="headerlink" href="#mine-2" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:寫好一個測試動作、確信 Falco 應該要報,結果什麼都沒有,於是開始懷疑安裝壞了。</p>
+<p><strong>根因</strong>:Falco 的規則走成熟度分級(stable、incubating、sandbox),<strong>出廠只裝 stable 這 25 條</strong>,其餘要另外 <code>falcoctl artifact install</code>。絕大多數「Falco 沒報」的情況,只是它沒有那條規則。</p>
+<p>再往下一層:規則的版本(<code>falco-rules:5</code>)跟 Falco 本體的版本(0.44.1)是<strong>兩條獨立的版本線</strong>,由 init 容器從 OCI registry 拉取。升級 Falco 不等於升級規則,反之亦然。</p>
+<p><strong>修法</strong>:先確認手上有哪些規則,再判斷是不是 Falco 的問題:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>falco<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>&lt;falco-pod&gt;<span class="w"> </span>-c<span class="w"> </span>falco<span class="w"> </span>--<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="w">    </span>grep<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;^- rule:&#39;</span><span class="w"> </span>/etc/falco/falco_rules.yaml
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="go">25</span>
+</span></code></pre></div>
+<h3 id="mine-3">地雷 3:<code>kubectl exec -t</code> 配不到終端機,規則就靜靜地不報<a class="headerlink" href="#mine-3" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:用看起來很合理的寫法觸發,零告警。</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-t<span class="w"> </span>baseline-nginx<span class="w"> </span>--<span class="w"> </span>bash<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;id; hostname&#39;</span>
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="go">uid=0(root) gid=0(root) groups=0(root)</span>
+</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="go">baseline-nginx</span>
+</span></code></pre></div>
+<p>指令成功、bash 確實在容器裡執行了,Falco 一筆都沒有。</p>
+<p><strong>根因</strong>不在 Falco。直接去問終端機:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-t<span class="w"> </span>baseline-nginx<span class="w"> </span>--<span class="w"> </span>bash<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;echo &quot;tty=$(tty)&quot;&#39;</span>
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="go">tty=not a tty                      ← -t 沒有生效</span>
+</span></code></pre></div>
+<p><code>kubectl</code> 的 TTY 是 <code>-i</code> 與 <code>-t</code> <strong>一起</strong>才會協商成功的:<code>-t</code> 要求配置終端機,但 kubectl 需要 client 端的 stdin 本身是終端機才會把這個要求送出去。腳本、CI、自動化工具的 stdin 都不是終端機,於是 <code>-t</code> 被靜靜地降級。<code>proc.tty</code> 保持 0,規則 <code>condition</code> 的第四行不成立,不報——<strong>而且沒有任何一行日誌說明發生了這件事</strong>。</p>
+<p><strong>修法</strong>:在本機先包一層 pty,<code>-it</code> 才有東西可協商。</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="gp">$ </span>script<span class="w"> </span>-q<span class="w"> </span>/dev/null<span class="w"> </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-it<span class="w"> </span>baseline-nginx<span class="w"> </span>--<span class="w"> </span>bash<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;echo &quot;tty=$(tty)&quot;&#39;</span>
+</span><span id="__span-25-2"><a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="go">tty=/dev/pts/0</span>
+</span></code></pre></div>
+<p><strong>教訓</strong>:這顆地雷的殺傷力在方向——它讓「規則沒報」看起來像 Falco 的問題,其實是觸發方式的問題。照文件寫自動化測試來驗證 Falco 裝好沒的人都會踩到,然後得出「Falco 不可靠」的結論,而 Falco 從頭到尾都是對的。反過來也要記住:<strong>真人在終端機打 <code>kubectl exec -it</code> 一定會被抓,腳本裡的 <code>exec</code> 不會。</strong></p>
+<h3 id="mine-4">地雷 4:出廠規則沒有任何一條在管「新的對外連線」<a class="headerlink" href="#mine-4" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:從容器連一個沒連過的位址,連線成功,Falco 零告警。</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>baseline-nginx<span class="w"> </span>--<span class="w"> </span>bash<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;exec 3&lt;&gt;/dev/tcp/8.8.8.8/53 &amp;&amp; echo connect-ok&#39;</span>
+</span><span id="__span-26-2"><a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="go">connect-ok</span>
+</span><span id="__span-26-3"><a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a>
+</span><span id="__span-26-4"><a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a><span class="gp">$ </span>./falco-alerts.sh<span class="w"> </span>--since<span class="w"> </span>20s<span class="w"> </span>--rules
+</span><span id="__span-26-5"><a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a><span class="go">（空）</span>
+</span></code></pre></div>
+<p><strong>根因</strong>:這不是漏抓,是規則集的取捨。25 條裡跟網路有關的三條(<code>Contact K8S API Server From Container</code>、<code>Netcat Remote Code Execution in Container</code>、<code>Disallowed SSH Connection Non Standard Port</code>)<strong>全都在描述具體的已知手法</strong>,沒有一條在描述「這個容器以前沒連過這裡」。而 Day 2 的手工基線抓得到,因為基線的本質就是「沒見過」。</p>
+<p><strong>修法</strong>:規則引擎只看得見寫進規則的事,所以缺的規則要自己寫——<a href="../sprint2-day4-falco-custom-rules/">Day 4</a> 補的就是這個洞。</p>
+<h3 id="mine-5">地雷 5:<code>nsenter</code> 進容器,Falco 看得見但認錯 pod<a class="headerlink" href="#mine-5" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:從一個特權 pod 用 <code>nsenter</code> 進到目標容器裡讀敏感檔,Falco 有報,但告警指向的是<strong>呼叫端</strong>。</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="gp">$ </span>script<span class="w"> </span>-q<span class="w"> </span>/dev/null<span class="w"> </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-it<span class="w"> </span>&lt;privileged-pod&gt;<span class="w"> </span>--<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-27-2"><a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="w">      </span>nsenter<span class="w"> </span>-t<span class="w"> </span>&lt;nginx-pid&gt;<span class="w"> </span>-m<span class="w"> </span>-u<span class="w"> </span>-i<span class="w"> </span>-n<span class="w"> </span>-p<span class="w"> </span>/bin/bash<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;hostname; cat /etc/shadow &gt; /dev/null&#39;</span>
+</span><span id="__span-27-3"><a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="go">baseline-nginx           ← hostname 回報的是 nginx 容器</span>
+</span></code></pre></div>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-28-1"><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>Warning  Read sensitive file untrusted
+</span><span id="__span-28-2"><a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a>    file=/etc/shadow  proc=cat  pname=bash
+</span><span id="__span-28-3"><a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a>    k8s.pod.name  = &lt;privileged-pod&gt;     ← 呼叫端的 pod
+</span><span id="__span-28-4"><a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a>    container.name = probe               ← 呼叫端的容器
+</span></code></pre></div>
+<p><strong>兩件事同時為真。</strong> 第一,<strong>Falco 看見了</strong>——<a href="../sprint2-day2-bpftrace-kubernetes/#mine-2">Day 2 那次是徹底的零筆</a>,Falco 至少報了一條。來源是架構差異:bpftrace 那套把過濾器掛在 pod 的 cgroup 上(在核心裡就過濾掉,所以省),Falco 收全節點的事件再到使用者空間比對(所以貴)。<strong>只要事件不需要事先指定範圍,就沒有「範圍外」可以躲。</strong></p>
+<p>第二,<strong>但它認錯了 pod</strong>。根因就是<a href="#step-3">步驟 3</a> 埋的伏筆:<code>container.*</code> 與 <code>k8s.*</code> 不是核心事件帶上來的,是 container plugin 用行程的 cgroup 反查的,而 <code>nsenter</code> 換的是命名空間、不換 cgroup。行程的 cgroup 仍屬於特權 pod,所以查出來就是特權 pod。</p>
+<p><strong>後果很具體</strong>:告警指向的是攻擊的發起端,不是受害端。調查員照著 <code>k8s.pod.name</code> 去看,會看到一個什麼都沒有的容器,而真正被翻的那顆 pod 在告警裡完全沒出現。</p>
+<p>好消息是<strong>訊號沒有消失,只是被貼錯標籤</strong>——<code>proc.name</code>、<code>pname</code>、<code>fd.name</code> 全都在,而且「一個特權容器裡冒出 <code>nsenter</code>」本身就是極強的指標。出廠 25 條沒有任何一條在看 <code>nsenter</code>。</p>
+<h3 id="mine-6">地雷 6:<code>container_entrypoint</code> 讓 shell 規則只抓得到第一層<a class="headerlink" href="#mine-6" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:同一次 <code>kubectl exec</code> 裡發生兩次 <code>bash</code> 的 <code>execve</code>,Falco 只報一筆。</p>
+<p><strong>根因</strong>:<code>Terminal shell in container</code> 的 <code>condition</code> 第五行是 <code>container_entrypoint</code>,展開後要求 <code>proc.pname</code> 是 runc、containerd-shim、conmon 這類容器執行期行程。字面意思是:<strong>只有容器執行期直接生出來的 shell 才算數。</strong></p>
+<p>驗證這件事有一個陷阱要先繞開。用巢狀 <code>bash -c</code> 測會得到「兩筆都報」的假答案:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-29-1"><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="gp">$ </span>script<span class="w"> </span>-q<span class="w"> </span>/dev/null<span class="w"> </span>kubectl<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-it<span class="w"> </span>baseline-nginx<span class="w"> </span>--<span class="w"> </span>bash<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;bash -c &quot;echo inner-shell-ran&quot;&#39;</span>
+</span><span id="__span-29-2"><a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="go">Terminal shell in container   proc=bash pname=runc              cmd=bash -c bash -c &quot;echo inner-shell-ran&quot;</span>
+</span><span id="__span-29-3"><a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="go">Terminal shell in container   proc=bash pname=containerd-shim   cmd=bash -c echo inner-shell-ran</span>
+</span></code></pre></div>
+<p><strong>這個實驗是無效的</strong>:<code>bash -c '&lt;單一指令&gt;'</code> 會被 bash 的 implicit exec 最佳化掉,外層 bash 直接 <code>execve</code> 成內層 bash 而不是 fork,所以內層的父行程仍然是容器執行期行程。要真的 fork,加一個 <code>&amp;</code>:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-30-1"><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="gp">$ </span>script<span class="w"> </span>-q<span class="w"> </span>/dev/null<span class="w"> </span>kubectl<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-it<span class="w"> </span>baseline-nginx<span class="w"> </span>--<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-30-2"><a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a><span class="w">      </span>bash<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;bash -c &quot;echo forked-shell-ran&quot; &amp; wait; echo done&#39;</span>
+</span><span id="__span-30-3"><a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="go">forked-shell-ran</span>
+</span><span id="__span-30-4"><a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a><span class="go">done</span>
+</span><span id="__span-30-5"><a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a>
+</span><span id="__span-30-6"><a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a><span class="gp">$ </span>./falco-alerts.sh<span class="w"> </span>--since<span class="w"> </span>25s
+</span><span id="__span-30-7"><a id="__codelineno-30-7" name="__codelineno-30-7" href="#__codelineno-30-7"></a><span class="go">Terminal shell in container   proc=bash pname=runc   cmd=bash -c bash -c &quot;echo forked-shell-ran&quot; &amp; wait; echo done</span>
+</span><span id="__span-30-8"><a id="__codelineno-30-8" name="__codelineno-30-8" href="#__codelineno-30-8"></a><span class="go">--- 1 alert(s); 2 bash execve happened ---</span>
+</span></code></pre></div>
+<p><strong>兩次 <code>execve</code>,一筆告警。</strong> 被 fork 出來的那個 shell,父行程是 bash(不在 <code>container_entrypoint</code> 的名單裡),規則不成立。</p>
+<p>另一條 shell 規則 <code>Run shell untrusted</code> 補不上這個洞,它自己也把這種情況排除掉了:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-31-1"><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="w">  </span><span class="nt">condition</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">&gt;</span>
+</span><span id="__span-31-2"><a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="w">    </span><span class="no">spawned_process and shell_procs and proc.pname exists</span>
+</span><span id="__span-31-3"><a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a><span class="w">    </span><span class="no">and protected_shell_spawner                        ← 父行程要在特定應用程式清單裡</span>
+</span><span id="__span-31-4"><a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a><span class="w">    </span><span class="no">and not proc.pname in (shell_binaries, …)          ← shell 生 shell 明確排除</span>
+</span></code></pre></div>
+<p><strong>後果</strong>:<code>kubectl exec</code> 進去會被抓,但那是攻擊者最不需要用的路徑。真正的入侵路徑——web shell、被入侵的 entrypoint、任何已經取得容器內執行權的東西——再開 shell 時,這條規則一筆都不會報。前面 <code>nsenter</code> 那次沒觸發這條規則也是同一個原因,它的 <code>proc.pname</code> 是 <code>nsenter</code>。</p>
+<p><strong>這不是 bug</strong>。<code>desc</code> 裡 Falco 自己就寫了 "Parent process may have legitimately already exited and be null (read container_entrypoint macro)",而且建議這條規則與其當作獨立規則,不如當作稽核用的通用規則,配合同容器、同 tty 的其他告警一起看。這是為了壓低誤報而刻意收窄的條件——<strong>規則引擎的偵測範圍就是 <code>condition</code> 那幾行字,不多也不少。</strong></p>
+<h3 id="mine-7">地雷 7:那個 request 不是用量,是保留量<a class="headerlink" href="#mine-7" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:節點看起來還有餘力(實際 CPU 用量不高),Falco 卻排不進去。</p>
+<p><strong>根因</strong>:<strong>Kubernetes 排程看的是 <code>requests</code>,不是實際用量。</strong> Falco 實際只用 14m,但它向排程器要 100m;節點只剩十幾 m 可配置,於是排不進去、被搶佔。這就是<a href="#mine-1">地雷 1</a> 的直接成因。</p>
+<p><strong>修法與代價</strong>:把 request 調成貼近實測(例如 50m)在這座叢集上就排得進去,但代價是事件洪峰時 Falco 沒有 CPU 餘裕,可能開始掉事件——<code>buf_size_preset: 4</code> 的 8 MB ring buffer 滿了就丟。這是一個要按叢集情況判斷的取捨,不是有標準答案的設定。</p>
+<h2 id="_10">帶得走的東西<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>規則引擎的偵測範圍,就是 <code>condition</code> 那幾行字,不多也不少。</strong> 讀不懂規則語言的人,不知道自己買到的保障有多寬——<code>Terminal shell in container</code> 看起來在管「容器裡有人開 shell」,實際上只管「容器執行期直接生的、帶終端機的第一層 shell」,而那個限制就寫在條件的第四、五行。</li>
+<li><strong>基線抓「沒見過」,規則抓「已知壞」,兩者互補而不互相取代。</strong> 基線誤報高、要逐個工作負載維護,但抓得到你沒想到的事;規則誤報低、可全叢集共用,但沒寫規則的事一律看不見。真實的防守兩邊都要。</li>
+<li><strong><code>container.*</code> 與 <code>k8s.*</code> 是查出來的,不是核心送上來的。</strong> 這一個事實同時解釋了 Falco 的方便(pod 身分變成一個欄位)與它的極限(<code>nsenter</code> 會讓告警貼錯標籤)。凡是靠 cgroup 反查身分的工具,都繼承同一組限制。</li>
+<li><strong>「沒有告警」不等於「沒有成本」。</strong> Falco 的 CPU 用量正比於節點上發生的 syscall 數量,跟報不報警無關。閒置零告警的那 8 分鐘裡,它一樣在每一個 <code>execve</code> 上比對 25 條規則。</li>
+<li><strong>DaemonSet 全綠不代表全節點都在監控。</strong> 被搶佔的那 55 秒,<code>kubectl get ds</code> 從頭到尾顯示 READY 3/3。監控元件的健康,要用它自己的輸出來驗,不是用它的部署狀態。</li>
+</ul>
+<h2 id="_11">延伸閱讀<a class="headerlink" href="#_11" title="Permanent link">&para;</a></h2>
+<p>想往下深挖,從這幾份開始:</p>
+<ul>
+<li><strong><a href="https://falco.org/docs/concepts/rules/basic-elements/">Falco 規則的三個基本元件</a></strong> —— 官方對 rule、macro、list 的定義,以及 <code>condition</code>／<code>output</code>／<code>priority</code>／<code>tags</code> 各自的角色,對得上步驟 3 的解剖。</li>
+<li><strong><a href="https://falco.org/docs/concepts/event-sources/kernel/">核心事件來源與 driver 選擇</a></strong> —— 說明 modern eBPF probe 需要 BTF 與 ring buffer 支援,以及它靠 CO-RE 免去逐核心版本編譯,正是步驟 1 釘死 <code>modern_ebpf</code> 的依據。</li>
+<li><strong><a href="https://falco.org/docs/reference/rules/default-rules/">出廠規則清單與成熟度分級</a></strong> —— 官方明載「預設只載入 stable 規則」,incubating 與 sandbox 要另外安裝,這是地雷 2 的一手來源。</li>
+<li><strong><a href="https://falco.org/docs/reference/rules/supported-fields/">事件與條件可用的欄位總表</a></strong> —— 寫規則時查欄位名稱用;<code>evt.*</code>／<code>proc.*</code> 與 <code>container.*</code>／<code>k8s.*</code> 分屬不同來源,在這裡看得最清楚。</li>
+<li><strong><a href="https://github.com/falcosecurity/charts/tree/master/charts/falco">Falco Helm chart 的參數表</a></strong> —— <code>driver.kind</code> 預設 <code>auto</code>、<code>customRules</code> 的用法都在這份 README 的參數表裡,Day 4 會直接用到。</li>
+</ul>
+<h2 id="_12">下一步<a class="headerlink" href="#_12" title="Permanent link">&para;</a></h2>
+<p>今天找到兩個具體的空白:出廠規則不管「沒連過的對外連線」(<a href="#mine-4">地雷 4</a>),也抓不到「容器裡已經在跑的東西再開 shell」(<a href="#mine-6">地雷 6</a>)。兩個都不是 bug,是規則寫死的取捨——而規則是可以自己寫的。<a href="../sprint2-day4-falco-custom-rules/">Day 4</a> 用今天學到的 <code>list</code>、<code>macro</code>、<code>rule</code> 三層結構,一條一條把這兩個洞補起來,然後面對寫規則真正困難的部分:誤報,以及調校誤報要付出的偵測力。</p>
+<hr />
+<div class="admonition quote">
+<p>Falco 標誌為 Falco 專案之官方資產(CNCF artwork),此處作社群教學用途。</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到頂端
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="頁腳" >
+        
+          
+          <a href="../sprint2-day2-bpftrace-kubernetes/" class="md-footer__link md-footer__link--prev" aria-label="上一頁: Day 2 · 把核心事件接回 Kubernetes">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                上一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 2 · 把核心事件接回 Kubernetes
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../sprint2-day4-falco-custom-rules/" class="md-footer__link md-footer__link--next" aria-label="下一頁: Day 4 · 自訂規則、誤報調校與告警路由">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                下一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 4 · 自訂規則、誤報調校與告警路由
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      KAI Scheduler、HAMi、Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,作社群教學用途
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.code.annotate", "content.code.select", "content.tabs.link", "search.suggest", "search.highlight", "search.share"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u8907\u88fd", "clipboard.copy": "\u8907\u88fd", "search.result.more.one": "\u6b64\u9801\u5c1a\u6709 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.more.other": "\u6b64\u9801\u5c1a\u6709 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.none": "\u6c92\u6709\u7b26\u5408\u7684\u9805\u76ee", "search.result.one": "\u627e\u5230 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.other": "\u627e\u5230 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.placeholder": "\u6253\u5b57\u9032\u884c\u641c\u5c0b", "search.result.term.missing": "\u7f3a\u5c11\u5b57\u8a5e", "select.version": "\u9078\u64c7\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

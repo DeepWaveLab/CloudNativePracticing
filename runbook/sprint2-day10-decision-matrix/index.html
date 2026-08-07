@@ -1,0 +1,2137 @@
+
+<!doctype html>
+<html lang="zh-TW" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="雲原生實作課程 —— GPU 排程 runbook、踩雷解法與反思">
+      
+      
+      
+        <link rel="canonical" href="https://deepwavelab.github.io/CloudNativePracticing/runbook/sprint2-day10-decision-matrix/">
+      
+      
+        <link rel="prev" href="../sprint2-day9-hubble/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Day 10 · 綜合:四套工具的分工 - Cloud Native Lab Course</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/terminal.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#day-10-sprint-2" class="md-skip">
+          跳轉到
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="頁首">
+    <a href="../.." title="Cloud Native Lab Course" class="md-header__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Cloud Native Lab Course
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Day 10 · 綜合:四套工具的分工
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換深色模式"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="切換深色模式" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換淺色模式"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="切換淺色模式" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜尋" placeholder="搜尋" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="搜尋">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="分享" aria-label="分享" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="清除" aria-label="清除" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜尋引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="標籤" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  首頁
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint1-day0-azure-aks-foundation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 1 · GPU 排程三部曲
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../sprint2-day0-ebpf-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 2 · eBPF 與執行期安全
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="導覽列" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Cloud Native Lab Course" class="md-nav__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Cloud Native Lab Course
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首頁
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    首頁
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day0-azure-aks-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 環境建置與成本紀律
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day1-kai-queue-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · KAI 安裝與 Queue 基礎
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day2-gang-scheduling-preemption/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Gang Scheduling 與搶占
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day3-hami-memory-isolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · HAMi 安裝與 VRAM 硬隔離
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day4-hami-kai-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · HAMi 進階與 KAI 整合
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day5-hami-webui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · HAMi-WebUI 觀測介面
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day6-dra-simulated-devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · DRA 概念與模擬裝置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day7-dra-aks-real-gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · DRA 真卡實測
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day8-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 綜合:三者分工決策表
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day0-ebpf-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · eBPF 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day1-bpftrace-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · bpftrace 三支經典工具
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day2-bpftrace-kubernetes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · 把核心事件接回 Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day3-falco-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Falco 安裝與出廠規則
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day4-falco-custom-rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · 自訂規則、誤報調校與告警路由
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day5-tetragon-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Tetragon 與 TracingPolicy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day6-tetragon-enforcement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · 從偵測到攔截
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day7-cilium-kubeproxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Cilium 與 kube-proxy replacement
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day8-cilium-network-policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · CiliumNetworkPolicy(L3/L4 → L7)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day9-hubble/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Hubble 可觀測性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 綜合:四套工具的分工
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 綜合:四套工具的分工
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        走過的路
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        開始與結束
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        四套工具的分工表
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="四套工具的分工表">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        位置與交付物
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        同樣四個偏離動作,誰看到什麼
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        成本
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        失效形狀——這一列比效能欄位重要
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        主題句:盲點就是執行點
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="主題句:盲點就是執行點">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷回顧:健康指標全綠而東西沒在運作
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的判斷
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        誠實的差距——這份清單是地圖,不是遺憾
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        三條可以自己走下去的路
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        結語
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        走過的路
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        開始與結束
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        四套工具的分工表
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="四套工具的分工表">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        位置與交付物
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        同樣四個偏離動作,誰看到什麼
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        成本
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        失效形狀——這一列比效能欄位重要
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        主題句:盲點就是執行點
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="主題句:盲點就是執行點">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷回顧:健康指標全綠而東西沒在運作
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的判斷
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        誠實的差距——這份清單是地圖,不是遺憾
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        三條可以自己走下去的路
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        結語
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="day-10-sprint-2">Day 10: Sprint 2 總結——一套工具的盲點,就是它的執行點<a class="headerlink" href="#day-10-sprint-2" title="Permanent link">&para;</a></h1>
+<p><img align="right" alt="eBPF" src="../../assets/logos/ebpf-logo.svg#only-light" width="110" />
+<img align="right" alt="eBPF" src="../../assets/logos/ebpf-logo-dark.svg#only-dark" width="110" /></p>
+<blockquote>
+<p>十天下來,同一批核心事件被四套工具用四種方式取用過。這一頁不動手,把散在十章裡的實測數字收攏成一張分工表——而收攏的過程會浮出一件各章各自看不到的事:<strong>每一套工具看不見的東西,跟它把程式掛在哪裡,是同一件事的兩面。</strong></p>
+</blockquote>
+<div class="admonition abstract">
+<p class="admonition-title">你在課程的哪裡</p>
+<ul>
+<li><strong>Day 0–9</strong>:eBPF 的地基、bpftrace 的臨場追蹤、Falco 的規則引擎、Tetragon 的核心層攔截、Cilium 的網路資料平面與 Hubble 的流量觀測。十個動手日、十章、76 顆地雷。</li>
+<li><strong>今天</strong>:不動手。把四套工具的位置、成本、失效形狀擺成一張表,每一格都要能追溯到某一天的某一個量測。</li>
+<li><strong>接下來</strong>:這一頁最後給三條可以自己走下去的路。</li>
+</ul>
+</div>
+<h2 id="_1">走過的路<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>flowchart TB
+    A["Day 0–2 · 臨場追蹤&lt;br/&gt;bpftrace:自己掛探針、自己算 pod 身分&lt;br/&gt;不用的時候成本是零"]
+    B["Day 3–4 · 規則引擎&lt;br/&gt;Falco:常駐比對、輸出具名告警&lt;br/&gt;沒寫規則的事一律看不見"]
+    C["Day 5–6 · 核心層攔截&lt;br/&gt;Tetragon:核心裡過濾,而且擋得住&lt;br/&gt;但守備範圍比觀察範圍小"]
+    D["Day 7–9 · 網路層&lt;br/&gt;Cilium + Hubble:換掉資料平面、寫政策、看流量&lt;br/&gt;看不見不經過 endpoint 的東西"]
+    A --&gt; B --&gt; C --&gt; D</code></pre>
+<table>
+<thead>
+<tr>
+<th>Day</th>
+<th>主題</th>
+<th>最重要的一件事</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="../sprint2-day0-ebpf-concepts/">0</a></td>
+<td>eBPF 是什麼</td>
+<td>verifier 保證程式會結束,<strong>不保證程式便宜</strong>——那支害機器慢 57% 的程式完全合法</td>
+</tr>
+<tr>
+<td><a href="../sprint2-day1-bpftrace-basics/">1</a></td>
+<td>bpftrace 三支經典工具</td>
+<td>三支工具加自寫的那支,<strong>沒有任何一個欄位說得出事件屬於哪顆 pod</strong></td>
+</tr>
+<tr>
+<td><a href="../sprint2-day2-bpftrace-kubernetes/">2</a></td>
+<td>接回 Kubernetes</td>
+<td>cgroup id 換算回 pod 名字的五步鏈,<strong>整條不碰 API server</strong></td>
+</tr>
+<tr>
+<td><a href="../sprint2-day3-falco-basics/">3</a></td>
+<td>Falco 與出廠規則</td>
+<td>出廠只有 <strong>25 條</strong>規則,而閒置 8 分 28 秒 <strong>0 筆告警</strong></td>
+</tr>
+<tr>
+<td><a href="../sprint2-day4-falco-custom-rules/">4</a></td>
+<td>自訂規則與誤報調校</td>
+<td>誤報 180 筆/分調到 0,<strong>代價是兩條外洩通道,而且量得出來</strong></td>
+</tr>
+<tr>
+<td><a href="../sprint2-day5-tetragon-basics/">5</a></td>
+<td>Tetragon 與 TracingPolicy</td>
+<td>核心層過濾是真的(3000 次不符合,<strong>0 筆出核心</strong>),但底層 sensor 同窗口匯出 6016 筆</td>
+</tr>
+<tr>
+<td><a href="../sprint2-day6-tetragon-enforcement/">6</a></td>
+<td>從偵測到攔截</td>
+<td>SIGKILL 真的<strong>擋住</strong>了外洩(5/5、0 位元組),而理由是掛勾點在操作之前</td>
+</tr>
+<tr>
+<td><a href="../sprint2-day7-cilium-kubeproxy/">7</a></td>
+<td>Cilium 與 kube-proxy replacement</td>
+<td>動手換掉之前,<strong>kube-proxy 有一大半工作早就不是它在做了</strong></td>
+</tr>
+<tr>
+<td><a href="../sprint2-day8-cilium-network-policy/">8</a></td>
+<td>CiliumNetworkPolicy</td>
+<td>網路政策<strong>只會放寬不會收緊</strong>;一條無效的政策是 fail-open</td>
+</tr>
+<tr>
+<td><a href="../sprint2-day9-hubble/">9</a></td>
+<td>Hubble</td>
+<td>緩衝區只留<strong>兩三分鐘</strong>,而它看不見這座叢集最大的政策破口</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_2">開始與結束<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Sprint 開始時</th>
+<th>Sprint 結束時</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>對 eBPF 的認識</td>
+<td>一個聽過的名詞</td>
+<td>說得出載入路徑、verifier 拒絕什麼、CO-RE 為什麼能跨 kernel</td>
+</tr>
+<tr>
+<td>看得到的事件身分</td>
+<td>只有 pid 與 comm</td>
+<td>pod、namespace、容器內 pid、image digest、workload kind</td>
+</tr>
+<tr>
+<td>偵測的形式</td>
+<td>人盯著終端機</td>
+<td>常駐規則引擎,具名告警帶 MITRE 分類</td>
+</tr>
+<tr>
+<td>能不能擋</td>
+<td>不能</td>
+<td>能,而且量過「擋住」與「事後殺掉」的差別</td>
+</tr>
+<tr>
+<td>網路的可見度</td>
+<td>Service 是個黑盒</td>
+<td>看得到 socket LB 的翻譯、政策的逐條命中計數、L7 的兩段連線</td>
+</tr>
+<tr>
+<td>對成本的認識</td>
+<td>「裝一下而已」</td>
+<td>每節點 CPU 與記憶體、事件量、緩衝深度、變更代價,全部有數字</td>
+</tr>
+<tr>
+<td>對這些工具的信任</td>
+<td>官方文件說什麼就是什麼</td>
+<td><strong>驗收條件是量測,不是 <code>kubectl apply</code> 的退出碼</strong></td>
+</tr>
+</tbody>
+</table>
+<h2 id="_3">四套工具的分工表<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<p>每一格都對應到某一天的某一個量測,點得進去。</p>
+<h3 id="_4">位置與交付物<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>bpftrace</th>
+<th>Falco</th>
+<th>Tetragon</th>
+<th>Cilium + Hubble</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>形態</td>
+<td>臨場,用完就走</td>
+<td>常駐 DaemonSet</td>
+<td>常駐 DaemonSet</td>
+<td>資料平面本身</td>
+</tr>
+<tr>
+<td>掛在哪</td>
+<td>自選探針</td>
+<td>syscall</td>
+<td>syscall、LSM</td>
+<td>pod veth、socket、endpoint</td>
+</tr>
+<tr>
+<td><strong>交付什麼</strong></td>
+<td>原始事件</td>
+<td><strong>判斷</strong>(規則名、嚴重度、MITRE)</td>
+<td><strong>紀錄與動作</strong></td>
+<td><strong>管制與流量圖</strong></td>
+</tr>
+<tr>
+<td>沒設定時</td>
+<td>什麼都沒有</td>
+<td><a href="../sprint2-day3-falco-basics/#mine-2">25 條出廠規則</a></td>
+<td><a href="../sprint2-day5-tetragon-basics/#mine-5">底層 sensor 永遠開著</a></td>
+<td>全通</td>
+</tr>
+<tr>
+<td>要人再判斷嗎</td>
+<td>是</td>
+<td>否</td>
+<td><strong>是</strong></td>
+<td>是</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_5">同樣四個偏離動作,誰看到什麼<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h3>
+<p>Day 5 讓 Falco 與 Tetragon 同時開著跑同一批動作,這是那次的結果:</p>
+<table>
+<thead>
+<tr>
+<th>動作</th>
+<th>Falco</th>
+<th>Tetragon</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>有終端機的 fork shell</td>
+<td>2 筆具名告警</td>
+<td>18 筆無名事件</td>
+</tr>
+<tr>
+<td><strong>無終端機的 web shell</strong></td>
+<td><strong>1 筆</strong>(出廠規則靜音,靠自訂規則)</td>
+<td>18 筆,<strong>與上一列組成完全相同</strong></td>
+</tr>
+<tr>
+<td><code>nsenter</code> 進目標 pod</td>
+<td>2 筆,<strong>pod 認錯</strong></td>
+<td>34 筆,<strong>pod 認錯</strong></td>
+</tr>
+<tr>
+<td>直接讀敏感檔</td>
+<td>1 筆</td>
+<td>8 筆</td>
+</tr>
+<tr>
+<td><strong>總數</strong></td>
+<td><strong>6</strong></td>
+<td><strong>78</strong></td>
+</tr>
+</tbody>
+</table>
+<p>那個「無終端機」的格子是分工的縮影:<strong>Falco 有一個 Tetragon 沒有的欄位(<a href="../sprint2-day5-tetragon-basics/#mine-7">tty</a>),Tetragon 有一個 Falco 沒有的保證——它不做判斷,所以不會判斷錯。</strong></p>
+<h3 id="_6">成本<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>每節點 CPU / 記憶體</th>
+<th>requests</th>
+<th>QoS</th>
+<th>priority</th>
+<th>變更一條規則</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Falco</td>
+<td>14–24m / 84–90Mi</td>
+<td><code>100m/512Mi</code>(<a href="../sprint2-day3-falco-basics/#mine-7">超額 4–7 倍</a>)</td>
+<td>Burstable</td>
+<td><strong>0</strong></td>
+<td><a href="../sprint2-day4-falco-custom-rules/#mine-1">71 秒滾動更新</a></td>
+</tr>
+<tr>
+<td>Tetragon(monitor-only)</td>
+<td>5–11m / 83–120Mi</td>
+<td><code>{}</code></td>
+<td><strong>BestEffort</strong></td>
+<td><strong>0</strong></td>
+<td><strong>2 秒內,不重啟</strong></td>
+</tr>
+<tr>
+<td>Tetragon(<strong>攔截狀態</strong>)</td>
+<td><strong>16–34m / 164–224Mi</strong></td>
+<td><code>{}</code></td>
+<td><strong>BestEffort</strong></td>
+<td><strong>0</strong></td>
+<td>同上</td>
+</tr>
+<tr>
+<td>Cilium agent(初裝)</td>
+<td>23–30m / 85–102Mi</td>
+<td><code>{}</code>(<a href="../sprint2-day7-cilium-kubeproxy/#mine-5">借來的</a>)</td>
+<td>Burstable</td>
+<td><strong>2000001000</strong></td>
+<td>—</td>
+</tr>
+<tr>
+<td>Cilium agent(<strong>跑完政策實驗</strong>)</td>
+<td>22m / <strong>216Mi</strong></td>
+<td>同上</td>
+<td>Burstable</td>
+<td><strong>2000001000</strong></td>
+<td>—</td>
+</tr>
+<tr>
+<td>Hubble relay + UI</td>
+<td>11m / 48Mi(兩顆合計)</td>
+<td><code>{}</code></td>
+<td><strong>BestEffort</strong></td>
+<td><strong>0</strong></td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p><strong>四套工具裡只有 Cilium 的 chart 替你設了 <code>priorityClassName</code></strong>,而那是因為它不是監控、是網路本身。其餘三套在滿載節點上都是搶佔演算法第一個挑中的。</p>
+<h3 id="_7">失效形狀——這一列比效能欄位重要<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>元件掛掉的時候</th>
+<th>有沒有指標會叫</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Falco</td>
+<td>少看到事件</td>
+<td><strong>不會</strong>(<a href="../sprint2-day3-falco-basics/#mine-1">DaemonSet 顯示 READY 3/3,而一顆節點斷了 55 秒</a>)</td>
+</tr>
+<tr>
+<td>Falcosidekick</td>
+<td><strong>事件照抓,但沒人收到</strong></td>
+<td><strong>不會</strong>(<a href="../sprint2-day4-falco-custom-rules/#mine-6">Falco 全綠</a>)</td>
+</tr>
+<tr>
+<td>Tetragon agent</td>
+<td><strong>BPF 程式留在核心裡繼續跑,沒人讀 ring buffer</strong></td>
+<td><strong>不會</strong>(<a href="../sprint2-day6-tetragon-enforcement/#mine-8">攔截情境下還會繼續殺行程</a>)</td>
+</tr>
+<tr>
+<td>Cilium agent</td>
+<td>節點斷網</td>
+<td>會(所以它才是 <code>system-node-critical</code>)</td>
+</tr>
+<tr>
+<td>Hubble</td>
+<td>看不到東西</td>
+<td>不會,而且它<strong>最容易在節點壓力最大時消失</strong></td>
+</tr>
+</tbody>
+</table>
+<h2 id="_8">主題句:盲點就是執行點<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h2>
+<p>整個 sprint 只問了一個問題四次,而四次答案都不一樣——<strong>從特權容器用 <code>nsenter</code> 進另一顆 pod 做壞事</strong>。把四個答案排在一起,工具的差異就不再是功能表的比較,而是架構的推論:</p>
+<table>
+<thead>
+<tr>
+<th>工具</th>
+<th>執行點綁在哪</th>
+<th><code>nsenter</code> 的結果</th>
+<th>出處</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>bpftrace</td>
+<td><strong>cgroup</strong>(過濾器綁 pod slice)</td>
+<td><strong>完全看不到</strong></td>
+<td><a href="../sprint2-day2-bpftrace-kubernetes/#mine-2">Day 2 地雷 2</a></td>
+</tr>
+<tr>
+<td>Falco</td>
+<td>全節點探針,身分事後靠 cgroup 反查</td>
+<td>看得到,<strong>pod 認錯</strong></td>
+<td><a href="../sprint2-day3-falco-basics/#mine-5">Day 3 地雷 5</a></td>
+</tr>
+<tr>
+<td>Tetragon</td>
+<td>全節點探針,身分在核心裡記 cgroup id</td>
+<td>看得到,<strong>pod 認錯</strong>(機制完全不同,答案相同)</td>
+<td><a href="../sprint2-day5-tetragon-basics/#mine-6">Day 5 地雷 6</a></td>
+</tr>
+<tr>
+<td>Tetragon 攔截</td>
+<td><strong>cgroup</strong></td>
+<td><strong>完整繞過</strong>(rc=0,讀走 502 位元組,零攔截事件)</td>
+<td><a href="../sprint2-day6-tetragon-enforcement/#step-4">Day 6 步驟 4</a></td>
+</tr>
+<tr>
+<td>Cilium 政策</td>
+<td><strong>網路命名空間</strong>(veth)</td>
+<td><strong>繞不過,而且自投羅網</strong>(鑽進去權限更少)</td>
+<td><a href="../sprint2-day8-cilium-network-policy/#mine-8">Day 8 地雷 8</a></td>
+</tr>
+<tr>
+<td>Hubble</td>
+<td><strong>endpoint</strong></td>
+<td>看得到,但<strong>逐欄記在受害者身上</strong></td>
+<td><a href="../sprint2-day9-hubble/#probe-b">Day 9 探針 B</a></td>
+</tr>
+</tbody>
+</table>
+<p><strong>三個結論從這張表直接讀得出來:</strong></p>
+<p><strong>一、「在核心裡做」不會讓 pod 歸屬變準,因為 pod 不是核心的概念。</strong> Falco 是使用者空間事後打執行期的 socket 反查,Tetragon 是 BPF 在 <code>execve</code> 當下就把 cgroup id 寫進 map——機制差得很遠,<strong>錯誤一模一樣</strong>。根因在更下面:<code>nsenter</code> 換命名空間、不換 cgroup。無論在核心裡記得多早,記到的都是發起者的 cgroup。</p>
+<p><strong>二、擋得住的範圍,永遠等於執行點能界定的範圍。</strong> Tetragon 的攔截綁 cgroup,所以換 cgroup 就繞過;Cilium 的政策綁 netns,所以 <code>nsenter -n</code> 反而是自投羅網。<strong>兩者都不是 bug,是各自執行點的直接推論。</strong></p>
+<p><strong>三、觀察範圍與攔截範圍不對稱,而那個差就是攻擊面。</strong> Day 6 有一次攻擊 Falco 看到了、Tetragon 的底層 sensor 也逐行記下了,<strong>而 Tetragon 的攔截沒有觸發</strong>——同一套軟體,看得見的部分跟擋得住的部分不是同一個範圍。只裝攔截的話,那次攻擊是完全靜默的成功。</p>
+<h3 id="_9">地雷回顧:健康指標全綠而東西沒在運作<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h3>
+<p>這是第二個貫穿全 sprint 的形狀,在十章裡出現了七次,而且七次的「綠燈」都不一樣:</p>
+<table>
+<thead>
+<tr>
+<th>教訓</th>
+<th>地雷(綠的是什麼 → 實際狀態)</th>
+<th>出處</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kubectl get ds</code> READY 3/3</td>
+<td>一顆節點 55 秒沒有監控</td>
+<td><a href="../sprint2-day3-falco-basics/#mine-1">Day 3 地雷 1</a></td>
+</tr>
+<tr>
+<td><code>helm upgrade</code> STATUS: deployed</td>
+<td>規則用了淘汰欄位,可能永遠不報</td>
+<td><a href="../sprint2-day4-falco-custom-rules/#mine-2">Day 4 地雷 2</a></td>
+</tr>
+<tr>
+<td><code>kubectl apply</code> created,CRD 無 status</td>
+<td><strong>策略根本沒載入</strong></td>
+<td><a href="../sprint2-day5-tetragon-basics/#mine-4">Day 5 地雷 4</a></td>
+</tr>
+<tr>
+<td>pod Running,RESTARTS 那個「1」</td>
+<td>冷啟動 panic,<strong>31 秒沒有任何攔截</strong></td>
+<td><a href="../sprint2-day6-tetragon-enforcement/#mine-1">Day 6 地雷 1</a></td>
+</tr>
+<tr>
+<td>ARM 回 <code>Succeeded</code></td>
+<td>taint 一個字都沒改</td>
+<td><a href="../sprint2-day7-cilium-kubeproxy/#mine-7">Day 7 地雷 7</a></td>
+</tr>
+<tr>
+<td><code>kubectl get cnp</code> 列得出來</td>
+<td>政策無效,<strong>fail-open</strong></td>
+<td><a href="../sprint2-day8-cilium-network-policy/#mine-3">Day 8 地雷 3</a></td>
+</tr>
+<tr>
+<td>pod 1/1 Running、RESTARTS 0、無事件</td>
+<td>82 秒輸出全錯的靜默故障</td>
+<td><a href="../sprint2-day6-tetragon-enforcement/#step-5">Day 6 步驟 5</a></td>
+</tr>
+</tbody>
+</table>
+<p><strong>共通的解法只有一句:驗收條件要問執行者本身,不要問管理平面。</strong> Falco 問啟動日誌有沒有 warning 區塊、Tetragon 問 <code>tetra tracingpolicy list</code> 的 <code>STATE</code>、Cilium 問 agent 的 <code>endpoint list</code> 與 policy map 的逐條計數器,網路政策問 <code>.status.conditions</code> 的 <code>Valid</code>。</p>
+<h2 id="_10">帶得走的判斷<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h2>
+<p><strong>什麼時候用哪一個</strong>,只用量到的東西講:</p>
+<ul>
+<li><strong>臨場追蹤(bpftrace)</strong>:回答「現在這一秒發生什麼」。成本是人的注意力——<a href="../sprint2-day2-bpftrace-kubernetes/">必須剛好在看</a>。適合診斷一個正在發生的具體問題,不適合當防線。</li>
+<li><strong>規則引擎(Falco)</strong>:回答「有沒有已知壞事」。誤報低、可全叢集共用,<strong>代價是沒寫規則的事一律看不見</strong>。它交付的是<strong>判斷</strong>,所以它是唯一一個「有人會被叫醒」的工具。</li>
+<li><strong>核心層攔截(Tetragon)</strong>:回答「這個動作不准發生」。範圍能被界定清楚時很強(成分固定的工作負載命名空間),範圍界定不了時無效。<strong>攔截交付的是「這個動作沒有發生」,不是「這個攻擊者被處理了」</strong>——五次攔截成功對攻擊者的代價只是五個行程。</li>
+<li><strong>網路層(Cilium + Hubble)</strong>:回答「誰可以跟誰講話」,而且做得到 HTTP 方法這一層。它是唯一一個<strong>繞不過</strong>的執行點,但它的稽核軌跡<strong>沒有行程身分</strong>。</li>
+</ul>
+<p><strong>四套之間最重要的一句話</strong>:偵測與攔截不能互相取代。<strong>攔截不能取代偵測,因為守備範圍比較小;偵測不能取代攔截,因為告警不會讓 <code>read()</code> 失敗。</strong> Day 6 那一格 Falco 的告警與 Tetragon 的攔截在<strong>同一毫秒</strong>發生,一個留下紀錄,一個留下 0 位元組。</p>
+<h2 id="_11">誠實的差距——這份清單是地圖,不是遺憾<a class="headerlink" href="#_11" title="Permanent link">&para;</a></h2>
+<p><strong>沒有教到的:</strong></p>
+<ul>
+<li><strong>k8saudit 沒有做。</strong> Falco 除了 syscall 還能吃 Kubernetes 稽核日誌,但受管叢集沒有本機稽核日誌,官方路徑需要額外的常駐雲端資源。</li>
+<li><strong>Falcosidekick UI 跳過了。</strong> 它需要一台帶特定模組的 Redis,而當時那座叢集的節點已經吃緊。<strong>這是本 sprint 唯一一個「有 UI 卻沒教」的缺口。</strong></li>
+<li><strong><code>ingressDeny</code> / <code>egressDeny</code> 沒有測。</strong> <a href="../sprint2-day8-cilium-network-policy/#mine-5">Day 8 地雷 5</a> 的結論是「加規則永遠不會收緊」,而 Cilium 有一組 deny 規則可以表達「即使有人允許也要擋」。整層沒碰。</li>
+<li><strong><code>Signal</code> 配 <code>Override</code> 沒有試。</strong> 那是官方對「要確保操作不完成」的建議寫法,本課分別測了兩個動作,沒有測併用。</li>
+</ul>
+<p><strong>留在環境裡沒有堵的洞:</strong></p>
+<ul>
+<li><strong>host firewall 從頭到尾沒開。</strong> <a href="../sprint2-day8-cilium-network-policy/#mine-9">Day 8 地雷 9</a>:任何 <code>hostNetwork</code> pod 完全豁免所有網路政策,而 <a href="../sprint2-day9-hubble/#probe-c">Day 9 探針 C</a> 證明 Hubble 也看不出那是繞過。<strong>這是本課環境最大的破口,而且是開著的。</strong> 它的修補位置在 admission 層(誰能建 hostNetwork pod),不在網路層。</li>
+<li><strong>DNS 外洩通道沒有關。</strong> FQDN 政策擋掉的域名照樣被解析並進快取。要關得把比對樣式收成明確清單,而那跟 FQDN 政策的初衷打架。</li>
+<li><strong>Hubble 沒有接出去。</strong> 緩衝區只留兩三分鐘,所以「事後去查」在出廠設定下不成立;而一旦落地,落下去的就是含認證標頭的原文(<a href="../sprint2-day9-hubble/#mine-4">Day 9 地雷 4</a>)。</li>
+</ul>
+<p><strong>規模上的限制:</strong></p>
+<ul>
+<li><strong>叢集最多三顆節點、最少一顆。</strong> Cilium 那三天是<strong>單節點</strong>,所以 Hubble relay 最重要的功能(跨節點聚合)等於沒測;規則與政策的數量也都在個位數,線性成長的代價還沒開始顯現。</li>
+<li><strong>沒有長時間運行。</strong> 最長的連續攔截狀態是十幾分鐘。所有「記憶體隨叢集歷史成長」的觀察都只涵蓋數小時。</li>
+<li><strong>延遲的宣稱只有一項站得住。</strong> <a href="../sprint2-day7-cilium-kubeproxy/">Day 7 明確放棄</a>(負載不對等、雜訊大於訊號),<a href="../sprint2-day8-cilium-network-policy/#step-6">Day 8 的 L7 成本敢講</a>(訊號是雜訊的 20 倍)。<strong>同一門課裡兩種結論並存是刻意的。</strong></li>
+</ul>
+<h2 id="_12">三條可以自己走下去的路<a class="headerlink" href="#_12" title="Permanent link">&para;</a></h2>
+<p><strong>一、不換 CNI 也能走 eBPF 資料平面。</strong> Day 7 為了自管 Cilium 新建了一座叢集,因為 <code>--network-plugin none</code> 只能在建立時指定。如果你的叢集不能重建,<a href="https://docs.tigera.io/calico/latest/operations/ebpf/enabling-ebpf">Calico 的 eBPF 資料平面</a>是另一條路——它可以在<strong>既有叢集</strong>上啟用,而且同樣會取代 kube-proxy。拿它跟本課 Day 7 的數字對照,是一個現成的比較題。</p>
+<p><strong>二、把 Falco 的規則庫打開。</strong> <a href="../sprint2-day3-falco-basics/#mine-2">Day 3</a> 量到出廠只有 25 條,而<a href="https://github.com/falcosecurity/rules">官方規則庫</a>明講 stable 是唯一預設綁進去的,另外還有 incubating 與 sandbox 兩級。裝上去之後重跑一次 Day 3 的閒置量測,就會知道「Falco 很吵」這個名聲到底屬於哪一級。</p>
+<p><strong>三、把兩條資料線接起來。</strong> 本 sprint 最明確的一個缺口:<a href="../sprint2-day9-hubble/">Hubble 說不出一條 flow 是哪個行程發的</a>,而 Tetragon 說得出。這兩份資料在本課的四套工具裡<strong>沒有任何一個地方會合</strong>。要回答「這條被擋的連線是哪支程式打的」,得自己把 Tetragon 的行程事件與 Hubble 的 flow 用時間與五元組對起來——這是一個真實存在、而且值得做的整合題。</p>
+<h2 id="_13">結語<a class="headerlink" href="#_13" title="Permanent link">&para;</a></h2>
+<p>Day 0 的第一個問題是「什麼是 eBPF」,而那一章的答案是:核心多長出了一套受控的擴充介面,程式送進去之前會被逐條檢查。</p>
+<p>十個動手日之後,最後一個動作是在瀏覽器上點開一筆流量,看到 <code>Verdict: dropped</code> 和它下面那行 <code>Unknown drop reason</code>。</p>
+<p>中間這一段學到的東西,如果只能留一句,是這個:<strong>這些工具沒有一個能看見全部,而它們各自看不見的部分不是缺陷,是它們把程式掛在哪裡的直接後果。</strong> 知道一套工具的執行點在哪,就知道它的盲點在哪——<strong>這比記住任何一條規則語法都有用,因為規則語法會改版,而這個推論不會。</strong></p>
+<hr />
+<div class="admonition quote">
+<p>eBPF 標誌為 eBPF 專案之官方資產,此處作社群教學用途。</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到頂端
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="頁腳" >
+        
+          
+          <a href="../sprint2-day9-hubble/" class="md-footer__link md-footer__link--prev" aria-label="上一頁: Day 9 · Hubble 可觀測性">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                上一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 9 · Hubble 可觀測性
+              </div>
+            </div>
+          </a>
+        
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      KAI Scheduler、HAMi、Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,作社群教學用途
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.code.annotate", "content.code.select", "content.tabs.link", "search.suggest", "search.highlight", "search.share"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u8907\u88fd", "clipboard.copy": "\u8907\u88fd", "search.result.more.one": "\u6b64\u9801\u5c1a\u6709 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.more.other": "\u6b64\u9801\u5c1a\u6709 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.none": "\u6c92\u6709\u7b26\u5408\u7684\u9805\u76ee", "search.result.one": "\u627e\u5230 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.other": "\u627e\u5230 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.placeholder": "\u6253\u5b57\u9032\u884c\u641c\u5c0b", "search.result.term.missing": "\u7f3a\u5c11\u5b57\u8a5e", "select.version": "\u9078\u64c7\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
