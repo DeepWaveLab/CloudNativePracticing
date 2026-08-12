@@ -1,0 +1,2834 @@
+
+<!doctype html>
+<html lang="zh-TW" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="雲原生實作課程 —— GPU 排程 runbook、踩雷解法與反思">
+      
+      
+      
+        <link rel="canonical" href="https://deepwavelab.github.io/CloudNativePracticing/runbook/sprint3-day1-three-generations/">
+      
+      
+        <link rel="prev" href="../sprint3-day0-wasm-concepts/">
+      
+      
+        <link rel="next" href="../sprint3-day2-wasmcloud/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Day 1 · RuntimeClass 七層實測 - Cloud Native Lab Course</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/terminal.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#day-1-runtimeclass" class="md-skip">
+          跳轉到
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="頁首">
+    <a href="../.." title="Cloud Native Lab Course" class="md-header__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Cloud Native Lab Course
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Day 1 · RuntimeClass 七層實測
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換深色模式"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="切換深色模式" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換淺色模式"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="切換淺色模式" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜尋" placeholder="搜尋" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="搜尋">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="分享" aria-label="分享" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="清除" aria-label="清除" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜尋引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="標籤" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  首頁
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint1-day0-azure-aks-foundation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 1 · GPU 排程三部曲
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint2-day0-ebpf-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 2 · eBPF 與執行期安全
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../sprint3-day0-wasm-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 3 · WebAssembly
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="導覽列" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Cloud Native Lab Course" class="md-nav__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Cloud Native Lab Course
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首頁
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    首頁
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 3 · WebAssembly 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day0-azure-aks-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 環境建置與成本紀律
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day1-kai-queue-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · KAI 安裝與 Queue 基礎
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day2-gang-scheduling-preemption/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Gang Scheduling 與搶占
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day3-hami-memory-isolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · HAMi 安裝與 VRAM 硬隔離
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day4-hami-kai-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · HAMi 進階與 KAI 整合
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day5-hami-webui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · HAMi-WebUI 觀測介面
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day6-dra-simulated-devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · DRA 概念與模擬裝置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day7-dra-aks-real-gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · DRA 真卡實測
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day8-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 綜合:三者分工決策表
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day0-ebpf-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · eBPF 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day1-bpftrace-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · bpftrace 三支經典工具
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day2-bpftrace-kubernetes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · 把核心事件接回 Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day3-falco-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Falco 安裝與出廠規則
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day4-falco-custom-rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · 自訂規則、誤報調校與告警路由
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day5-tetragon-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Tetragon 與 TracingPolicy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day6-tetragon-enforcement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · 從偵測到攔截
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day7-cilium-kubeproxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Cilium 與 kube-proxy replacement
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day8-cilium-network-policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · CiliumNetworkPolicy(L3/L4 → L7)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day9-hubble/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Hubble 可觀測性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 綜合:四套工具的分工
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 3 · WebAssembly
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 3 · WebAssembly
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day0-wasm-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · wasm 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · RuntimeClass 七層實測
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · RuntimeClass 七層實測
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        今天要走的路
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-wasi-node-pool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1: 對已退役的 WASI node pool 下指令,看它今天回什麼
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 1: 對已退役的 WASI node pool 下指令,看它今天回什麼">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#feature-flag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        那個 feature flag 還在,但註冊它救不了任何事
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-krustletrepo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2: Krustlet——官網還活著,repo 五年沒動
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 2: Krustlet——官網還活著,repo 五年沒動">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        為什麼這是讀者防雷的重點
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一份文件裡兩段互相抵消的指示
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3: 出廠節點上有什麼
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 3: 出廠節點上有什麼">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        出廠設定全文,22 行
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#handler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        有幾個 handler
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4: 驗收——RuntimeClass 的兩半
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 4: 驗收——RuntimeClass 的兩半">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#handler_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        第一半:handler 對得上
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        七層,完整串起來
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#handler_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        第二半:handler 不存在
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        誠實的差距
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收 checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷記錄
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="地雷記錄">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 1:官方文件的 containerd 設定路徑,在 containerd 2.x 的節點上是錯的
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 2:叢集出廠就有一個指向不存在 handler 的 RuntimeClass
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 3:同一個「handler 不存在」,寫不寫 scheduling 給你兩種完全不同的失敗
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 4:停機的 AKS 不是零成本
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的東西
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day2-wasmcloud/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · wasmCloud 與元件模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day3-wasmcloud-distributed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · 分散式模型與驗收改寫
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day4-wasmedge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · WasmEdge 執行期
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day5-cost-measurement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · 成本實測
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day6-spinkube-shim/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · SpinKube(上):shim 佈建
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day7-spinkube-operator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · SpinKube(下):operator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day8-reversibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 拆得掉嗎:可逆性驗收
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day9-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · 綜合:三條路線的決策表
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        今天要走的路
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-wasi-node-pool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1: 對已退役的 WASI node pool 下指令,看它今天回什麼
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 1: 對已退役的 WASI node pool 下指令,看它今天回什麼">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#feature-flag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        那個 feature flag 還在,但註冊它救不了任何事
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-krustletrepo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2: Krustlet——官網還活著,repo 五年沒動
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 2: Krustlet——官網還活著,repo 五年沒動">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        為什麼這是讀者防雷的重點
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一份文件裡兩段互相抵消的指示
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3: 出廠節點上有什麼
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 3: 出廠節點上有什麼">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        出廠設定全文,22 行
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#handler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        有幾個 handler
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4: 驗收——RuntimeClass 的兩半
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 4: 驗收——RuntimeClass 的兩半">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#handler_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        第一半:handler 對得上
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        七層,完整串起來
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#handler_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        第二半:handler 不存在
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        誠實的差距
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        驗收 checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷記錄
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="地雷記錄">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 1:官方文件的 containerd 設定路徑,在 containerd 2.x 的節點上是錯的
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 2:叢集出廠就有一個指向不存在 handler 的 RuntimeClass
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 3:同一個「handler 不存在」,寫不寫 scheduling 給你兩種完全不同的失敗
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 4:停機的 AKS 不是零成本
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的東西
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="day-1-runtimeclass">Day 1: RuntimeClass 的七層實測,以及兩條已經退場的路<a class="headerlink" href="#day-1-runtimeclass" title="Permanent link">&para;</a></h1>
+<p><img align="right" alt="Kubernetes 官方標誌" src="../../assets/logos/kubernetes-icon-color.svg" width="88" /></p>
+<blockquote>
+<p><a href="../sprint3-day0-wasm-concepts/">Day 0</a> 在紙上說了兩件事:RuntimeClass 的 <code>handler</code> 對應到節點 containerd 設定裡的一段,而 wasm 進 Kubernetes 的路上,Krustlet 與 AKS 的 WASI node pool 已經先後退場。今天把兩件事都驗出來——包括對那個已退役的功能下一次指令,看它今天實際回什麼。</p>
+</blockquote>
+<div class="admonition abstract">
+<p class="admonition-title">你在課程的哪裡</p>
+<ul>
+<li><strong>Day 0</strong>:wasm 是什麼、Kubernetes 用什麼機制執行它。全部是概念,沒有碰過叢集。</li>
+<li><strong>今天</strong>:建一座新叢集,把 RuntimeClass 從 Pod spec 一路追到節點上的 shim 行程;順便確認已退役的 WASI node pool 確實叫不動了。驗收是那條追蹤鏈能完整指出來。</li>
+<li><strong>Day 2</strong>:第一條路線 wasmCloud,而它的賣點是<strong>完全不用改節點</strong>——今天存下來的節點基準,就是那天的對照組。</li>
+</ul>
+</div>
+<h2 id="_1">今天要走的路<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>步驟</th>
+<th>做什麼</th>
+<th>為什麼排在這</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>對已退役的 WASI node pool 下指令</td>
+<td>舊教學不會下架,<strong>今天的錯誤訊息是網路上查不到的</strong></td>
+</tr>
+<tr>
+<td>2</td>
+<td>確認 Krustlet 的現況</td>
+<td>它的官網還活著,而 repo 已經五年沒動</td>
+</tr>
+<tr>
+<td>3</td>
+<td>出廠節點上有什麼</td>
+<td><strong>這份基準 Day 8 要拿來驗「拆得乾淨嗎」</strong></td>
+</tr>
+<tr>
+<td>4</td>
+<td>建 RuntimeClass,追完七層</td>
+<td>驗收</td>
+</tr>
+</tbody>
+</table>
+<h2 id="1-wasi-node-pool">步驟 1: 對已退役的 WASI node pool 下指令,看它今天回什麼<a class="headerlink" href="#1-wasi-node-pool" title="Permanent link">&para;</a></h2>
+<p>AKS 的 WASI node pool 是 <a href="../sprint3-day0-wasm-concepts/">Day 0 那張表</a>裡「雲廠商代管」的那條路。微軟的封存文件說 2025-05-05 起無法建立新的 WASI node pool。<strong>文件寫的東西不算數,要下指令。</strong></p>
+<p>先看工具那一側。核心 <code>az</code> CLI <strong>完全沒有</strong> <code>--workload-runtime</code> 這個參數。但那份文件本來就要你裝 <code>aks-preview</code> 擴充套件,裝了之後:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>add<span class="w"> </span>--help<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-A4<span class="w"> </span>workload-runtime
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="go">    --workload-runtime : Determines the type of workload a node can run.</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="go">                         Defaults to OCIContainer.  Allowed values:</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="go">                         KataCcIsolation, KataMshvVmIsolation,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="go">                         KataVmIsolation, OCIContainer, WasmWasi</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="go">                                                       ^^^^^^^^^</span>
+</span></code></pre></div>
+<p><strong><code>WasmWasi</code> 還在合法值清單裡</strong>,而且 <code>--help</code> 裡還附著一個現成範例。照舊教學走的人,會一路走到最後一步才撞牆:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>add<span class="w"> </span>-g<span class="w"> </span>&lt;resource-group&gt;<span class="w"> </span>--cluster-name<span class="w"> </span>&lt;cluster&gt;<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">    </span>-n<span class="w"> </span>mywasipool<span class="w"> </span>--node-count<span class="w"> </span><span class="m">1</span><span class="w"> </span>--node-vm-size<span class="w"> </span>Standard_D2as_v5<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span>--workload-runtime<span class="w"> </span>WasmWasi
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="go">ERROR: (InvalidWorkloadRuntimeSettingError) The agent pool mywasipool has a deprecated workload</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="go">runtime WasmWasi. WebAssembly System Interface (WASI) node pools (preview) are no longer supported</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="go">on AKS. For more information on the retirement, see https://aka.ms/aks/wasi-retirement. If you&#39;d</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="go">like to run WebAssembly (WASM) workloads, you can deploy SpinKube to Azure Kubernetes Service.</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="go">Code: InvalidWorkloadRuntimeSettingError</span>
+</span></code></pre></div>
+<p><strong>這段訊息值得逐字讀,有三個資訊:</strong></p>
+<p><strong>它有一個 <code>Code</code>。</strong> <code>InvalidWorkloadRuntimeSettingError</code> 代表拒絕發生在 ARM 的資源驗證階段,不是 CLI 的參數檢查——<strong>換 SDK、換 Terraform、直接打 REST,都會拿到同一段</strong>。</p>
+<p><strong>措辭用現在式描述一個不存在的資源。</strong> 「該 agent pool <strong>有</strong>一個已淘汰的執行期」——聽起來像 pool 已經建出來了。沒有:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>list<span class="w"> </span>-g<span class="w"> </span>&lt;resource-group&gt;<span class="w"> </span>--cluster-name<span class="w"> </span>&lt;cluster&gt;<span class="w"> </span>-o<span class="w"> </span>table
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">Name    Prov       Count</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="go">system  Succeeded  1        ← 只有這一個</span>
+</span></code></pre></div>
+<p>這是「先建物件再驗證」的實作痕跡,而它會讓人誤以為要去清理殘留。</p>
+<p><strong>它主動給了遷移方向。</strong> 那個方向是 SpinKube,也就是本 sprint Day 6–7 要走的路。</p>
+<h3 id="feature-flag">那個 feature flag 還在,但註冊它救不了任何事<a class="headerlink" href="#feature-flag" title="Permanent link">&para;</a></h3>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="gp">$ </span>az<span class="w"> </span>feature<span class="w"> </span>list<span class="w"> </span>--namespace<span class="w"> </span>Microsoft.ContainerService<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">    </span>--query<span class="w"> </span><span class="s2">&quot;[?contains(name,&#39;Wasm&#39;)].{name:name,state:properties.state}&quot;</span><span class="w"> </span>-o<span class="w"> </span>table
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="go">Name                                            State</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="go">microsoft.ContainerService/WasmNodePoolPreview  NotRegistered</span>
+</span></code></pre></div>
+<p>旗標還掛在 ARM 的清單上。<strong>這裡刻意不去註冊它</strong>,兩個理由:</p>
+<p>註冊 feature flag 是<strong>訂閱層級</strong>的異動,會影響同一訂閱底下所有叢集可用的 API 介面,包含正式環境。為了一個已退場的預覽功能付這個代價不划算。</p>
+<p>而且<strong>從錯誤碼可以推論註冊了也沒用</strong>:拒絕的 <code>Code</code> 是「這個值已淘汰」,不是 feature gate 沒開時慣用的「功能未啟用」。<strong>擋你的是值,不是權限。</strong></p>
+<p><strong>這一點是推論,不是實測</strong>——要實測就得動訂閱層級的設定。</p>
+<h2 id="2-krustletrepo">步驟 2: Krustlet——官網還活著,repo 五年沒動<a class="headerlink" href="#2-krustletrepo" title="Permanent link">&para;</a></h2>
+<p>Krustlet 是 wasm 進 Kubernetes 最早的嘗試(Day 0 那張表的第一條路):一個假裝自己是 kubelet 的行程,繞過 CRI 直接向 API server 註冊成節點。這裡<strong>不部署它</strong>,只確認它現在是什麼狀態——因為你搜尋時遲早會撞到它。</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="gp">$ </span>gh<span class="w"> </span>api<span class="w"> </span>repos/krustlet/krustlet/releases<span class="w"> </span>--jq<span class="w"> </span><span class="s1">&#39;.[] | &quot;\(.tag_name)\t\(.published_at)&quot;&#39;</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="go">v1.0.0-alpha.1   2021-07-27T17:06:02Z</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="go">v0.7.0           2021-03-24T21:57:49Z</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="go">...</span>
+</span></code></pre></div>
+<p><strong>最後一個 release 是 2021-07-27,而且九個 release 全部標記為 prerelease</strong>——這個專案從來沒有發過正式版。</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="gp">$ </span>gh<span class="w"> </span>api<span class="w"> </span>repos/krustlet/krustlet<span class="w"> </span>--jq<span class="w"> </span><span class="s1">&#39;{archived,pushed_at,stars}&#39;</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="go">{ &quot;archived&quot;: false, &quot;pushed_at&quot;: &quot;2023-10-02T18:41:06Z&quot;, &quot;stars&quot;: 3605 }</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="gp">$ </span>gh<span class="w"> </span>api<span class="w"> </span>repos/krustlet/krustlet/commits/main<span class="w"> </span>--jq<span class="w"> </span><span class="s1">&#39;.files[].filename&#39;</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="go">README.md</span>
+</span></code></pre></div>
+<p><strong>這個 repo 歷史上的最後一次提交只改了一個檔案:README。</strong> 內容是:</p>
+<blockquote>
+<p>⚠️ This project is currently not actively maintained.</p>
+</blockquote>
+<p>而<strong>就在那句話下面三行</strong>,README 仍然寫著:</p>
+<blockquote>
+<p>📯 Krustlet 1.0 coming soon!</p>
+</blockquote>
+<p>兩句話同時掛在首頁上,相隔兩年。</p>
+<h3 id="_2">為什麼這是讀者防雷的重點<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h3>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="gp">$ </span>curl<span class="w"> </span>-s<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s2">&quot;%{http_code}\n&quot;</span><span class="w"> </span>https://krustlet.dev/
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="go">200</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="gp">$ </span>curl<span class="w"> </span>-s<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s2">&quot;%{http_code}\n&quot;</span><span class="w"> </span>https://docs.krustlet.dev/intro
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="go">200</span>
+</span></code></pre></div>
+<p><strong>官網與文件站今天都回 200,站上沒有任何停止維護的標示,3605 顆星也還在。</strong> 搜尋引擎會把一個看起來完整的教學站排在前面,而那個 repo 的最後一次提交是五年前的訃聞。</p>
+<p><strong>判定一個專案的生死不能看官網,要看 release 與 commit。</strong></p>
+<h3 id="_3">一份文件裡兩段互相抵消的指示<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h3>
+<p>那份封存的 AKS 文件裡有一段給 Krustlet 使用者的遷移指引:</p>
+<blockquote>
+<p>如果你還在用基於 Krustlet 的 WASI node pool,<strong>可以建立一個新的 WASI node pool</strong> 來遷移到 containerd shim。</p>
+</blockquote>
+<p>而同一頁最上面的警告是:</p>
+<blockquote>
+<p>2025 年 5 月 5 日起,你將無法建立新的 WASI node pool。</p>
+</blockquote>
+<p><strong>Krustlet 的使用者被指引搬去 WASI node pool,而 WASI node pool 已經關門。</strong> 兩條退場的路,一條指向另一條。</p>
+<h2 id="3">步驟 3: 出廠節點上有什麼<a class="headerlink" href="#3" title="Permanent link">&para;</a></h2>
+<p>要看節點,需要一顆特權 pod 再跳進節點的命名空間——這個做法 <a href="../sprint2-day0-ebpf-concepts/">Sprint 2 Day 0</a> 建立過,這裡直接沿用。</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>node-shell.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="s">kind: Pod</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="s">metadata:</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="s">  name: node-shell</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="s">  namespace: wasmlab</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="s">spec:</span>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="s">  hostPID: true          # so nsenter -t 1 reaches the node&#39;s PID 1</span>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="s">  hostNetwork: true</span>
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="s">  containers:</span>
+</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="s">    - name: shell</span>
+</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="s">      image: mcr.microsoft.com/cbl-mariner/base/core:2.0</span>
+</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="s">      command: [&quot;sleep&quot;, &quot;infinity&quot;]</span>
+</span><span id="__span-7-14"><a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="s">      securityContext:</span>
+</span><span id="__span-7-15"><a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="s">        privileged: true</span>
+</span><span id="__span-7-16"><a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="s">      volumeMounts:</span>
+</span><span id="__span-7-17"><a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="s">        - { name: host, mountPath: /host }</span>
+</span><span id="__span-7-18"><a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a><span class="s">  volumes:</span>
+</span><span id="__span-7-19"><a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a><span class="s">    - name: host</span>
+</span><span id="__span-7-20"><a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a><span class="s">      hostPath: { path: / }</span>
+</span><span id="__span-7-21"><a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a><span class="s">EOF</span>
+</span><span id="__span-7-22"><a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>node-shell.yaml
+</span></code></pre></div>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>wasmlab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>node-shell<span class="w"> </span>--<span class="w"> </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">1</span><span class="w"> </span>-m<span class="w"> </span>--<span class="w"> </span>containerd<span class="w"> </span>--version
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="go">containerd github.com/containerd/containerd/v2 2.3.3-2</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>wasmlab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>node-shell<span class="w"> </span>--<span class="w"> </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">1</span><span class="w"> </span>-m<span class="w"> </span>--<span class="w"> </span>ls<span class="w"> </span>/etc/containerd/
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="go">config.toml</span>
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="go">kubenet_template.conf          ← 沒有 conf.d/,出廠是單一檔案</span>
+</span></code></pre></div>
+<p>那個 <strong>2.3.3</strong> 立刻推翻了 Day 0 引用的設定路徑,見<a href="#mine-1">地雷 1</a>。</p>
+<h3 id="22">出廠設定全文,22 行<a class="headerlink" href="#22" title="Permanent link">&para;</a></h3>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">version</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">oom_score</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">-999</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="k">[plugins.</span><span class="s2">&quot;io.containerd.cri.v1.images&quot;</span><span class="k">]</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">  </span><span class="k">[plugins.</span><span class="s2">&quot;io.containerd.cri.v1.images&quot;</span><span class="k">.pinned_images]</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">    </span><span class="n">sandbox</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;mcr.microsoft.com/oss/v2/kubernetes/pause:3.6&quot;</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">  </span><span class="err">…</span>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="k">[plugins.</span><span class="s2">&quot;io.containerd.cri.v1.runtime&quot;</span><span class="k">.containerd]</span>
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="w">    </span><span class="n">default_runtime_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;runc&quot;</span>
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="w">    </span><span class="k">[plugins.</span><span class="s2">&quot;io.containerd.cri.v1.runtime&quot;</span><span class="k">.containerd.runtimes.runc]</span>
+</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="w">      </span><span class="n">runtime_type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;io.containerd.runc.v2&quot;</span>
+</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="w">    </span><span class="k">[plugins.</span><span class="s2">&quot;io.containerd.cri.v1.runtime&quot;</span><span class="k">.containerd.runtimes.runc.options]</span>
+</span><span id="__span-9-12"><a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="w">      </span><span class="n">BinaryName</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;/usr/bin/runc&quot;</span>
+</span><span id="__span-9-13"><a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="w">      </span><span class="n">SystemdCgroup</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+</span><span id="__span-9-14"><a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="w">    </span><span class="k">[plugins.</span><span class="s2">&quot;io.containerd.cri.v1.runtime&quot;</span><span class="k">.containerd.runtimes.untrusted]</span>
+</span><span id="__span-9-15"><a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="w">      </span><span class="n">runtime_type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;io.containerd.runc.v2&quot;</span>
+</span><span id="__span-9-16"><a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a><span class="w">    </span><span class="k">[plugins.</span><span class="s2">&quot;io.containerd.cri.v1.runtime&quot;</span><span class="k">.containerd.runtimes.untrusted.options]</span>
+</span><span id="__span-9-17"><a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a><span class="w">      </span><span class="n">BinaryName</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;/usr/bin/runc&quot;</span>
+</span><span id="__span-9-18"><a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a><span class="k">[metrics]</span>
+</span><span id="__span-9-19"><a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a><span class="w">  </span><span class="n">address</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;0.0.0.0:10257&quot;</span>
+</span></code></pre></div>
+<p><strong>把這份存起來。Day 8 要拿它逐字比對,驗證 Day 6 裝的 shim 拆得乾淨。</strong></p>
+<h3 id="handler">有幾個 handler<a class="headerlink" href="#handler" title="Permanent link">&para;</a></h3>
+<p><strong>兩個</strong>:<code>runc</code> 與 <code>untrusted</code>。而且它們的 <code>runtime_type</code> 與 <code>BinaryName</code> 完全一樣——<code>untrusted</code> 是 Kubernetes 早年一個 pod annotation 留下來的相容性入口,跟 <code>runc</code> 指向同一個執行體,差別只在 <code>runc</code> 多了 <code>SystemdCgroup = true</code>。</p>
+<p>同一件事<strong>完全不碰節點也問得到</strong>:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>node<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.items[0].status.runtimeHandlers}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>json.tool
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="go">[ { &quot;name&quot;: &quot;&quot;,          &quot;features&quot;: {…} },</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="go">  { &quot;name&quot;: &quot;runc&quot;,      &quot;features&quot;: {…} },</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="go">  { &quot;name&quot;: &quot;untrusted&quot;, &quot;features&quot;: {…} } ]</span>
+</span></code></pre></div>
+<p>三筆,多出來的空字串是<strong>不指定 <code>runtimeClassName</code> 時走的預設路徑</strong>。</p>
+<p><strong>這行指令是 Day 6 最好用的驗收工具</strong>:shim 裝成功的話,這裡會多一筆。</p>
+<p>而節點上真正存在的 shim 執行檔只有一個:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="gp">$ </span>ls<span class="w"> </span>-la<span class="w"> </span>/usr/bin/containerd-shim*<span class="w"> </span>/usr/bin/runc
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="go">-rwxr-xr-x 1 root root  8805376 /usr/bin/containerd-shim-runc-v2</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="go">-rwxr-xr-x 1 root root 10015640 /usr/bin/runc</span>
+</span></code></pre></div>
+<p><strong>兩個 handler、一個 shim 二進位檔。</strong> handler 是設定裡的名字,shim 是磁碟上的東西——Day 6 要做的正是「放一個新的二進位檔進去,再加一段設定指向它」,而這兩件事今天各自看得清楚。</p>
+<p>叢集那一側也有東西是出廠就在的,而且其中一個是壞的,見<a href="#mine-2">地雷 2</a>。</p>
+<h2 id="step-4">步驟 4: 驗收——RuntimeClass 的兩半<a class="headerlink" href="#step-4" title="Permanent link">&para;</a></h2>
+<h3 id="handler_1">第一半:handler 對得上<a class="headerlink" href="#handler_1" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>runtimeclass-runc.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="s">apiVersion: node.k8s.io/v1</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="s">kind: RuntimeClass</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="s">metadata:</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="s">  name: wasm-day1-runc</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="s">handler: runc          # this handler DOES exist on the node</span>
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="s">EOF</span>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>
+</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>pod-runc.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-12-11"><a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a><span class="s">kind: Pod</span>
+</span><span id="__span-12-12"><a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a><span class="s">metadata:</span>
+</span><span id="__span-12-13"><a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a><span class="s">  name: pod-runc-handler</span>
+</span><span id="__span-12-14"><a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a><span class="s">  namespace: wasmlab</span>
+</span><span id="__span-12-15"><a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a><span class="s">spec:</span>
+</span><span id="__span-12-16"><a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a><span class="s">  runtimeClassName: wasm-day1-runc</span>
+</span><span id="__span-12-17"><a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a><span class="s">  containers:</span>
+</span><span id="__span-12-18"><a id="__codelineno-12-18" name="__codelineno-12-18" href="#__codelineno-12-18"></a><span class="s">    - name: app</span>
+</span><span id="__span-12-19"><a id="__codelineno-12-19" name="__codelineno-12-19" href="#__codelineno-12-19"></a><span class="s">      image: mcr.microsoft.com/cbl-mariner/base/core:2.0</span>
+</span><span id="__span-12-20"><a id="__codelineno-12-20" name="__codelineno-12-20" href="#__codelineno-12-20"></a><span class="s">      command: [&quot;sleep&quot;, &quot;infinity&quot;]</span>
+</span><span id="__span-12-21"><a id="__codelineno-12-21" name="__codelineno-12-21" href="#__codelineno-12-21"></a><span class="s">EOF</span>
+</span><span id="__span-12-22"><a id="__codelineno-12-22" name="__codelineno-12-22" href="#__codelineno-12-22"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>runtimeclass-runc.yaml<span class="w"> </span>-f<span class="w"> </span>pod-runc.yaml
+</span></code></pre></div>
+<p>刻意不用叢集出廠的那個 <code>runc</code> RuntimeClass——<strong>要證明的是這個物件自己建得出來</strong>,而 Day 6 的 wasm 版本除了 handler 名字以外長得一模一樣。</p>
+<p><strong>但 Pod 跑起來不算證明</strong>,因為不指定 <code>runtimeClassName</code> 它也會跑起來。要證明的是「它是經由 <code>runc</code> 這個 handler 被啟動的」,所以要問 CRI:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="gp">$ </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">1</span><span class="w"> </span>-m<span class="w"> </span>--<span class="w"> </span>crictl<span class="w"> </span>pods<span class="w"> </span>--namespace<span class="w"> </span>wasmlab<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>…
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="go">pod-runc-handler         SANDBOX_READY  runtimeHandler=&#39;runc&#39;</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="go">pod-untrusted-handler    SANDBOX_READY  runtimeHandler=&#39;untrusted&#39;</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="go">node-shell               SANDBOX_READY  runtimeHandler=&#39;&#39;        ← 沒指定的那顆</span>
+</span></code></pre></div>
+<p>三種狀態同框。最後那顆的 <code>runtimeHandler</code> 是<strong>空字串</strong>——kubelet 根本沒把 handler 傳給 CRI,containerd 自己套用 <code>default_runtime_name</code>。<strong>「用預設」與「明確指定 runc」在 CRI 層是兩條不同的路徑,即使結果一樣。</strong></p>
+<h3 id="_4">七層,完整串起來<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
+<p>這就是 Day 0 只在紙上講、今天要指出來的那條線。前三層住在叢集(etcd),後四層住在節點的磁碟與行程裡——<strong>這條分界後面幾天會反覆出現</strong>:</p>
+<pre class="mermaid"><code>flowchart TB
+    subgraph cluster["叢集側(存在 etcd)"]
+        A["① Pod 宣告要用哪個 RuntimeClass&lt;br/&gt;runtimeClassName: wasm-day1-runc"]
+        B["② RuntimeClass 指向哪個 handler&lt;br/&gt;handler: runc"]
+    end
+    C["③ kubelet 把 handler 交給 CRI&lt;br/&gt;sandbox 的 runtimeHandler = runc"]
+    subgraph node["節點側(存在 VM 磁碟上)"]
+        D["④ config.toml 有這個 handler 的區塊&lt;br/&gt;runtimes.runc"]
+        E["⑤ 區塊宣告執行期類型&lt;br/&gt;runtime_type = io.containerd.runc.v2"]
+        F["⑥ 執行期指向真正的執行檔&lt;br/&gt;BinaryName = /usr/bin/runc"]
+        G["⑦ 節點上實際啟動的行程&lt;br/&gt;containerd-shim-runc-v2"]
+    end
+    A --&gt; B --&gt; C --&gt; D --&gt; E --&gt; F --&gt; G</code></pre>
+<p>七層各自在哪裡驗、實測值是什麼:</p>
+<table>
+<thead>
+<tr>
+<th>層</th>
+<th>怎麼驗</th>
+<th>實測值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>① Pod 的宣告</td>
+<td><code>kubectl get pod -o yaml</code> 看 <code>runtimeClassName</code></td>
+<td><code>wasm-day1-runc</code></td>
+</tr>
+<tr>
+<td>② RuntimeClass 的 <code>handler</code></td>
+<td><code>kubectl get runtimeclass</code></td>
+<td><code>runc</code></td>
+</tr>
+<tr>
+<td>③ CRI 收到的 handler</td>
+<td>節點上 <code>crictl pods</code> 看 <code>runtimeHandler</code></td>
+<td><code>runc</code></td>
+</tr>
+<tr>
+<td>④ <code>config.toml</code> 的 runtime 區塊</td>
+<td>設定檔第 12 行</td>
+<td><code>[plugins."io.containerd.cri.v1.runtime".containerd.runtimes.runc]</code></td>
+</tr>
+<tr>
+<td>⑤ 區塊裡的 <code>runtime_type</code></td>
+<td>同一個區塊</td>
+<td><code>io.containerd.runc.v2</code></td>
+</tr>
+<tr>
+<td>⑥ 區塊裡的 <code>options.BinaryName</code></td>
+<td>同一個區塊</td>
+<td><code>/usr/bin/runc</code></td>
+</tr>
+<tr>
+<td>⑦ 實際啟動的 shim 行程</td>
+<td>節點上 <code>ps</code></td>
+<td><code>/usr/bin/containerd-shim-runc-v2</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Day 6 要換掉的只有節點側那四層(④–⑦);叢集側的前三層,形狀一模一樣。</strong></p>
+<p>節點上第二個 handler 也驗了一次:建一個 <code>handler: untrusted</code> 的 RuntimeClass,pod 一樣 Running,CRI 回報 <code>runtimeHandler='untrusted'</code>。<strong>它不是理論上存在,是真的能用。</strong></p>
+<h3 id="handler_2">第二半:handler 不存在<a class="headerlink" href="#handler_2" title="Permanent link">&para;</a></h3>
+<p>這一半是刻意去撞的,因為<strong>那正是 Day 6 裝 shim 沒成功時會看到的畫面</strong>。先有一次乾淨的對照,到時候就不用猜。</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>runtimeclass-missing.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="s">apiVersion: node.k8s.io/v1</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="s">kind: RuntimeClass</span>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="s">metadata:</span>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="s">  name: wasmtime-spin-v2</span>
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="s">handler: wasmtime-spin-v2    # nothing on the node provides this</span>
+</span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="s">EOF</span>
+</span></code></pre></div>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>runtimeclass-missing.yaml
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="go">runtimeclass.node.k8s.io/wasmtime-spin-v2 created      ← 沒有警告</span>
+</span></code></pre></div>
+<p><strong>API server 收下了,連一句警告都沒有。</strong> 然後把 pod 送上去:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>wasmlab<span class="w"> </span>get<span class="w"> </span>pod<span class="w"> </span>pod-missing-handler
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="go">NAME                  READY   STATUS              RESTARTS   AGE</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="go">pod-missing-handler   0/1     ContainerCreating   0          112s</span>
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>wasmlab<span class="w"> </span>describe<span class="w"> </span>pod<span class="w"> </span>pod-missing-handler<span class="w"> </span><span class="p">|</span><span class="w"> </span>tail<span class="w"> </span>-3
+</span><span id="__span-16-6"><a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="go">Failed to create pod sandbox: rpc error: code = Unknown desc =</span>
+</span><span id="__span-16-7"><a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="go">  unable to get OCI runtime for sandbox &quot;…&quot;:</span>
+</span><span id="__span-16-8"><a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="go">  no runtime for &quot;wasmtime-spin-v2&quot; is configured</span>
+</span></code></pre></div>
+<p><strong>驗收兩半都過。</strong> 而這個失敗還有第二種長相,取決於 RuntimeClass 有沒有寫 <code>scheduling</code>——見<a href="#mine-3">地雷 3</a>。</p>
+<h2 id="_5">誠實的差距<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>「註冊 feature flag 也沒用」是推論。</strong> 依據是錯誤碼的性質(值被判定為淘汰,而非權限未開),不是實測。要實測得動訂閱層級的設定。</li>
+<li><strong>單節點。</strong> 今天所有節點層的觀察都來自一顆節點。跨節點的 handler 不一致(有些節點裝了 shim、有些沒有)是 Day 6 之後才會出現的情況。</li>
+<li><strong><code>untrusted</code> 這個 handler 只驗到「能起 pod」。</strong> 它跟 <code>runc</code> 指向同一個執行體,所以沒有再往下追行為差異。</li>
+<li><strong>Standard Load Balancer 的費用沒有實測。</strong> 成本那一段只確認了公用 IP 是按小時計費的(<a href="#mine-4">地雷 4</a>);LB 的規則費與資料處理費沒有量,所以不宣稱。</li>
+</ul>
+<h2 id="checkpoint">驗收 checkpoint<a class="headerlink" href="#checkpoint" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>驗證</th>
+<th>判準</th>
+<th>實測結果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>WASI node pool 確實叫不動</td>
+<td>實際下指令,取得帶 <code>Code</code> 的錯誤</td>
+<td><code>InvalidWorkloadRuntimeSettingError</code>,且 node pool 清單確認沒有殘留</td>
+</tr>
+<tr>
+<td>Krustlet 的狀態有一手證據</td>
+<td>release 與 commit 的日期,而非官網外觀</td>
+<td>最後 release 2021-07-27(全部 prerelease);最後提交只改 README</td>
+</tr>
+<tr>
+<td>節點基準已存檔</td>
+<td>containerd 版本、設定全文、handler 清單、shim 二進位檔</td>
+<td>四份都存了,<strong>Day 8 的比對對象</strong></td>
+</tr>
+<tr>
+<td><strong>驗收第一半</strong></td>
+<td>Pod 跑起來<strong>且</strong> CRI 回報的 <code>runtimeHandler</code> 等於預期</td>
+<td><code>runtimeHandler='runc'</code>,七層可逐層指出</td>
+</tr>
+<tr>
+<td><strong>驗收第二半</strong></td>
+<td>handler 不存在時,取得明確的失敗訊息</td>
+<td><code>no runtime for "wasmtime-spin-v2" is configured</code>,狀態停在 <code>ContainerCreating</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="_6">地雷記錄<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
+<h3 id="mine-1">地雷 1:官方文件的 containerd 設定路徑,在 containerd 2.x 的節點上是錯的<a class="headerlink" href="#mine-1" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>:照文件複製一段 runtime 設定貼進節點的 <code>config.toml</code>,重啟 containerd,<strong>沒有任何錯誤</strong>,而 pod 起不來,訊息是 <code>no runtime for "…" is configured</code>——跟「shim 二進位檔沒複製到位」一模一樣。</p>
+<p><strong>根因</strong>:Kubernetes 官方 RuntimeClass 文件(以及絕大多數 gVisor、Kata、SpinKube 的教學)寫的是:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>[plugins.&quot;io.containerd.grpc.v1.cri&quot;.containerd.runtimes.${HANDLER}]
+</span></code></pre></div>
+<p>那是 containerd <strong>1.x</strong> 的 plugin ID。containerd 2.x 把 CRI 拆成兩個 plugin,實際路徑是:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>[plugins.&quot;io.containerd.cri.v1.runtime&quot;.containerd.runtimes.${HANDLER}]
+</span></code></pre></div>
+<p>而這座叢集的節點跑的是 <strong>containerd 2.3.3</strong>。</p>
+<p>更容易誤導的是,AKS 出廠的設定檔是一份<strong>混血</strong>:第一行寫 <code>version = 2</code>,內容卻用 2.x 的 plugin 名,於是每次 <code>containerd config dump</code> 都會印一行:</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="go">level=warning msg=&quot;Configuration migrated from version 2, use `containerd config migrate` to avoid migration&quot;</span>
+</span></code></pre></div>
+<p><strong>貼錯路徑的後果是安靜忽略。</strong> containerd 把它當成一個不認識的 plugin 設定,不報錯、不警告。</p>
+<p><strong>修法與追查順序</strong>:動手改節點之前先問 <code>containerd --version</code>,<strong>而不是先去檢查 shim 有沒有複製到位</strong>。containerd 自己的 CRI 設定文件有「Runtime classes」一節,用的就是 2.x 的路徑。</p>
+<h3 id="mine-2">地雷 2:叢集出廠就有一個指向不存在 handler 的 RuntimeClass<a class="headerlink" href="#mine-2" title="Permanent link">&para;</a></h3>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>runtimeclass<span class="w">          </span><span class="c1"># 全新叢集,什麼都還沒做</span>
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="go">NAME                HANDLER   AGE</span>
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="go">kata-vm-isolation   kata      4m32s</span>
+</span><span id="__span-20-4"><a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="go">runc                runc      4m33s</span>
+</span></code></pre></div>
+<p><code>runc</code> 對得上節點。<strong><code>kata-vm-isolation</code> 的 handler 是 <code>kata</code>,而這顆節點上沒有這個 handler,也沒有 kata 的 shim 二進位檔。</strong></p>
+<p>它由 AKS 的 addon-manager 放置,帶著 <code>addonmanager.kubernetes.io/mode: Reconcile</code>——刪掉會被裝回來。</p>
+<p><strong>根因是分層</strong>:RuntimeClass 是<strong>叢集層</strong>物件,handler 是<strong>節點層</strong>設定,<strong>API server 對兩者的一致性不做任何校驗</strong>。<code>kubectl apply</code> 一個 handler 不存在的 RuntimeClass,連警告都不會有(步驟 4 第二半親自驗過)。</p>
+<p><strong>教訓</strong>:<code>kubectl get runtimeclass</code> 列得出來,<strong>不代表叢集跑得動它</strong>。</p>
+<p>順帶兩個對後面有用的欄位,都在那個出廠物件上:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="nt">overhead</span><span class="p">:</span>
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="w">  </span><span class="nt">podFixed</span><span class="p">:</span>
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="w">    </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">600Mi</span>
+</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="nt">scheduling</span><span class="p">:</span>
+</span><span id="__span-21-5"><a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span>
+</span><span id="__span-21-6"><a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="w">    </span><span class="nt">kubernetes.azure.com/kata-vm-isolation</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;true&quot;</span>
+</span></code></pre></div>
+<p><code>overhead.podFixed</code> 是<strong>把執行體自身開銷回饋給排程器的正式管道</strong>(kata 要開一台輕量 VM,所以是 600Mi)。Day 5 量完 wasm 的記憶體足跡之後,這個欄位該填什麼才有答案。<code>scheduling</code> 則是<a href="#mine-3">地雷 3</a> 的主角。</p>
+<h3 id="mine-3">地雷 3:同一個「handler 不存在」,寫不寫 <code>scheduling</code> 給你兩種完全不同的失敗<a class="headerlink" href="#mine-3" title="Permanent link">&para;</a></h3>
+<p><strong>沒寫 <code>scheduling</code></strong>(步驟 4 建的那個):</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>pod<span class="w"> </span>pod-missing-handler
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="go">NAME                  READY   STATUS              AGE</span>
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="go">pod-missing-handler   0/1     ContainerCreating   112s</span>
+</span></code></pre></div>
+<p>Pod <strong>被成功排上節點</strong>,scheduler 沒有意見。失敗發生在 kubelet 對 containerd 發出建立請求的時候,每 14 秒重試一次,狀態<strong>永遠停在 <code>ContainerCreating</code></strong>。</p>
+<p><strong>它不會進 <code>CrashLoopBackOff</code>,也不會變成 <code>Error</code>——只監控那幾個狀態的告警規則抓不到它。</strong></p>
+<p><strong>寫了 <code>scheduling.nodeSelector</code></strong>(出廠那個 kata):</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>describe<span class="w"> </span>pod<span class="w"> </span>pod-kata-shipped<span class="w"> </span><span class="p">|</span><span class="w"> </span>tail<span class="w"> </span>-2
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="go">0/1 nodes are available: 1 node(s) didn&#39;t match Pod&#39;s node affinity/selector</span>
+</span></code></pre></div>
+<p>Pod 停在 <code>Pending</code>,而訊息<strong>一個字都沒提到 RuntimeClass</strong>。線索藏在活物件上:RuntimeClass 的 admission 外掛會把 <code>scheduling.nodeSelector</code> <strong>併進 pod 的 spec</strong>,所以 <code>kubectl get pod -o jsonpath='{.spec.nodeSelector}'</code> 會看到一個<strong>你自己沒寫過的選擇器</strong>——那就是「有人在 admission 動過手腳」的訊號,順著它查 RuntimeClass 才對得上。(自己手寫的 manifest 裡沒有這一欄,<strong>要查 API server 回來的活物件,不是查你送出去的檔案</strong>——這一點是 Day 7 實測後修正的。)</p>
+<p><strong>取捨很實際:</strong></p>
+<ul>
+<li><strong>不寫</strong>:在混合節點池裡(有些節點裝了 shim、有些沒有),Pod 會隨機挑到跑不動的節點,於是<strong>同一個 Deployment 有些副本活著、有些卡著,看起來像間歇性故障</strong>。</li>
+<li><strong>寫了</strong>:行為乾淨,但錯誤訊息難懂。</li>
+</ul>
+<p><strong>Day 6 的 shim 安裝器會替裝好的節點打標籤,所以那天建的 RuntimeClass 應該要帶 <code>scheduling</code>。</strong></p>
+<h3 id="mine-4">地雷 4:停機的 AKS 不是零成本<a class="headerlink" href="#mine-4" title="Permanent link">&para;</a></h3>
+<p><code>az aks stop</code> 之後,節點資源群組裡還留著六樣資源,其中 <strong>Standard 公用 IP 是按小時計費的</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>資源</th>
+<th>停機後是否計費</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>VMSS(capacity 歸零)</td>
+<td>否</td>
+</tr>
+<tr>
+<td>OS 磁碟(隨執行個體消失)</td>
+<td>否</td>
+</tr>
+<tr>
+<td>VNet / NSG / 受管身分</td>
+<td>否</td>
+</tr>
+<tr>
+<td><strong>Standard 公用 IP(Static)</strong></td>
+<td><strong>是,約 US$0.005/hr</strong></td>
+</tr>
+<tr>
+<td>Standard Load Balancer</td>
+<td><strong>未實測,不宣稱</strong></td>
+</tr>
+</tbody>
+</table>
+<p>約 <strong>NT$0.16/hr</strong>,一天 NT$3.8、一個月約 NT$115,<strong>不論有沒有流量、不論叢集開著還是停著</strong>。</p>
+<p>金額很小,但<strong>「停機後零成本」是一個假的宣稱,而假的零成本會讓人以為停機的叢集可以無限期放著不管</strong>。正確的說法是:收工後閒置成本約 NT$0.16/hr,<strong>要真的歸零只能整座刪除</strong>。</p>
+<h2 id="_7">帶得走的東西<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>文件寫的東西不算數,要下指令。</strong> 那份封存文件說 WASI node pool 不能建了,但 <code>--help</code> 裡它還是合法值、還附範例。只有真的送出請求,才會拿到那個帶 <code>Code</code> 的拒絕。</li>
+<li><strong>判定專案生死看 release 與 commit,不看官網。</strong> Krustlet 的官網與文件站今天都回 200、3605 顆星還在,而 repo 的最後一次提交是五年前把 README 改成「不再維護」——同一頁下面三行還寫著「1.0 即將推出」。</li>
+<li><strong>RuntimeClass 與節點設定之間沒有人負責校驗。</strong> 叢集層宣告一個名字,節點層提供一個實作,兩邊對不上時 API server 不會說話,而失敗會延遲到 pod 要啟動的那一刻才出現。</li>
+<li><strong>同一個錯誤有兩種長相,而其中一種躲得過告警。</strong> handler 不存在時,沒有 <code>scheduling</code> 的會卡在 <code>ContainerCreating</code> 無限重試——不是 <code>CrashLoopBackOff</code>、不是 <code>Error</code>,只盯那幾個狀態的規則看不到它。</li>
+<li><strong>停機不等於免費。</strong> 這條在任何雲上都值得自己量一次:哪些資源隨執行個體消失,哪些按小時一直跳。</li>
+</ul>
+<h2 id="_8">延伸閱讀<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h2>
+<p>想往下深挖,從這幾份開始:</p>
+<ul>
+<li><strong><a href="https://github.com/Azure/AKS/issues/4770">AKS WASI node pool 的退場公告</a></strong> —— 第一方公告,2025-01-28 開、2025-05-06 關:2025-05-05 起無法建立新的 WASI node pool,要求改用 SpinKube 遷移。</li>
+<li><strong><a href="https://learn.microsoft.com/en-us/azure/aks/use-wasi-node-pools">那份已封存的 WASI node pool 文件</a></strong> —— 已移入 previous-versions 並標註不被索引。值得看的是它同時包含「Krustlet 使用者請建立新的 WASI node pool」與「你無法建立新的 WASI node pool」兩段指示。</li>
+<li><strong><a href="https://github.com/containerd/containerd/blob/main/docs/cri/config.md">containerd 的 CRI 設定文件</a></strong> —— 地雷 1 的一手來源:「Runtime classes」一節用的是 containerd 2.x 的 <code>io.containerd.cri.v1.runtime</code> 路徑。</li>
+<li><strong><a href="https://kubernetes.io/docs/concepts/containers/runtime-class/">Kubernetes RuntimeClass 文件</a></strong> —— <code>handler</code>、<code>scheduling</code>、<code>overhead</code> 三個欄位的規格;注意它的設定範例仍是 containerd 1.x 的路徑。</li>
+</ul>
+<h2 id="_9">下一步<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h2>
+<p>今天證明了機制存在,但<strong>還沒有任何 wasm 在跑</strong>——七層追到底,最後那個 shim 仍然是 <code>runc</code>。</p>
+<p><a href="../sprint3-day2-wasmcloud/">Day 2</a> 換上第一條路線 wasmCloud,而它的做法跟今天這條線<strong>完全不同</strong>:它不在節點上加 shim,它的 host 就是一般的 pod。所以那一天的驗收有兩半,第二半是<strong>把節點的 containerd 設定跟今天存下來的基準逐字比對,證明它一個位元組都沒動</strong>。</p>
+<p>三條路線之所以照「對節點的侵入程度由低到高」排,原因就在這裡:<strong>最乾淨的那一條先做,後面的改動才不會污染前面的量測。</strong></p>
+<hr />
+<div class="admonition quote">
+<p>Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,此處作社群教學用途。</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到頂端
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="頁腳" >
+        
+          
+          <a href="../sprint3-day0-wasm-concepts/" class="md-footer__link md-footer__link--prev" aria-label="上一頁: Day 0 · wasm 是什麼">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                上一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 0 · wasm 是什麼
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../sprint3-day2-wasmcloud/" class="md-footer__link md-footer__link--next" aria-label="下一頁: Day 2 · wasmCloud 與元件模型">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                下一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 2 · wasmCloud 與元件模型
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      KAI Scheduler、HAMi、Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,作社群教學用途
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.code.annotate", "content.code.select", "content.tabs.link", "search.suggest", "search.highlight", "search.share"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u8907\u88fd", "clipboard.copy": "\u8907\u88fd", "search.result.more.one": "\u6b64\u9801\u5c1a\u6709 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.more.other": "\u6b64\u9801\u5c1a\u6709 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.none": "\u6c92\u6709\u7b26\u5408\u7684\u9805\u76ee", "search.result.one": "\u627e\u5230 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.other": "\u627e\u5230 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.placeholder": "\u6253\u5b57\u9032\u884c\u641c\u5c0b", "search.result.term.missing": "\u7f3a\u5c11\u5b57\u8a5e", "select.version": "\u9078\u64c7\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
