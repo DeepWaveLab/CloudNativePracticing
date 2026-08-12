@@ -100,7 +100,7 @@ KAI 裝完就自帶那四個 PriorityClass。分水嶺在 **100**:值 ≥100 的
 
 ### 步驟 1:先把 GPU pool 拉起來,等待時間拿去裝 KAI
 
-Day 0 定下的紀律是收工把 GPU pool 縮到 0。開工第一件事就是拉回來:
+GPU pool 平時依 [Day 0 的成本紀律](sprint1-day0-azure-aks-foundation.md)縮到 0,使用前先拉回 2 台:
 
 ```console
 $ az aks nodepool scale \

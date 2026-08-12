@@ -55,13 +55,13 @@ flowchart TB
 
 ### 今天要走的路
 
-七個步驟:喚醒環境並部署基線對象 → 把上面那條鏈跑通並拿任意事件驗證 → 走一次 pid 那條路並說明為什麼不選它 → 把過濾掛到 pod slice 上、寫出今天的主角腳本 → 量過濾前後的差距 → 做出 nginx 的啟動基線(本日驗收)→ 用三個刻意的偏離測試基線,再誠實列出這套做法辦不到的事。
+七個步驟:部署基線對象 → 把上面那條鏈跑通並拿任意事件驗證 → 走一次 pid 那條路並說明為什麼不選它 → 把過濾掛到 pod slice 上、寫出今天的主角腳本 → 量過濾前後的差距 → 做出 nginx 的啟動基線(本日驗收)→ 用三個刻意的偏離測試基線,再誠實列出這套做法辦不到的事。
 
 ## 步驟
 
-### 步驟 1:喚醒環境,並替基線對象挑一個映像
+### 步驟 1:替基線對象挑一個映像
 
-叢集前一天收工時停掉,開工先 `az aks start`(本次 4 分 05 秒),再把 `ebpf` pool 從 0 拉回 2 台 `Standard_D2as_v5` spot(1 分 40 秒)。接著的 `kubectl` 一如預期連不上,那是 [Day 1 的地雷 1](sprint2-day1-bpftrace-basics.md#mine-1) 又一次發作,但**這次快取的是區域網路的 DNS 轉發器,不是工作站**:Day 1 那次 `nslookup` 說解得到、`getaddrinfo()` 說沒有,今天連 `nslookup` 都回 NXDOMAIN,只有直接問公用 DNS 才解得到。同一顆地雷、不同的快取層,症狀相反而解法相同——用 `--server` 加 `--tls-server-name` 繞過名字解析。順帶兩件值得記住的事實:API server 的 IP 每次停機再開都會換,VMSS 實例編號也是,所以那條繞道指令不能寫死進腳本。
+環境同前章,`ebpf` pool 兩台 `Standard_D2as_v5` spot(1 分 40 秒)。接著的 `kubectl` 一如預期連不上,那是 [Day 1 的地雷 1](sprint2-day1-bpftrace-basics.md#mine-1) 又一次發作,但**這次快取的是區域網路的 DNS 轉發器,不是工作站**:Day 1 那次 `nslookup` 說解得到、`getaddrinfo()` 說沒有,今天連 `nslookup` 都回 NXDOMAIN,只有直接問公用 DNS 才解得到。同一顆地雷、不同的快取層,症狀相反而解法相同——用 `--server` 加 `--tls-server-name` 繞過名字解析。順帶兩件值得記住的事實:API server 的 IP 每次停機再開都會換,VMSS 實例編號也是,所以那條繞道指令不能寫死進腳本。
 
 DaemonSet 逐字重用 Day 1 的檔案,基線對象改用 nginx。第一次套用直接 `ImagePullBackOff`:
 
@@ -631,7 +631,7 @@ prog total=53
 bpftrace procs=0
 ```
 
-總數停在 53 而不是開工的 52,多出來那一支是隨容器生滅漂進來的 `cgroup_device`;`tracing=1` 是核心自帶的 `hid_tail_call`,Day 1 記過同一個 tag。**驗收條件寫成「自己掛的那幾類歸零」,不是「總數回到開工值」。** 兩顆節點的最終狀態一致,節點 `/tmp` 也沒有留下東西。
+總數停在 53 而不是最初的 52,多出來那一支是隨容器生滅漂進來的 `cgroup_device`;`tracing=1` 是核心自帶的 `hid_tail_call`,Day 1 記過同一個 tag。**驗收條件寫成「自己掛的那幾類歸零」,不是「總數回到最初的基線值」。** 兩顆節點的最終狀態一致,節點 `/tmp` 也沒有留下東西。
 
 接著刪 `ebpf-lab` namespace(11 秒)、把 `ebpf` pool 縮回 0(1 分 10 秒)並用 `nodepool list`、`nodepool show`、`kubectl get nodes` 三重驗證,最後停掉整座叢集(2 分 04 秒),三個 pool 的定義都留給 Day 3。`ebpf` pool 從下達 scale 到確認歸零共存活 22 分 10 秒(0.369 hr),spot 單價 US$0.0207/hr/台,本日兩台合計 **US$0.0153**,約新台幣 0.49 元;同規格隨需價是 US$0.112/hr/台。
 

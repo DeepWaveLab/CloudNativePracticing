@@ -63,7 +63,7 @@
 
     ---
 
-    給切卡的帳本一張臉:配額鏈與用量鏈、畫面上的 0 有幾種來源,還意外目擊一次真實 spot 回收。
+    給切卡的帳本一張臉:配額鏈與用量鏈、畫面上的 0 有幾種來源,並附一次真實 spot 回收的觀測案例。
 
 -   ![Kubernetes DRA](../assets/logos/kubernetes-icon-color.svg){ width="44" }
 

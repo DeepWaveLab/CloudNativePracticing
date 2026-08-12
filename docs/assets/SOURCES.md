@@ -14,6 +14,10 @@
 | logos/falco-icon-color.svg | https://github.com/cncf/artwork/blob/master/projects/falco/icon/color/falco-icon-color.svg | 2026-08-07 | CNCF artwork(Linux Foundation),社群教學用途 |
 | logos/tetragon-icon-color.svg | https://github.com/cilium/tetragon/blob/main/docs/static/svgs/tetragon-shield.svg | 2026-08-07 | Tetragon 官方 repo 的盾牌標誌(CNCF artwork 尚無 tetragon 目錄) |
 | logos/cilium-icon-color.svg | https://github.com/cncf/artwork/blob/master/projects/cilium/icon/color/cilium_icon-color.svg | 2026-08-07 | CNCF artwork;Day 7–9 使用 |
+| logos/webassembly-icon-color.svg | https://github.com/WebAssembly/web-assembly-logo/blob/master/dist/icon/web-assembly-icon.svg | 2026-08-10 | WebAssembly 官方 GitHub 組織,授權 CC0 1.0;目檢後採純圖示版——完整字標的彩色版在深色底字樣過暗、白色版在淺色底整個消失 |
+| logos/wasmcloud-icon-color.svg | https://github.com/cncf/artwork/blob/main/projects/wasmcloud/icon/color/wasmcloud.icon_green.svg | 2026-08-10 | CNCF artwork(Linux Foundation);單色 #00bc8e,W 由負空間構成,淺深兩底目檢皆可讀,不需深色版;Day 2–3 使用 |
+| logos/wasmedge-icon-color.svg | https://github.com/cncf/artwork/blob/main/projects/wasm-edge-runtime/icon/color/wasm-edge-runtime-icon-color.svg | 2026-08-10 | CNCF artwork(Linux Foundation);CNCF 目錄名為 wasm-edge-runtime;方形徽章,頂端缺口吃背景色,淺深兩底目檢皆可讀;Day 4 使用 |
+| logos/spinkube-icon-color.svg | https://github.com/cncf/artwork/blob/main/projects/spinkube/icon/color/spinkube-icon-color.svg | 2026-08-11 | CNCF artwork(Linux Foundation);七邊形漸層徽章,內部標記為負空間,淺深兩底目檢皆可讀;Day 6–7 使用 |
 | screenshots/day5/*.png | 本課程實測擷圖(HAMi-WebUI chart 1.2.0,英文介面) | 2026-08-05 | 課程自製 |
 | screenshots/sprint2-day9/*.png | 本課程實測擷圖(Hubble UI,Cilium chart 1.20.0,英文介面;headless Chrome 151 經 CDP 擷取) | 2026-08-07 | 課程自製 |
 | screenshots/sprint2-day9/05–07-*.png | 本課程實測擷圖(Hubble UI,Cilium 1.20.0);headless Chrome 151 經 CDP、1600×1000 @2x | 2026-08-07 | 課程自製;05 服務圖(L7 虛線／L4 實線)、06 L7 拒絕顯示 Unknown drop reason、07 L4 拒絕顯示 Policy denied |

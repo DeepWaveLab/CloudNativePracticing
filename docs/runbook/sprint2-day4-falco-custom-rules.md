@@ -374,7 +374,7 @@ window end   2026-08-06T11:18:11Z
 
 ### 接收端放在叢集內
 
-**不接任何外部目的地、不放任何憑證**——Slack、Teams、PagerDuty、SMTP 全部需要 token 或密碼,而這種東西不該出現在教材或範例設定裡。所以接收端是一顆自己寫的 python `http.server`,做兩件事:回 200、把收到的 JSON 印到自己的標準輸出。
+**不接任何外部目的地、不放任何憑證**——Slack、Teams、PagerDuty、SMTP 全部需要 token 或密碼,而範例設定不放真實憑證。所以接收端是一顆自己寫的 python `http.server`,做兩件事:回 200、把收到的 JSON 印到自己的標準輸出。
 
 ```bash
 cat > webhook-receiver.yaml <<'EOF'
@@ -526,9 +526,9 @@ $ kubectl -n falco logs deploy/webhook-receiver | grep -c RECEIVED
 
 ## 誠實的差距
 
-- **`minimumpriority` 設了但沒被驗證。** 實驗期間沒有產生 informational 或 debug 等級的事件,所以「低於門檻的會被擋掉」這件事本課沒有實測過。
-- **追加式覆寫沒有實作。** 上面那張表提到官方語法可以只追加 `exceptions` 的 `values` 而不動原規則檔,這是官方文件寫的能力,本課沒有跑過那條路徑。
-- **告警去向只驗到叢集內的 webhook。** 真實環境常見的 Slack、SIEM、物件儲存全部沒接——它們都需要憑證,不適合放進教材。扇出的能力是設定層的,本課只證明了「一個目的地收得到」。
+- **`minimumpriority` 設了但沒被驗證。** 實驗期間沒有產生 informational 或 debug 等級的事件,所以「低於門檻的會被擋掉」這件事沒有實測過。
+- **追加式覆寫沒有實作。** 上面那張表提到官方語法可以只追加 `exceptions` 的 `values` 而不動原規則檔,這是官方文件寫的能力,那條路徑沒有跑過。
+- **告警去向只驗到叢集內的 webhook。** 真實環境常見的 Slack、SIEM、物件儲存全部沒接——它們都需要憑證,不適合放進教材。扇出的能力是設定層的,這裡只證明了「一個目的地收得到」。
 - **調校後的規則沒有長時間觀察。** 0 alerts/min 是 120 秒窗口的結果,不是跑一週的結果。
 - **兩個 `exceptions` 寫死了 ClusterIP。** 其中一個指向的 Service 在收工時已經刪掉,那條例外從此指向一個不存在的位址——無害但無效。這本身就是「例外需要定期回頭審查」的實例。
 
@@ -604,7 +604,7 @@ LOAD_DEPRECATED_ITEM (Used deprecated item: field 'evt.dir'):
 
 Falco 0.44 的 syscall source **不再送 enter 事件**,所以 `evt.dir = <` 恆真、`evt.dir = >` 恆假。
 
-這條規則剛好沒事——恆真等於把它拿掉。**但把不等號寫反的人不會這麼幸運**:`evt.dir = >` 會讓整條規則恆假、**一輩子不報,而且 helm 全綠、schema 驗證通過、pod 健康**。網路上大量 Falco 規則範例是 0.3x 時代寫的,複製過來就是這個結果。
+這條規則剛好沒事——恆真等於把它拿掉。**但把不等號寫反的人不會這麼幸運**:`evt.dir = >` 會讓整條規則恆假、**永遠不會觸發,而且 helm 全綠、schema 驗證通過、pod 健康**。網路上大量 Falco 規則範例是 0.3x 時代寫的,複製過來就是這個結果。
 
 **修法**:刪掉那個詞。修完之後 warning 區塊整個消失:
 

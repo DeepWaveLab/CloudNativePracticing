@@ -630,7 +630,7 @@ queue.scheduling.run.ai "batch-eval" deleted
 namespace "kai-lab" deleted
 ```
 
-GPU pool 照 Day 0 的收工循環縮回 0(指令同 Day 0 步驟 8)。今天模擬回收又補過節點,收工時更要回查 `count` 確認最終狀態,別只看指令的回傳值——理由見[地雷 5](#mine-5)。
+GPU pool 照 Day 0 的紀律縮回 0(指令同 Day 0 步驟 8)。本日模擬回收又補過節點,縮容後更要回查 `count` 確認最終狀態,別只看指令的回傳值——理由見[地雷 5](#mine-5)。
 
 ## 驗收 checkpoint
 
@@ -727,21 +727,21 @@ Time                          Op                           Status
 2026-08-03T08:21:23.8985592Z  Create or Update Agent Pool  Started
 ```
 
-多出了 08:27:21 那一組——那是另一個 session 的收工停機流程下的 `--node-count 0`。真正的時間軸是:
+多出了 08:27:21 那一組——那是**另一個操作者**的停機流程下的 `--node-count 0`,正是這顆地雷的場景。真正的時間軸是:
 
 | 時間(UTC) | 操作 | 來源 |
 |---|---|---|
-| 08:21:23 | `nodepool scale --node-count 2` | 實驗 session |
-| 08:23:57 | 查到 `count: 2 / Updating`(真實進度) | 實驗 session |
-| 08:27:21 | `nodepool scale --node-count 0` | **另一個 session** |
+| 08:21:23 | `nodepool scale --node-count 2` | 操作者 A |
+| 08:23:57 | 查到 `count: 2 / Updating`(真實進度) | 操作者 A |
+| 08:27:21 | `nodepool scale --node-count 0` | **操作者 B** |
 | 08:28:52 | 收斂為 `count: 0 / Succeeded` | —— |
 
 **真正的根因(兩層)**:
 
-1. **node pool 的 `count` 是宣告式的期望值,沒有鎖也沒有版本檢查**。兩個 session 先後下 scale,AKS 一律接受,最後一次寫入直接覆蓋——不報衝突、不警告,兩道指令都回 `Succeeded`。
+1. **node pool 的 `count` 是宣告式的期望值,沒有鎖也沒有版本檢查**。兩個操作者先後下 scale,AKS 一律接受,最後一次寫入直接覆蓋——不報衝突、不警告,兩道指令都回 `Succeeded`。
 2. **Azure activity log 有數分鐘的傳播延遲**。08:27:21 的操作在 08:27:51 查詢時查不到,5 分鐘後才出現。「查了 log 沒看到別人,所以沒有別人」這個推論,在事發後幾分鐘內**不成立**。
 
-**另一個陷阱**:兩個 session 用同一組 Azure 憑證,activity log 的 `caller` 欄位完全相同。就算傳播完成,也無法靠 `caller` 分辨是誰下的,只能靠時間戳對照各自的操作紀錄。
+**另一個陷阱**:兩個操作者用同一組 Azure 憑證,activity log 的 `caller` 欄位完全相同。就算傳播完成,也無法靠 `caller` 分辨是誰下的,只能靠時間戳對照各自的操作紀錄。
 
 **修法**:(1) 共用叢集要約定**單一收放權責**(誰負責開關機),或用 tag 標記「實驗進行中」;(2) 事故追查時,activity log 至少等 5–10 分鐘再下結論,並且**先問人**再怪平台;(3) 自動化腳本 scale 後一律回查 `count` 與實際節點數——這件事無論如何都要做,只是原因不是平台會吃掉請求,而是別人可能覆蓋你。
 

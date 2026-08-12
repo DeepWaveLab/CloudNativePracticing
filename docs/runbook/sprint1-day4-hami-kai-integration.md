@@ -80,7 +80,7 @@ flowchart TB
 
 ### 步驟 1:用一行 annotation 決定四顆 pod 疊在一張卡還是攤在兩張
 
-開工照 Day 0 的循環把 GPU pool 拉回兩台,並且回查 `count` 而不是只看指令回傳(理由是 Day 2 地雷 5)。從下指令到兩張卡可配置共 **5 分 51 秒**,而這段時間沒有任何 HAMi 的操作:
+先照 Day 0 的循環把 GPU pool 拉回兩台,並且回查 `count` 而不是只看指令回傳(理由是 Day 2 地雷 5)。從下指令到兩張卡可配置共 **5 分 51 秒**,而這段時間沒有任何 HAMi 的操作:
 
 ```text
 12:21:39  node objects appear (NotReady): vmss00000b / vmss00000c
@@ -196,7 +196,7 @@ Error: failed to perform "FetchReference" on source:
 
 能用的是 Day 1 裝 KAI 時用的 `ghcr.io/kai-scheduler/kai-scheduler/kai-scheduler`,KAI 專案自己的 README 也是這個位址;文件裡的 `ghcr.io/nvidia/...` 是還沒開放的別名。Day 1 地雷 1 踩的是 chart 的**版本字串**,這次踩的是 chart 的**位址**——同一類問題的兩個位置,共同的處理方式都是先用 `helm show chart` 對一次再動手。
 
-本叢集 Day 1 已經有 v0.16.8,所以改成 `helm upgrade` 疊上整合值(`07-kai-integration-values.yaml`,此刻的內容是 `global.gpuSharing: true` 加 `binder.plugins.hamicore.enabled: true`;現存檔案裡還多一行 `admission.gpuFractionRuntimeClassName: ""`,那是稍後[地雷 1](#mine-1) 的修法事後補進同一份檔案的——照檔案操作的讀者會直接跳過那顆雷):
+本叢集 Day 1 已經有 v0.16.8,所以改成 `helm upgrade` 疊上整合值(`07-kai-integration-values.yaml`,此刻的內容是 `global.gpuSharing: true` 加 `binder.plugins.hamicore.enabled: true`;檔案裡另有一行 `admission.gpuFractionRuntimeClassName: ""`,那是[地雷 1](#mine-1) 的修法——照完整檔案操作會直接跳過那顆雷):
 
 ```bash
 cat > 07-kai-integration-values.yaml <<'EOF'
@@ -317,7 +317,7 @@ proportion.go:256  Total allocatable resources are
   <CPU: 7.511 (cores), memory: 50.122 (GB), Gpus: 20>, number of nodes: <3>
 ```
 
-這一段吃掉本日最久的 8 分鐘,診斷順序值得完整寫下來。第一個訊號是排程器的日誌跟自己的事件互相矛盾:`Gpus: 20` 表示卡明明看得見(兩台 × HAMi 切的 10 份),事件卻說 GPU memory 不夠。第二步是把請求量往下砍,4096 改成 2000、1000,結果一樣 Pending;這條路死掉本身就是資訊,問題與請求量無關。於是問題換成「KAI 是從哪裡知道一張卡有多少 VRAM 的」,答案在原始碼裡的一個 fallback 常數(見[地雷 2](#mine-2))。手動補上節點標籤之後(12:42:43),排程立刻過了——接著撞上今天最硬的一顆:
+這一段的診斷歷時 8 分鐘,順序值得完整記錄。第一個訊號是排程器的日誌跟自己的事件互相矛盾:`Gpus: 20` 表示卡明明看得見(兩台 × HAMi 切的 10 份),事件卻說 GPU memory 不夠。第二步是把請求量往下砍,4096 改成 2000、1000,結果一樣 Pending;這條路死掉本身就是資訊,問題與請求量無關。於是問題換成「KAI 是從哪裡知道一張卡有多少 VRAM 的」,答案在原始碼裡的一個 fallback 常數(見[地雷 2](#mine-2))。手動補上節點標籤之後(12:42:43),排程立刻過了——接著撞上今天最硬的一顆:
 
 ```text
 Events:
@@ -459,7 +459,7 @@ hami_resource_quota_used{namespace="hami-lab",quota_name="nvidia.com/gpumem"}  1
 
 Day 3 有一個沒回答完的問題:`nvidia.com/gpumem` 不是節點資源,`kubectl` 查不到任何餘額,那 VRAM 到底剩多少要去哪裡看?答案在這裡,而且是 per-device 的完整帳:`hami_gpu_memory_limit_bytes` 對上 `hami_gpu_memory_allocated_bytes` 就是「這張卡還剩多少」,`hami_node_gpu_memory_allocated_ratio = 0.25` 精準對上 `coex-hami` 的 4096/16384。
 
-但最後兩行不能信。`hami-lab` 是 Day 3 收工時就刪掉的 namespace,`day4-lab` 的實際持有量也只有 4096 MiB——這是[地雷 4](#mine-4)。
+但最後兩行不能信。`hami-lab` 是 Day 3 結束時就刪掉的 namespace,`day4-lab` 的實際持有量也只有 4096 MiB——這是[地雷 4](#mine-4)。
 
 KAI 那邊:
 

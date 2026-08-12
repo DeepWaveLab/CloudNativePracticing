@@ -507,13 +507,13 @@ No resources found                          ← 卸載後約 95 秒,自己清掉
 
 DeviceClass 與 DaemonSet 是 helm 管的,`uninstall` 一下就走;ResourceSlice 不是 helm 建的,它是 kubelet plugin 在執行期自己 publish 的,helm 的 release manifest 裡根本沒有這個物件,所以會清,但不同步([地雷 4](#mine-4))。
 
-中間那段窗口順手測了一件事:在 ResourceSlice 還在、driver 已經沒了的狀態下,重建一個指向 `gpu.example.com` 的 DeviceClass 與 claim,會不會配到一顆不存在的裝置?結果是 `ghost-pod` 排在 Pending,claim 停在 `pending`,事件同樣是那句 `cannot allocate all claims`,沒有配置成功。不過這裡要誠實標一句:**這只證明「到觀察的時候不會配」,沒有證明「窗口內任一時刻都不會配」**,因為 slice 消失的確切時刻沒有量到,只知道落在 15 秒到 95 秒之間。
+中間那段窗口另補一項驗證:在 ResourceSlice 還在、driver 已經沒了的狀態下,重建一個指向 `gpu.example.com` 的 DeviceClass 與 claim,會不會配到一顆不存在的裝置?結果是 `ghost-pod` 排在 Pending,claim 停在 `pending`,事件同樣是那句 `cannot allocate all claims`,沒有配置成功。不過這裡要誠實標一句:**這只證明「到觀察的時候不會配」,沒有證明「窗口內任一時刻都不會配」**,因為 slice 消失的確切時刻沒有量到,只知道落在 15 秒到 95 秒之間。
 
 殘留照 Day 4 的做法逐項回查:`get deviceclass,resourceslices` 零筆、`get clusterrole,clusterrolebinding | grep -i dra` 零筆(chart 的 RBAC 隨 uninstall 清掉)、兩種 webhook 設定也都零筆(`webhook.enabled=false`,本來就沒建)。
 
 ### 步驟 8:刪掉 `drasim`,結清今天的帳
 
-`drasim` 不在每日 18:00 自動歸零腳本的守備範圍內(那支只管 `gpuspot`),所以這一步必須自己做完:
+`drasim` 不在 Day 0 那套收工歸零循環的涵蓋範圍內(那套指令只管 `gpuspot`),所以這一步必須自己做完:
 
 ```console
 16:17:43 $ az aks nodepool delete -g <resource-group> --cluster-name <cluster> -n drasim \

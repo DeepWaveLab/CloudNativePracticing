@@ -95,9 +95,9 @@ tracepoint:syscalls:sys_exit_openat
 
 ## 步驟
 
-### 步驟 1:喚醒環境並確認 bpftrace 的版本與來源
+### 步驟 1:確認 bpftrace 的版本與來源
 
-叢集在前一天收工時停掉了,開工第一件事是 `az aks start`(本次 4 分 36 秒),再把 `ebpf` pool 從 0 `az aks nodepool scale` 回 2(2 分 09 秒)。`az` 一路順暢,但接下來的 `kubectl` 會連不上,而且錯誤訊息會把你指向完全錯的方向,診斷與正解見[地雷 1](#mine-1)。繞過之後三顆節點都在:
+若叢集曾停機(成本紀律的常態),重新啟動後 `az` 會一路順暢,但 `kubectl` 可能連不上,而且錯誤訊息會把你指向完全錯的方向——診斷與正解見[地雷 1](#mine-1)。`ebpf` pool 兩台 spot 就緒後,三顆節點都在:
 
 ```console
 $ kubectl get nodes -o custom-columns='NODE:…,KERNEL:…,IMAGE:…'
@@ -180,7 +180,7 @@ ebpf-lab-system   1/1     Running   19s   aks-system-35459509-vmss000002
 trace-target      1/1     Running   19s   aks-ebpf-80832270-vmss000003
 ```
 
-19 秒四顆全部 Running。裝完 bpftrace(兩顆 pod 並行 23 秒,含 `apt-get update`)之後,開工的第一件事是確認手上這支是哪一支:
+19 秒四顆全部 Running。裝完 bpftrace(兩顆 pod 並行 23 秒,含 `apt-get update`)之後,第一件事是確認手上這支是哪一支:
 
 ```console
 $ kubectl -n ebpf-lab exec ebpf-lab-przdr -- which -a bpftrace
@@ -198,7 +198,7 @@ $ kubectl -n ebpf-lab exec ebpf-lab-przdr -- \
 bpftrace v0.9.4                       ← 節點上那支,還在
 ```
 
-Day 0 記過節點內建一支 2019 年的 v0.9.4,而且它在 PATH 裡排在前面。這件事每天開工都要複驗一次,因為它不會壞掉,只會少東西。容器裡的 PATH 摸不到節點那支,所以「一律在容器裡自己裝」這條紀律本身就是防呆;但只要用 `nsenter` 或 `chroot` 進節點除錯,v0.9.4 立刻又是預設值。
+Day 0 記過節點內建一支 2019 年的 v0.9.4,而且它在 PATH 裡排在前面。這件事每天都要複驗一次,因為它不會壞掉,只會少東西。容器裡的 PATH 摸不到節點那支,所以「一律在容器裡自己裝」這條紀律本身就是防呆;但只要用 `nsenter` 或 `chroot` 進節點除錯,v0.9.4 立刻又是預設值。
 
 ### 步驟 2:execsnoop、opensnoop、tcpconnect 各驗一次
 
@@ -556,7 +556,7 @@ $ kubectl -n ebpf-lab exec ebpf-lab-przdr -- \
 
 是核心自帶的 `hid_tail_call`,兩顆 kernel 上都是同一個 tag。同一份清單 `grep -c vfs_write` 的結果是 0,今天載入的程式一個不剩。
 
-還有一個量測細節值得記住:`ebpf` pool 的基線在一天內從 52 漂到 53,漂進來的那一個是 `cgroup_device`,而節點上光這一類就有 46 個,容器起落就會增減。**「prog 總數回到開工時的數字」不是可靠的驗收條件,要看的是「自己掛的那一類程式歸零」。**
+還有一個量測細節值得記住:`ebpf` pool 的基線在一天內從 52 漂到 53,漂進來的那一個是 `cgroup_device`,而節點上光這一類就有 46 個,容器起落就會增減。**「prog 總數回到當天最初的數字」不是可靠的驗收條件,要看的是「自己掛的那一類程式歸零」。**
 
 接著刪 namespace(45 秒)、把 `ebpf` pool 縮回 0(1 分 10 秒)並用 `nodepool list`、`nodepool show`、`kubectl get nodes` 三重驗證,最後停掉整座叢集(2 分 04 秒),三個 pool 的定義都保留給 Day 2。節點側的 hostPath 目錄不會跟著 pool 縮容消失,要自己 `rm -rf /var/log/day1-watch`。
 
@@ -599,7 +599,7 @@ kubectl \
 
 `--tls-server-name` 讓 SNI 與憑證驗證仍然用 FQDN,只有連線目標換成 IP,安全性一點都沒放掉。要根治就是 `sudo killall -HUP mDNSResponder`,但那需要 sudo。
 
-**教訓**:這條跟 eBPF 無關,卻直接來自本課程的成本紀律——每天收工停叢集、隔天開叢集,等於每天替自己種一次這顆雷。
+**教訓**:這條跟 eBPF 無關,卻直接來自本課程的成本紀律——頻繁停開叢集,就會反覆種下這顆雷。
 
 ### 地雷 2:同名的 execsnoop,兩個實作對失敗的 exec 預設行為相反 {#mine-2}
 
@@ -607,7 +607,7 @@ kubectl \
 
 **根因**:`execsnoop.bt` 掛的是 `sys_enter_exec*`,拿不到回傳值,所以成功與失敗印得一模一樣(rc=127 的那一次照樣有一行)。`execsnoop-bpfcc` 掛了進入與離開兩端,拿得到回傳值,於是預設只印成功的,失敗的要加 `-x` 才看得到。
 
-**修法**:bcc 版要看失敗的 exec 就加 `-x`(`--fails`);bpftrace 版要區分成敗,得自己再掛一支追離開端。教材與監控規格裡示範 execsnoop 時,一定要指名是哪一個實作。
+**修法**:bcc 版要看失敗的 exec 就加 `-x`(`--fails`);bpftrace 版要區分成敗,得自己再掛一支追離開端。任何文件或監控規格示範 execsnoop 時,一定要指名是哪一個實作。
 
 **教訓**:兩份「這台機器跑過什麼」的清單,在「有人嘗試執行但失敗了」這一類事件上結論完全相反——而那一類事件正是入侵偵測最在意的(打錯路徑的攻擊工具、被權限擋下的提權嘗試)。
 
@@ -625,7 +625,7 @@ $ bpftrace --info | sed -n '/Kernel helpers/,/^$/p'
   dpath: no                                     ← bpftrace 說沒有
 ```
 
-也就是說,擋下來的是 bpftrace 自己的能力偵測,不是核心。至於偵測為什麼失敗,最可能的解釋是 `bpf_d_path` 有核心允許清單(`btf_allowlist_d_path`,只有 `vfs_truncate`、`dentry_open`、`security_file_permission` 等少數函式可以呼叫),而 bpftrace 的偵測程式沒有掛在清單內的函式上,載入失敗就被記成「helper 不存在」——**這一層本課沒有直接量到,標記為推測**。
+也就是說,擋下來的是 bpftrace 自己的能力偵測,不是核心。至於偵測為什麼失敗,最可能的解釋是 `bpf_d_path` 有核心允許清單(`btf_allowlist_d_path`,只有 `vfs_truncate`、`dentry_open`、`security_file_permission` 等少數函式可以呼叫),而 bpftrace 的偵測程式沒有掛在清單內的函式上,載入失敗就被記成「helper 不存在」——**這一層沒有直接量到,標記為推測**。
 
 **修法**:不要等它修好,也不要去升級 kernel(換成 6.12 也一樣)。路徑自己從 dentry 鏈走出來,見步驟 3 的腳本。錯誤訊息指名的元件不一定是有問題的元件,兩個獨立的能力探測給出相反答案時,先確認是誰在做判斷。
 
@@ -641,7 +641,7 @@ $ bpftrace --info | sed -n '/Kernel helpers/,/^$/p'
 
 **症狀**:量啟動延遲的腳本在偵測到第一個位元組之後送 `SIGINT`,bpftrace 每次都正常結束,`execsnoop-bpfcc` 卻繼續寫輸出;`ps -eo pid,etime,args` 抓到 `30868  04:04  /usr/bin/python3 /usr/sbin/execsnoop-bpfcc`,訊號送出去四分鐘後還在跑。
 
-**根因(推測)**:合理的解釋是 CPython 的訊號處理。`SIGINT` 只會設一個旗標,要等直譯器回到位元組碼邊界才丟 `KeyboardInterrupt`,而那時它正卡在 `libbcc` 的 clang 編譯裡——那是一次 ctypes 呼叫,兩秒起跳。本課沒有進一步驗證這條推論。
+**根因(推測)**:合理的解釋是 CPython 的訊號處理。`SIGINT` 只會設一個旗標,要等直譯器回到位元組碼邊界才丟 `KeyboardInterrupt`,而那時它正卡在 `libbcc` 的 clang 編譯裡——那是一次 ctypes 呼叫,兩秒起跳。這條推論沒有進一步驗證。
 
 **修法**:收工紀律因此不同,bpftrace 可以 `SIGINT`,bcc 工具要準備好 `SIGKILL`。另外 `pkill -9 -f "execsnoop-bpfcc"` 會把自己那一行 `bash -c` 也殺掉(pattern 出現在自己的命令列裡),整個 `kubectl exec` 回 137;要嘛寫成 `pkill -f "[e]xecsnoop-bpfcc"`,要嘛就別用 `-f`。
 

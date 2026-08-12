@@ -55,7 +55,7 @@ netlab      default-deny-ingress   36m   True
 netlab      echo7-get-only         31m   True
 ```
 
-`AGE` 是真相——那個時間點是 Day 8 收工前建立的,**這些物件不是重建的,是同一批**。不過「物件在」不等於「在執行」([Day 8 地雷 3](sprint2-day8-cilium-network-policy.md#mine-3) 的教訓),所以要打一次:
+`AGE` 是真相——那個時間點是 Day 8 結束前建立的,**這些物件不是重建的,是同一批**。不過「物件在」不等於「在執行」([Day 8 地雷 3](sprint2-day8-cilium-network-policy.md#mine-3) 的教訓),所以要打一次:
 
 ```console
 $ GET  http_code=200
@@ -309,10 +309,10 @@ netlab/flowgen              netlab/multiport                   9090      106  DR
 ## 誠實的差距
 
 - **緩衝區容量的預設值,文件與實測對不上。** 見[地雷 1](#mine-1)。本課只能確定「這座叢集是 4095」,不能宣稱那是所有版本的預設。
-- **沒有開匯出。** 要把 Hubble 當事後鑑識工具就得把 flow 落地或送 Prometheus,兩者都是額外的 Helm 變更與儲存成本,本課刻意沒開(會改資料平面設定,而且要另外驗證)。**所以「接出去之後歷史有多深、成本多少」本課沒有答案。**
+- **沒有開匯出。** 要把 Hubble 當事後鑑識工具就得把 flow 落地或送 Prometheus,兩者都是額外的 Helm 變更與儲存成本,本課刻意沒開(會改資料平面設定,而且要另外驗證)。**所以「接出去之後歷史有多深、成本多少」這題沒有實測答案。**
 - **探針 A 的對照組不完整。** 被測程式出廠不記存取日誌,所以「成功的請求有沒有留下日誌」這一半沒有對照。結論只涵蓋「被擋的請求在應用端沒有痕跡」。
 - **host firewall 從頭到尾沒開。** 探針 C 的破口在本課環境是開著的,而堵法(`hostFirewall.enabled=true` 加叢集範圍政策)沒有實作也沒有驗證。
-- **單節點。** relay 的價值是把多個節點的 agent 聚合起來,而這座叢集只有一顆節點——**跨節點聚合這件事本課等於沒測。**
+- **單節點。** relay 的價值是把多個節點的 agent 聚合起來,而這座叢集只有一顆節點——**跨節點聚合這件事等於沒測。**
 
 ## 驗收 checkpoint
 
@@ -340,7 +340,7 @@ $ cilium-dbg status | grep -i hubble
 Hubble:   Ok   Current/Max Flows: 2508/4095 (61.25%), Flows/s: 19.49
 ```
 
-**先講一個必須誠實處理的落差**:官方 Helm 參考文件對 `hubble.eventBufferCapacity` 列出的預設值是 **65536**,而這座叢集(chart 1.20.0)實測是 **4095**——chart 的 `values.yaml` 裡這一行是註解掉的,`helm show values` 只看得到 `# eventBufferCapacity: "4095"`。**本課只能確定自己量到的數字,不能宣稱哪一個是「所有版本的預設」。** 而這件事本身就是結論:**這個數字要在自己的叢集上問 agent,不要相信任何一份文件上的數字,包括這一章。**
+**先講一個必須誠實處理的落差**:官方 Helm 參考文件對 `hubble.eventBufferCapacity` 列出的預設值是 **65536**,而這座叢集(chart 1.20.0)實測是 **4095**——chart 的 `values.yaml` 裡這一行是註解掉的,`helm show values` 只看得到 `# eventBufferCapacity: "4095"`。**這裡只能確定實際量到的數字,不能宣稱哪一個是「所有版本的預設」。** 而這件事本身就是結論:**這個數字要在自己的叢集上問 agent,不要相信任何一份文件上的數字,包括本章在內的任何二手轉述。**
 
 實測填充速度(節點剛開機、八顆 pod、沒有任何業務流量):
 
@@ -456,7 +456,7 @@ WARNING: TLS is not enabled for the Hubble Relay server (hubble.relay.tls.server
 
 ## 下一步
 
-Sprint 2 的動手部分到這裡結束。九天下來,同一批核心事件被四套工具用四種方式取用過:bpftrace 臨場追、Falco 用規則判斷、Tetragon 在核心裡攔、Cilium 在網路層擋與看。
+Sprint 2 的動手部分到這裡結束。一路走到這裡,同一批核心事件被四套工具用四種方式取用過:bpftrace 臨場追、Falco 用規則判斷、Tetragon 在核心裡攔、Cilium 在網路層擋與看。
 
 而最值得回頭看的,是它們**各自看不見的東西剛好是別人的長處**——`nsenter` 那一題四套工具給了四個不同的答案,`hostNetwork` 那個破口有三套工具完全沒有提過。[Day 10](sprint2-day10-decision-matrix.md) 不動手,把這些散在九章裡的實測數字收攏成一張分工決策表,每一格都要能追溯到某一天的某一個量測。
 

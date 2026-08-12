@@ -29,7 +29,7 @@ Cilium 不在規則裡放 IP。它把每顆 endpoint 的**標籤集合**雜湊�
 
 ## 步驟 1: 復原,並重驗 Day 7 的驗收
 
-Day 7 收工時留了一句話:kube-proxy 的節點選擇器修改撐過停機重啟**是單一觀察**,而它是 Day 7 驗收的一半,所以今天開工必須重驗。
+Day 7 結束時留了一句話:kube-proxy 的節點選擇器修改撐過停機重啟**是單一觀察**,而它是 Day 7 驗收的一半,所以今天必須先重驗。
 
 ```console
 $ kubectl -n kube-system get ds kube-proxy -o custom-columns=…
@@ -224,7 +224,7 @@ client → svc-multiport     curl: (28) 逾時      ← 叢集內也一起被擋
 client 的 dig example.com  <addr-a>       ← DNS 本身還通
 ```
 
-**倒數第二行是實務上最會咬人的**:`egress` 區段一出現,這顆 endpoint 的整個出向就變成預設拒絕,包含它原本理所當然的叢集內流量。**FQDN 政策不是「加一條對外的允許」,是「把這顆 pod 的對外世界整個換掉」。**
+**倒數第二行是實務上最容易出事的**:`egress` 區段一出現,這顆 endpoint 的整個出向就變成預設拒絕,包含它原本理所當然的叢集內流量。**FQDN 政策不是「加一條對外的允許」,是「把這顆 pod 的對外世界整個換掉」。**
 
 ### 它底下怎麼運作
 
@@ -350,9 +350,9 @@ Allow  Ingress  k8s:app=client   8080/TCP   PROXY PORT NONE
 Proxy Status:  OK, … 0 redirects active
 ```
 
-`PROXY PORT` 從 `NONE` 變成一個數字,是那 0.49 毫秒**可歸因的路徑差異**:封包不再是 BPF 查一次 map 就轉走,而是**進使用者空間、由 Envoy 解 HTTP、判定、再送出去**。本課沒有再往下做 profiling,所以只能說路徑變了、時間多了,不能拆出每一段各佔多少。
+`PROXY PORT` 從 `NONE` 變成一個數字,是那 0.49 毫秒**可歸因的路徑差異**:封包不再是 BPF 查一次 map 就轉走,而是**進使用者空間、由 Envoy 解 HTTP、判定、再送出去**。沒有再往下做 profiling,所以只能說路徑變了、時間多了,不能拆出每一段各佔多少。
 
-記憶體倒是意外地便宜:`cilium-envoy` 全程 13–14 Mi,開了 L7 政策、跑完 800 次請求之後還是 14 Mi。**在一顆 endpoint、一條 HTTP 規則的規模下沒有長。** 真正長的是 agent(Day 7 收工 140–153 Mi,今天做完全部實驗是 216 Mi)——跟 Day 7 的觀察一致:**本次量到的 agent 記憶體更像是隨叢集歷史累積,而不是隨當下負載起伏**——兩天加起來只有數小時,不足以當成通則。
+記憶體的增幅倒是很小:`cilium-envoy` 全程 13–14 Mi,開了 L7 政策、跑完 800 次請求之後還是 14 Mi。**在一顆 endpoint、一條 HTTP 規則的規模下沒有長。** 真正長的是 agent(Day 7 收工 140–153 Mi,今天做完全部實驗是 216 Mi)——跟 Day 7 的觀察一致:**本次量到的 agent 記憶體更像是隨叢集歷史累積,而不是隨當下負載起伏**——兩天加起來只有數小時,不足以當成通則。
 
 ## 步驟 7: `nsenter` 對照組——Day 6 的逃生門在這裡通不通
 
@@ -499,7 +499,7 @@ client → :90(9090)   PORT-9090        ← 一點都沒收緊
 
 **這在多人維護的命名空間裡是頭號事故來源**:A 寫了一條 `fromEndpoints: [{}]` 圖方便,B 之後寫的所有細緻規則全部是裝飾品——**而且 B 自己測的時候會全部「通過」**。
 
-(想表達「即使有人允許也要擋」要用 `ingressDeny` / `egressDeny`,那是另一個層級,本課沒有測。)
+(想表達「即使有人允許也要擋」要用 `ingressDeny` / `egressDeny`,那是另一個層級,沒有測。)
 
 ### 地雷 6:被政策擋掉的域名,照樣被解析、照樣進快取 {#mine-6}
 
@@ -540,7 +540,7 @@ Day 6 的 Tetragon 掛在 cgroup 上、`nsenter` 不動 cgroup,所以能繞;**Ci
 
 **但有一個防守方的損失**:因為丟包記在被害者的 identity 上,**光看 `cilium monitor` 分不出「client 自己違規」與「有人鑽進 client 的命名空間違規」**。網路政策的稽核軌跡**沒有行程身分**——那是 Tetragon 有而 Cilium 沒有的東西。
 
-三套工具在這一格剛好互補:**Falco 看得到 `nsenter` 這個行為、Tetragon 殺得掉行程(但會被繞)、Cilium 擋得住封包(但不知道是誰)。**
+三套工具在這個情境剛好互補:**Falco 看得到 `nsenter` 這個行為、Tetragon 殺得掉行程(但會被繞)、Cilium 擋得住封包(但不知道是誰)。**
 
 ### 地雷 9:`Host firewall: Disabled` 之下,任何 hostNetwork pod 完全不受 CNP 管 {#mine-9}
 

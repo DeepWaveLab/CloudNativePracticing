@@ -150,7 +150,7 @@ Day 5 讓 Falco 與 Tetragon 同時開著跑同一批動作,這是那次的結�
 **沒有教到的:**
 
 - **k8saudit 沒有做。** Falco 除了 syscall 還能吃 Kubernetes 稽核日誌,但受管叢集沒有本機稽核日誌,官方路徑需要額外的常駐雲端資源。
-- **Falcosidekick UI 跳過了。** 它需要一台帶特定模組的 Redis,而當時那座叢集的節點已經吃緊。**這是本 sprint 唯一一個「有 UI 卻沒教」的缺口。**
+- **Falcosidekick UI 跳過了。** 它需要一台帶特定模組的 Redis,而實驗叢集的節點資源已經吃緊。**這是本 sprint 唯一一個「有 UI 卻沒教」的缺口。**
 - **`ingressDeny` / `egressDeny` 沒有測。** [Day 8 地雷 5](sprint2-day8-cilium-network-policy.md#mine-5) 的結論是「加規則永遠不會收緊」,而 Cilium 有一組 deny 規則可以表達「即使有人允許也要擋」。整層沒碰。
 - **`Signal` 配 `Override` 沒有試。** 那是官方對「要確保操作不完成」的建議寫法,本課分別測了兩個動作,沒有測併用。
 

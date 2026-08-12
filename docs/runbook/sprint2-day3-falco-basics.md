@@ -490,9 +490,9 @@ chmod +x falco-alerts.sh
 ## 誠實的差距
 
 - **閒置零告警不能外推。** 那是 15 分鐘、三顆節點、工作負載很單純的實驗室數字。真實叢集的 CI、備份、健康檢查都會踩到 `Read sensitive file untrusted` 與 `Run shell untrusted`。
-- **k8saudit 不在本課範圍。** Falco 除了 syscall 之外還能吃 Kubernetes 稽核日誌,但受管的 AKS 沒有本機稽核日誌,官方路徑要接 Event Hub 加 Storage Account,是實打實的常駐費用。本課只教 syscall 規則。
-- **提高 priority 的效果沒有實測。** [地雷 1](#mine-1) 的結論是「priority 不會變出 CPU」,那是從節點的可配置資源推出來的;把 Falco 設成 `system-node-critical` 之後誰被踢掉,本課沒有實際做過——因為代價是 Sprint 1 的元件。
-- **只驗了一種 driver。** `kmod` 與 legacy `ebpf` 在受管節點上走不通的說法來自官方文件與節點映像的限制,本課沒有實際去撞。
+- **k8saudit 不在本章範圍。** Falco 除了 syscall 之外還能吃 Kubernetes 稽核日誌,但受管的 AKS 沒有本機稽核日誌,官方路徑要接 Event Hub 加 Storage Account,是實打實的常駐費用。本課只教 syscall 規則。
+- **提高 priority 的效果沒有實測。** [地雷 1](#mine-1) 的結論是「priority 不會變出 CPU」,那是從節點的可配置資源推出來的;把 Falco 設成 `system-node-critical` 之後誰被踢掉,沒有實際做過——因為代價是 Sprint 1 的元件。
+- **只驗了一種 driver。** `kmod` 與 legacy `ebpf` 在受管節點上走不通的說法來自官方文件與節點映像的限制,沒有實際驗證。
 
 ## 驗收 checkpoint
 

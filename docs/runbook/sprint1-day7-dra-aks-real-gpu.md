@@ -337,7 +337,7 @@ LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64
 /dev/nvidia0  /dev/nvidiactl  /dev/nvidia-uvm  /dev/nvidia-uvm-tools  /dev/nvidia-caps/…
 ```
 
-**通過,而且第一次就過。** 三條互相獨立的證據:
+**通過。** 三條互相獨立的證據:
 
 1. **UUID 對得起來。** ResourceSlice 的 `uuid` 屬性是 `GPU-bf5809e7-…`,容器裡 `nvidia-smi -L` 印的是同一個字串。這不是「剛好看得到一張卡」,是被配置的那一張。
 2. **`NVIDIA_VISIBLE_DEVICES=void`。** 舊路線就是靠這個變數帶裝置 ID 讓 runtime 掛卡;這裡它被明確設成 `void`(等於「什麼都不要掛」),卡卻在容器裡。注入走的是 CDI,不是舊的環境變數路徑。
@@ -704,7 +704,7 @@ No resources found
 
 三個 DeviceClass 是 chart 的物件,隨 uninstall 立即消失;ResourceSlice 不是 chart 產的(是 kubelet plugin 在執行期建的),它要等 apiserver 這一端發現「沒有 driver 在續約」才回收,今天量到 32 秒。這追認了 [Day 6 地雷 4](sprint1-day6-dra-simulated-devices.md#mine-4),同時把數字補上:模擬 driver 當時約 95 秒,真 driver 32 秒,差別在兩者的註冊與續約週期設定不同。營運上的意義沒變——卸載後有一段「供給表還在、但沒有 driver 能準備裝置」的窗口,這段時間送進來的 claim 會被排程器成功配置,然後卡在 kubelet 那一端。要換 driver 版本或搬遷 driver,先確認 slice 歸零再讓新工作負載進來。
 
-最後刪掉節點池。`gpudra` 不在 Day 0 那套每天 18:00 自動歸零的安全網裡(那套只碰 `gpuspot`),所以這一步要自己做、自己驗:
+最後刪掉節點池。`gpudra` 不在 Day 0 那套收工歸零循環的涵蓋範圍裡(那套指令只碰 `gpuspot`),所以這一步要自己做、自己驗:
 
 ```console
 16:48:49 $ az aks nodepool delete -g <resource-group> --cluster-name <cluster> \
@@ -753,7 +753,7 @@ No resources found
 
 ### 地雷 3:`DeviceClass.extendedResourceName` 被靜默丟棄,物件建立成功但欄位蒸發 {#mine-3}
 
-**症狀**:`helm install` 一切成功、DeviceClass 也在,但把物件讀回來會發現 `extendedResourceName` 這個欄位不見了(步驟 8 的探針量的就是這件事)。會咬人的是後果:舊寫法的 pod(`resources.limits: nvidia.com/gpu: 1`)丟進去之後停在 Pending,事件說 `Insufficient nvidia.com/gpu`,而在那之前沒有任何一步報過錯。
+**症狀**:`helm install` 一切成功、DeviceClass 也在,但把物件讀回來會發現 `extendedResourceName` 這個欄位不見了(步驟 8 的探針量的就是這件事)。麻煩的是後果:舊寫法的 pod(`resources.limits: nvidia.com/gpu: 1`)丟進去之後停在 Pending,事件說 `Insufficient nvidia.com/gpu`,而在那之前沒有任何一步報過錯。
 
 **根因**:chart 在 `resource.k8s.io/v1` 的叢集上會把 `extendedResourceName: nvidia.com/gpu` 寫進 `gpu.nvidia.com` 這個 DeviceClass,讓舊寫法能被 DRA 接住。這個欄位由 `DRAExtendedResource` 控制,而 AKS 上這個 alpha gate 是 0。apiserver 對「未啟用的功能對應的欄位」走的是標準行為:直接剝掉,不報錯、不警告。
 
@@ -769,7 +769,7 @@ No resources found
 
 **修法**:沒有修法,這是虛擬化層的性質。driver 的處理是印一行警告然後繼續,不影響任何整卡配置的功能。
 
-**教訓**:單卡機器不受影響,但多卡機器上「把兩顆 GPU 配在同一個 PCIe root 底下以取得最短路徑」這類拓樸感知的選擇器,在 Azure 上寫不出來。這不是 T4 的限制,是 Azure 虛擬化層的限制,會影響 Azure 上所有 N 系列。挑雲上機型做多卡訓練時,這一格要先問清楚。
+**教訓**:單卡機器不受影響,但多卡機器上「把兩顆 GPU 配在同一個 PCIe root 底下以取得最短路徑」這類拓樸感知的選擇器,在 Azure 上寫不出來。這不是 T4 的限制,是 Azure 虛擬化層的限制,會影響 Azure 上所有 N 系列。挑雲上機型做多卡訓練時,先問清楚 PCIe 拓樸屬性拿不拿得到。
 
 ### 地雷 5:template 產的 claim 在 pod 一進終態就被刪掉,不等 pod 被回收 {#mine-5}
 

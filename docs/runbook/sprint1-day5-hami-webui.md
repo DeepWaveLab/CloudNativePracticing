@@ -57,7 +57,7 @@ flowchart TB
 
 ### 今天要走的路
 
-環境沿用 Day 0 蓋的 AKS `<cluster>`(K8s v1.35.6)、`gpuspot` pool 兩台 `Standard_NC4as_T4_v3`(各一張 16 GB T4,spot)、system pool 一台 2 vCPU 的 `Standard_D2as_v5`,Day 1 裝的 KAI Scheduler v0.16.8 全程保留但不參與。六段:重裝 HAMi 並驗 Day 4 留下的殘留、把 WebUI 連同它剝小的 Prometheus 裝起來、佈六顆不對稱的切卡負載、不開瀏覽器先用 curl 驗資料、把用量那條鏈接通、最後逐頁走讀畫面。收尾前還有一次真實的 spot 回收——兩台 GPU 節點被 Azure 平台收走,前後過程完整留在趨勢圖上,拿來看這個介面在節點消失時顯示什麼剛剛好。workload 全部放在 `day5-lab` namespace。
+環境沿用 Day 0 蓋的 AKS `<cluster>`(K8s v1.35.6)、`gpuspot` pool 兩台 `Standard_NC4as_T4_v3`(各一張 16 GB T4,spot)、system pool 一台 2 vCPU 的 `Standard_D2as_v5`,Day 1 裝的 KAI Scheduler v0.16.8 全程保留但不參與。六段:重裝 HAMi 並驗 Day 4 留下的殘留、把 WebUI 連同它剝小的 Prometheus 裝起來、佈六顆不對稱的切卡負載、不開瀏覽器先用 curl 驗資料、把用量那條鏈接通、最後逐頁走讀畫面。收尾附一段真實 spot 回收的觀測案例——兩台 GPU 節點被 Azure 平台收走,前後過程完整留在趨勢圖上,拿來看這個介面在節點消失時顯示什麼剛剛好。workload 全部放在 `day5-lab` namespace。
 
 ## 步驟
 
@@ -80,14 +80,14 @@ az aks nodepool scale -g <resource-group> --cluster-name <cluster> -n gpuspot \
 [Day 4 地雷 5](sprint1-day4-hami-kai-integration.md#mine-5) 記錄了 `helm uninstall hami` 之後留在叢集裡的四樣東西,今天正好是「下一次」,逐項回查:
 
 ```text
-hami 相關 secret         → 一個都沒有(Day 4 收工時已刪 hami-scheduler-tls)
+hami 相關 secret         → 一個都沒有(Day 4 結束時已刪 hami-scheduler-tls)
 namespace                → 只剩 default／kai-*／kube-*,空殼 ns 已清
 webhook                  → 只剩 mutating-kai-admission 加 AKS 自己的三個
 節點 hami.io/* annotation → 兩台都是空的
 節點 nvidia.com/gpu       → capacity 與 allocatable 都不存在
 ```
 
-五項全乾淨,但原因分兩種。secret 與空 namespace 是 Day 4 收工時手動刪的;節點 annotation 與 `capacity` 這兩項則是因為節點根本是新的——Day 4 那兩台 `…00000b`／`…00000c` 連同殘留一起被 scale-to-0 銷毀,今天開起來的是 `…00000d`／`…00000e`。
+五項全乾淨,但原因分兩種。secret 與空 namespace 是 Day 4 結束時手動刪的;節點 annotation 與 `capacity` 這兩項則是因為節點根本是新的——Day 4 那兩台 `…00000b`／`…00000c` 連同殘留一起被 scale-to-0 銷毀,今天開起來的是 `…00000d`／`…00000e`。
 
 這給了一條在 spot 或可縮放節點池上很省事的規則:**寫在 node 物件上的髒東西,把池子縮到 0 就免費清掉了**。長生命週期的固定節點沒有這個機制,那些 annotation 會一直躺著騙下一套方案。
 
@@ -181,7 +181,7 @@ kube-prometheus-stack:
 EOF
 ```
 
-這是安裝當下的版本。[地雷 1](#mine-1) 的 `externalPrometheus`、[地雷 3](#mine-3) 的 `hamiServiceMonitor.honorLabels`、[地雷 4](#mine-4) 的 `dcgm-exporter.tolerations`(連同一段明寫整卡視野的 `dcgm-exporter.extraEnv`:`NVIDIA_VISIBLE_DEVICES=all` 與 `NVIDIA_DRIVER_CAPABILITIES=all`)都是後面才補進同一份檔案的——照這一版裝,才會依序撞到那三顆雷。
+這是安裝當下的版本。[地雷 1](#mine-1) 的 `externalPrometheus`、[地雷 3](#mine-3) 的 `hamiServiceMonitor.honorLabels`、[地雷 4](#mine-4) 的 `dcgm-exporter.tolerations`(連同一段明寫整卡視野的 `dcgm-exporter.extraEnv`:`NVIDIA_VISIBLE_DEVICES=all` 與 `NVIDIA_DRIVER_CAPABILITIES=all`)都是踩到對應地雷之後才補上的修正——照這一版裝,才會依序撞到那三顆雷。
 
 chart 內建的 `prometheus.prometheusSpec.serviceMonitorSelector.matchLabels.jobRelease=hami-webui-prometheus` 保留不動。這一行是 stack 剝小之後仍然安全的關鍵:這顆 Prometheus 只撿本 chart 打了那個標籤的三份 ServiceMonitor,不會去掃整座叢集的每一個 Service,所以它的記憶體用量與叢集規模無關。
 
@@ -440,7 +440,7 @@ aks-gpuspot-…00000e  gpu 0 => 100
 | 其後 | pool 的 `count` 收斂為 0、`provisioningState: Succeeded`;放叢集的那個 resource group,activity log 上一道操作都沒有 |
 | 15:08 | scale 回 2,新節點 `…00000f`／`…00000g` |
 
-第一台走掉之後、第二台還在的那段時間,Accelerators 頁上只剩一張卡,配額與用量都照常更新——一半的叢集不見了,而畫面本身沒有任何異常標記。這是[Day 2 地雷 4](sprint1-day2-gang-scheduling-preemption.md#mine-4) 的自然重演:pool 沒有開 cluster autoscaler,沒有人負責把 `count` 補回期望值;而放叢集的 resource group 上零 ARM 操作,事後翻自己的 activity log 也查不到任何線索。當時那條結論是用模擬做出來的,這次沒有人動手,結果一模一樣。
+第一台走掉之後、第二台還在的那段時間,Accelerators 頁上只剩一張卡,配額與用量都照常更新——一半的叢集不見了,而畫面本身沒有任何異常標記。這是[Day 2 地雷 4](sprint1-day2-gang-scheduling-preemption.md#mine-4) 的自然重演:pool 沒有開 cluster autoscaler,沒有人負責把 `count` 補回期望值;而放叢集的 resource group 上零 ARM 操作,只查這個 resource group 的 activity log 不會有任何線索。當時那條結論是用模擬做出來的,這次沒有人動手,結果一模一樣。
 
 回頭看 Overview 那兩張趨勢圖,整段過程都在上面:
 
@@ -452,7 +452,7 @@ aks-gpuspot-…00000e  gpu 0 => 100
 
 復原本身很快:pool scale 回 2,HAMi 的 device plugin 靠 pool 層級的 `gpu=on` 標籤自動接手,`vgpuTotal` 立刻回到 20,控制面一個字都不用改。要重來一次的是那六顆 workload。`03-webui-workloads.yaml` 裡的 `NODE_A_PLACEHOLDER`／`NODE_B_PLACEHOLDER` 是刻意的佔位符,沒有先 `sed` 換成當下的 hostname 就直接 apply,得到的是六顆永遠 Pending 的 pod,而 `hami-scheduler` 給的事件只有一句 `didn't match Pod's node affinity/selector`——它不會告訴你那個 hostname 已經不存在了。
 
-這是把 pod 用 `kubernetes.io/hostname` 釘死在 spot 節點上的天然代價。本課程這樣寫是為了讓兩張卡的配額不對稱,畫面才有層次;正式環境要指定放置位置,用 pool 層級的標籤(`agentpool`、`gpu=on`)或[Day 4 步驟 1](sprint1-day4-hami-kai-integration.md) 那組 `hami.io/node-scheduler-policy` annotation,兩者都活得過節點重建。
+這是把 pod 用 `kubernetes.io/hostname` 釘死在 spot 節點上的天然代價。這裡刻意這樣寫,是為了讓兩張卡的配額不對稱、畫面有層次;正式環境要指定放置位置,用 pool 層級的標籤(`agentpool`、`gpu=on`)或[Day 4 步驟 1](sprint1-day4-hami-kai-integration.md) 那組 `hami.io/node-scheduler-policy` annotation,兩者都活得過節點重建。
 
 ### 步驟 8:縮回 0,並確認畫面歸零是預期行為
 
@@ -509,7 +509,7 @@ externalPrometheus:
 
 **修法**:`kubectl -n kube-system rollout restart deploy/hami-webui`。
 
-**教訓**:這與 DeepWave 既有的 terraform 慣例是同一條規則的另一個面貌——改了 ConfigMap 或 Secret 就要自己重啟消費者。判斷方式很機械:`helm get manifest` 看 Deployment 的 pod template 裡有沒有任何會隨設定改變的欄位(annotation 或 env),沒有就一定要手動 rollout。
+**教訓**:這是同一條通用規則的另一個面貌——改了 ConfigMap 或 Secret 就要自己重啟消費者。判斷方式很機械:`helm get manifest` 看 Deployment 的 pod template 裡有沒有任何會隨設定改變的欄位(annotation 或 env),沒有就一定要手動 rollout。
 
 ### 地雷 3:每個任務的用量永遠是 0——Prometheus 把標籤改了名 {#mine-3}
 

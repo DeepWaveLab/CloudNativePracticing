@@ -365,7 +365,7 @@ $ kubectl -n ebpf-lab exec baseline-nginx -- bash -c \
 
 ## 步驟 5: 四個偏離,兩套工具同時看
 
-Falco 是 [Day 4](sprint2-day4-falco-custom-rules.md) 收工的狀態(25 條出廠加 2 條自訂),Tetragon 是 `__base__` 加一條 `lab-etc-read`。一次動作,兩份輸出。
+Falco 維持 [Day 4](sprint2-day4-falco-custom-rules.md) 結束時的狀態(25 條出廠加 2 條自訂),Tetragon 是 `__base__` 加一條 `lab-etc-read`。一次動作,兩份輸出。
 
 | 偏離 | Falco 說了什麼 | 怪到哪顆 pod | Tetragon 說了什麼 | 怪到哪顆 pod |
 |---|---|---|---|---|
@@ -423,7 +423,7 @@ Tetragon 的部署預設見[地雷 8](#mine-8)。
 
 ## 誠實的差距
 
-- **`enable-process-ns` 沒有測。** [地雷 6](#mine-6) 提到改用命名空間當身分依據也許能修正 `nsenter` 的歸屬,Tetragon 有這個選項且預設關閉,本課沒有開來驗證,不知道夠不夠。
+- **`enable-process-ns` 沒有測。** [地雷 6](#mine-6) 提到改用命名空間當身分依據也許能修正 `nsenter` 的歸屬,Tetragon 有這個選項且預設關閉,沒有開來驗證,不知道夠不夠。
 - **一個計數器沒查清楚。** `tetra tracingpolicy list -o json` 有 `stats.action_counters.post`,實測一次 1 位元組的讀取讓它增加 5、匯出事件只增加 1。合理的猜測是進入與返回各自計數,但**沒有驗證就不寫成結論**。可以確定的只有:**`post` 不是事件數,拿它估事件量會高估好幾倍。**
 - **只驗了一個掛勾。** 今天整章的核心層過濾論述建立在一條 kprobe 策略上,tracepoint、uprobe、LSM 掛勾的行為沒有測。
 - **事件量沒有長時間觀察。** 1915 筆/分鐘是 60 秒窗口的外推,不是跑一天的結果。

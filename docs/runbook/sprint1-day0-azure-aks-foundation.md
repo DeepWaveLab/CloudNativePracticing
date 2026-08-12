@@ -69,9 +69,9 @@ Total Regional vCPUs                      16              50
 
 申請的路有三條,依你的訂閱型態而定:
 
-1. **`az quota create`**:最快,但需要你的身分在該訂閱有 quota 寫入權限。本課程的訂閱掛在另一個 tenant、身分是 B2B guest,直接吃了 `Unauthorized`(見[地雷 3](#mine-3))。
+1. **`az quota create`**:最快,但需要你的身分在該訂閱有 quota 寫入權限。訂閱掛在另一個 tenant、以 B2B guest 身分登入時,直接吃了 `Unauthorized`(見[地雷 3](#mine-3))。
 2. **Portal 的 Quotas 頁**:搜尋 Quotas → Compute → 篩區域,勾選項目送出。多數自有訂閱走這條就通。
-3. **透過代理商(CSP 訂閱)**:CSP 型訂閱的 quota 常常只有代理商能動,寫信給他們,附上訂閱名稱、訂閱 ID、區域、quota 項目與目標值。本課程實際走的是這條,等了幾個工作天。
+3. **透過代理商(CSP 訂閱)**:CSP 型訂閱的 quota 常常只有代理商能動,寫信給他們,附上訂閱名稱、訂閱 ID、區域、quota 項目與目標值。這條路徑要等人工處理,實測等了幾個工作天。
 
 等待期不必空轉:kind + 模擬 GPU 的本機練習(Day 1 的前置)完全不需要真卡,可以先跑。
 
@@ -272,7 +272,7 @@ chart 預設帶了一組 nodeAffinity,要求節點有 NFD(Node Feature Discovery
 
 **症狀**:確認過 GPU 家族 quota 核准了,VM 還是開不出來;或反過來,區域總額看起來夠,GPU 就是起不來。
 
-**原因**:`az vm list-usage` 裡至少三個維度同時生效——VM 家族額度、`Total Regional vCPUs`、spot 專用的 `Total Regional Low-priority vCPUs`。GPU 節點要同時通過家族與區域兩關,用 spot 再多一關。更陰的是:**已停機(deallocated)的 VM 在這份帳上仍然佔著區域額度**——本課程開場時區域總額 50/50,全是幾台停機多月的舊 lab VM 佔的,刪掉 resource group 才拿回 34 個 vCPU。停機省的是計算費,不是 quota。
+**原因**:`az vm list-usage` 裡至少三個維度同時生效——VM 家族額度、`Total Regional vCPUs`、spot 專用的 `Total Regional Low-priority vCPUs`。GPU 節點要同時通過家族與區域兩關,用 spot 再多一關。更陰的是:**已停機(deallocated)的 VM 在這份帳上仍然佔著區域額度**——實測案例:區域總額 50/50 全滿,佔額度的是幾台停機多月的 VM,刪掉 resource group 才拿回 34 個 vCPU。停機省的是計算費,不是 quota。
 
 ### 地雷 3:B2B guest 身分送不動 quota API {#mine-3}
 
@@ -284,7 +284,7 @@ chart 預設帶了一組 nodeAffinity,要求節點有 NFD(Node Feature Discovery
 
 **症狀**:指令下對了,叢集是錯的。
 
-**原因**:current-context 是 kubeconfig 裡的一個共享可變狀態,`az aks get-credentials` 會改它,任何一個終端機、任何一個自動化腳本也都可能改它。本課程實際發生過:一次例行的 `kubectl get nodes` 沒帶 `--context`,打到了 kubeconfig 裡另一個生產叢集——那次只是唯讀查詢,沒造成損害,但同一個失誤配上 `delete` 就是事故。
+**原因**:current-context 是 kubeconfig 裡的一個共享可變狀態,`az aks get-credentials` 會改它,任何一個終端機、任何一個自動化腳本也都可能改它。真實案例:一次例行的 `kubectl get nodes` 沒帶 `--context`,打到了 kubeconfig 裡另一個生產叢集——那次只是唯讀查詢,沒造成損害,但同一個失誤配上 `delete` 就是事故。
 
 **修法**:在多叢集環境裡工作時,把「kubectl 一律帶 `--context`、helm 一律帶 `--kube-context`」當成肌肉記憶,不依賴、也不去改 current-context。(本課的教學指令為了好讀沒有帶這個旗標,照做前請先確認 `kubectl config current-context` 指向的是你打算操作的叢集。)
 
