@@ -10,7 +10,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;
 [![Kubernetes](../assets/logos/kubernetes-icon-color.svg){ width="88" }](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)
 
-*三位主角:KAI Scheduler(誰先拿到卡)、HAMi 與它的 WebUI(拿到之後能用多少)、Kubernetes DRA(重新定義「一張卡」)。*
+*三套機制:KAI Scheduler(誰先拿到卡)、HAMi 與它的 WebUI(拿到之後能用多少)、Kubernetes DRA(重新定義「一張卡」)。*
 
 </div>
 
@@ -63,7 +63,7 @@
 
     ---
 
-    給切卡的帳本一張臉:配額鏈與用量鏈、畫面上的 0 有幾種來源,並附一次真實 spot 回收的觀測案例。
+    切卡帳本的觀測介面:配額鏈與用量鏈、畫面上的 0 有幾種來源,並附一次真實 spot 回收的觀測案例。
 
 -   ![Kubernetes DRA](../assets/logos/kubernetes-icon-color.svg){ width="44" }
 

@@ -47,7 +47,7 @@ eBPF 是第三條路:**你把一小段程式送進核心,核心先逐條檢查�
 
 | 後來加進來的能力 | 讓誰得以存在 |
 |---|---|
-| kprobe、tracepoint 這類追蹤掛點 | bpftrace、BCC 這類臨場追蹤工具([Day 1](sprint2-day1-bpftrace-basics.md)) |
+| kprobe、tracepoint 這類追蹤掛點 | bpftrace、BCC 這類即時追蹤工具([Day 1](sprint2-day1-bpftrace-basics.md)) |
 | cgroup 相關掛點 | 以容器與工作負載為單位的管制([Day 2](sprint2-day2-bpftrace-kubernetes.md) 的 pod 身分就靠 cgroup) |
 | XDP、TC 這類網路路徑掛點 | Cilium 這種把資料路徑換掉的 CNI(Day 7–9) |
 | BTF 與 CO-RE | 同一份程式換一顆 kernel 還能跑,不必在每台機器上重編 |
@@ -648,18 +648,13 @@ $ az aks nodepool scale -g <resource-group> --cluster-name <cluster> \
 
 ## 地雷記錄
 
-### 地雷 1:節點內建一支 2019 年的 bpftrace,基本功能正常卻少掉六萬個掛載點 {#mine-1}
+### 地雷 1:節點內建的 bpftrace 可能很舊,基本功能正常卻少掉一整類掛載點 {#mine-1}
 
-**症狀**:在節點上直接執行 `bpftrace`,它跑得起來、列得出探針、印得出事件;但寫 `kfunc:` 的腳本一律回 `ERROR: Invalid provider: 'kfunc'`。**根因**是 AKS 的 Ubuntu 24.04 節點映像裡有一支 `/usr/local/bin/bpftrace`,35 MB,`dpkg -S` 查不到(VHD 建置時放進去的,不是套件),版本 **v0.9.4**——比套件庫的 0.20.2 落後六年。基本功能都在,缺的是後來新增的 probe 型別:
+**症狀**:在節點上直接執行 `bpftrace`,它跑得起來、列得出探針、印得出事件;但寫 `kfunc:` 的腳本一律回 `ERROR: Invalid provider: 'kfunc'`。
 
-```console
-$ /usr/local/bin/bpftrace -l | wc -l
-69903                      ← 對照 0.20.2 的 133022
-```
+**根因**:AKS 的 Ubuntu 節點映像裡有一支 VHD 建置時放進去的 `/usr/local/bin/bpftrace`(`dpkg -S` 查不到,不是套件裝的),版本比套件庫落後很多。基本功能都在,缺的是後來才加的 probe 型別——`kfunc` 這類要 BTF/CO-RE,舊版的年代還沒有這條路線。同一顆 kernel、同一份 BTF,換一支工具就少掉一整類可觀測面。
 
-差的 63,119 幾乎剛好是 `kfunc` 那 63,265 個,因為 v0.9.4 的年代還沒有 BTF/CO-RE 這條 probe 路線。同一顆 kernel、同一份 BTF,換一支工具就少掉將近一半的可觀測面。
-
-**修法**:一律在容器裡安裝、一律先 `bpftrace --version` 確認版本再開始。這條紀律要當肌肉記憶,因為問題出在 PATH 順序——`/usr/local/bin` 在多數 `PATH` 裡排在 `/usr/bin` 前面,用 `nsenter` 或 `chroot` 進節點除錯時,執行到的會是六年前那支,而不是剛裝的新版。
+**修法**:一律在容器裡安裝、一律先 `bpftrace --version` 確認版本再開始。這條要當肌肉記憶,因為問題出在 PATH 順序——`/usr/local/bin` 在多數 `PATH` 裡排在 `/usr/bin` 前面,用 `nsenter` 或 `chroot` 進節點除錯時,執行到的會是那支舊的,不是剛裝的新版。
 
 ### 地雷 2:`ubuntu:24.04` 沒有 `bpftool` 套件,而 `apt-get install` 是全有全無 {#mine-2}
 

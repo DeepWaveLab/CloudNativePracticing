@@ -29,7 +29,7 @@ flowchart TB
     SCHED --> NO["湊不齊:全部 Pending<br>零 GPU 佔用"]
 ```
 
-送 workload 之前先確認欄位——版本自己會說話,不必靠記憶:
+送 workload 之前先確認欄位——直接查就有,不必靠記憶:
 
 ```console
 $ kubectl explain podgroup.spec --recursive
@@ -242,7 +242,7 @@ $ kubectl get pods -A -o json | jq -r '.items[]
 kai-lab/gang-prober  node=aks-gpuspot-21249019-vmss000006  phase=Running
 ```
 
-整個叢集只有探針 pod 一個 GPU 持有者。三個 gang 成員等了 66 秒,一張卡都沒碰——這就是 gang 的價值主張兌現的樣子:與其讓 2 個成員佔著卡空轉等第 3 個,不如全部退出讓路。
+整個叢集只有探針 pod 一個 GPU 持有者。三個 gang 成員等了 66 秒,一張卡都沒碰——這就是 gang 換來的東西:與其讓 2 個成員佔著卡空轉等第 3 個,不如全部退出讓路。
 
 排程器日誌則說明了它把這一組當成什麼:
 
@@ -257,7 +257,7 @@ preempt/preempt.go:105        Didn't find a preemption strategy for job <kai-lab
 stalegangeviction/stalegangeviction.go:30  Enter StaleGangEviction ...
 ```
 
-請求量印成 `resources: <[0 0 3 3 0 0 0]>`——**3 是整組的總和,不是單顆 pod 的 1**。從 allocate 到 preempt,排程器全程用「一個要 3 GPU 的 job」在思考,這就是 gang 的實作本質:把 N 顆 pod 摺疊成一筆不可分割的資源請求。另外每一輪都完整跑完五個 action,即使明知湊不齊也每秒重試一次。
+請求量印成 `resources: <[0 0 3 3 0 0 0]>`——**3 是整組的總和,不是單顆 pod 的 1**。從 allocate 到 preempt,排程器全程把它當成「一個要 3 GPU 的 job」處理,這就是 gang 的實作本質:把 N 顆 pod 摺疊成一筆不可分割的資源請求。另外每一輪都完整跑完五個 action,即使明知湊不齊也每秒重試一次。
 
 ### 步驟 3:湊得齊的時候,整組是同一秒上去的
 
@@ -354,7 +354,7 @@ $ kubectl -n kai-lab delete pod $VICTIM --force --grace-period=0
 
 原始碼推出的 60 秒預測完全命中:成員在 08:05:32 消失,倖存者在 08:06:32 被驅逐,剛好 60.0 秒。中間 KAI 先發 `StaleJob` 事件公告「1 pods are active, minMember is 2」,等滿寬限期才動手。這 60 秒是刻意留給短暫抖動(pod 重啟、節點瞬斷)的自癒空間——成員在 60 秒內回來,整組就不會被收掉。
 
-KAI 的立場是**不容忍部分存活**:組破了就整組回收,把卡全部還出來。對分散式訓練這是正確的,少一個 worker 的 job 本來就跑不完,留著只是佔卡空轉。不過最後一行 `Job completed` 是個陷阱——被驅逐的 gang 在 Job controller 眼中竟然是圓滿完成,詳見[地雷 2](#mine-2)。
+KAI 的立場是**不容忍部分存活**:組破了就整組回收,把卡全部還出來。對分散式訓練這是正確的,少一個 worker 的 job 本來就跑不完,留著只是佔卡空轉。不過最後一行 `Job completed` 是個陷阱——被驅逐的 gang,Job controller 竟然當成正常完成,詳見[地雷 2](#mine-2)。
 
 ### 步驟 5:拆散 gang——搶占者只要一張卡
 
@@ -667,7 +667,7 @@ $ kubectl -n kai-lab get podgroups -o json | jq '.items[].spec.minMember'
 
 **症狀**:整組被 StaleGangEviction 收掉之後,`kubectl get job` 顯示 `succeeded: 2`、condition `Complete / CompletionsReached`、事件是 `Job completed`。從 Job 的角度看,這是一次圓滿的執行——真正的工作一秒都沒做完。
 
-**根因**:容器指令寫的是 `trap 'exit 0' TERM; sleep infinity & wait`,這是 Day 1 地雷 6 為了避開 30 秒寬限期而特地寫的。但收到 `SIGTERM` 就 `exit 0` 的代價是:被驅逐的 pod 在 Job controller 眼中是**正常結束**(exit code 0 = Succeeded),於是 `completions: 2` 被判定達成,Job 標記為 Complete,也不會補建 pod。
+**根因**:容器指令寫的是 `trap 'exit 0' TERM; sleep infinity & wait`,這是 Day 1 地雷 6 為了避開 30 秒寬限期而特地寫的。但收到 `SIGTERM` 就 `exit 0` 的代價是:被驅逐的 pod 對 Job controller 來說是**正常結束**(exit code 0 = Succeeded),於是 `completions: 2` 被判定達成,Job 標記為 Complete,也不會補建 pod。
 
 **修法**:驅逐訊號要以**非零 exit code** 結束,Job 才會正確記為失敗並依 `backoffLimit` 重試:
 
@@ -700,52 +700,16 @@ trap 'exit 143' TERM
 
 ### 地雷 5:兩個操作者動同一個 node pool——後寫入者靜默勝出,而 activity log 會晚幾分鐘才說實話 {#mine-5}
 
-**症狀**:手動補容量的指令下了 `--node-count 2`,中途查到 `count: 2 / provisioningState: Updating`(真實進度),最後卻收斂成 `count: 0 / Succeeded`。要 2,拿到 0,而且平台回報成功。
+**症狀**:`nodepool scale --node-count 2` 下完,中途查到 `count: 2 / Updating`(真實進度),最後卻收斂成 `count: 0 / Succeeded`。要 2 拿到 0,平台還回報成功。
 
-**第一次診斷(錯的)**:三個方向都追查過——受管 resource group 沒有任何 `Failed` 事件、spot 配額 `Standard NCASv3_T4 Family vCPUs 0/50` 充足、activity log 只有自己那一道操作:
+**根因(兩層)**:
 
-```console
-$ az monitor activity-log list --resource-group <resource-group> \
-    --start-time 2026-08-03T08:15:00Z \
-    --query "[?contains(operationName.value,'agentPools')].{time:eventTimestamp,op:operationName.localizedValue,status:status.value}" -o table
-Time                          Op                           Status
-2026-08-03T08:21:28.8985242Z  Create or Update Agent Pool  Accepted
-2026-08-03T08:21:23.8985592Z  Create or Update Agent Pool  Started
-```
+1. **node pool 的 `count` 是宣告式的期望值,沒有鎖、也沒有版本檢查**。兩個操作者先後下 scale,AKS 一律接受,最後一次寫入直接覆蓋前一次——不報衝突、不警告,兩道指令都回 `Succeeded`。這裡是另一個操作者的停機流程下了 `--node-count 0`,把你的 2 蓋掉。
+2. **Azure activity log 有數分鐘的傳播延遲**。事發當下查 log 只看得到自己那一道,對方的操作要 5 分鐘後才出現。「查了 log 沒看到別人,所以沒有別人」在事發後幾分鐘內不成立。而且兩人若共用同一組 Azure 憑證,`caller` 欄位完全相同,就算傳播完成也只能靠時間戳對照各自的操作紀錄。
 
-證據看起來很完整,於是得出結論:「沒有第二個呼叫者,是 AKS 在 spot 收斂期間靜默吃掉了 scale 請求。」**這個結論是錯的。**
+**修法**:(1) 共用叢集約定**單一收放權責**(誰負責開關機),或用 tag 標記「實驗進行中」;(2) 事故追查時,activity log 等 5–10 分鐘再下結論,先問人再怪平台;(3) 自動化腳本 scale 後一律回查 `count` 與實際節點數——不是因為平台會吃掉請求,而是別人可能覆蓋你。
 
-**5 分鐘後,同一道指令重查**:
-
-```text
-Time                          Op                           Status
-2026-08-03T08:28:15.5148959Z  Create or Update Agent Pool  Succeeded
-2026-08-03T08:27:26.1896742Z  Create or Update Agent Pool  Accepted
-2026-08-03T08:27:22.5097896Z  Create or Update Agent Pool  Succeeded
-2026-08-03T08:27:21.3458554Z  Create or Update Agent Pool  Started
-2026-08-03T08:21:28.8985242Z  Create or Update Agent Pool  Accepted
-2026-08-03T08:21:23.8985592Z  Create or Update Agent Pool  Started
-```
-
-多出了 08:27:21 那一組——那是**另一個操作者**的停機流程下的 `--node-count 0`,正是這顆地雷的場景。真正的時間軸是:
-
-| 時間(UTC) | 操作 | 來源 |
-|---|---|---|
-| 08:21:23 | `nodepool scale --node-count 2` | 操作者 A |
-| 08:23:57 | 查到 `count: 2 / Updating`(真實進度) | 操作者 A |
-| 08:27:21 | `nodepool scale --node-count 0` | **操作者 B** |
-| 08:28:52 | 收斂為 `count: 0 / Succeeded` | —— |
-
-**真正的根因(兩層)**:
-
-1. **node pool 的 `count` 是宣告式的期望值,沒有鎖也沒有版本檢查**。兩個操作者先後下 scale,AKS 一律接受,最後一次寫入直接覆蓋——不報衝突、不警告,兩道指令都回 `Succeeded`。
-2. **Azure activity log 有數分鐘的傳播延遲**。08:27:21 的操作在 08:27:51 查詢時查不到,5 分鐘後才出現。「查了 log 沒看到別人,所以沒有別人」這個推論,在事發後幾分鐘內**不成立**。
-
-**另一個陷阱**:兩個操作者用同一組 Azure 憑證,activity log 的 `caller` 欄位完全相同。就算傳播完成,也無法靠 `caller` 分辨是誰下的,只能靠時間戳對照各自的操作紀錄。
-
-**修法**:(1) 共用叢集要約定**單一收放權責**(誰負責開關機),或用 tag 標記「實驗進行中」;(2) 事故追查時,activity log 至少等 5–10 分鐘再下結論,並且**先問人**再怪平台;(3) 自動化腳本 scale 後一律回查 `count` 與實際節點數——這件事無論如何都要做,只是原因不是平台會吃掉請求,而是別人可能覆蓋你。
-
-**教訓**:排除法的有效性,取決於證據是否已經完整到齊。在分散式系統裡,「還沒出現」和「不存在」長得一模一樣。
+**教訓**:在分散式系統裡,「還沒出現」和「不存在」長得一模一樣。
 
 ## 帶得走的東西
 

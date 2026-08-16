@@ -6,7 +6,7 @@
 > 十天下來,同一批核心事件被四套工具用四種方式取用過。這一頁不動手,把散在十章裡的實測數字收攏成一張分工表——而收攏的過程會浮出一件各章各自看不到的事:**每一套工具看不見的東西,跟它把程式掛在哪裡,是同一件事的兩面。**
 
 !!! abstract "你在課程的哪裡"
-    - **Day 0–9**:eBPF 的地基、bpftrace 的臨場追蹤、Falco 的規則引擎、Tetragon 的核心層攔截、Cilium 的網路資料平面與 Hubble 的流量觀測。十個動手日、十章、76 顆地雷。
+    - **Day 0–9**:eBPF 的地基、bpftrace 的即時追蹤、Falco 的規則引擎、Tetragon 的核心層攔截、Cilium 的網路資料平面與 Hubble 的流量觀測。十個動手日、十章、76 顆地雷。
     - **今天**:不動手。把四套工具的位置、成本、失效形狀擺成一張表,每一格都要能追溯到某一天的某一個量測。
     - **接下來**:這一頁最後給三條可以自己走下去的路。
 
@@ -14,7 +14,7 @@
 
 ```mermaid
 flowchart TB
-    A["Day 0–2 · 臨場追蹤<br/>bpftrace:自己掛探針、自己算 pod 身分<br/>不用的時候成本是零"]
+    A["Day 0–2 · 即時追蹤<br/>bpftrace:自己掛探針、自己算 pod 身分<br/>不用的時候成本是零"]
     B["Day 3–4 · 規則引擎<br/>Falco:常駐比對、輸出具名告警<br/>沒寫規則的事一律看不見"]
     C["Day 5–6 · 核心層攔截<br/>Tetragon:核心裡過濾,而且擋得住<br/>但守備範圍比觀察範圍小"]
     D["Day 7–9 · 網路層<br/>Cilium + Hubble:換掉資料平面、寫政策、看流量<br/>看不見不經過 endpoint 的東西"]
@@ -26,7 +26,7 @@ flowchart TB
 | [0](sprint2-day0-ebpf-concepts.md) | eBPF 是什麼 | verifier 保證程式會結束,**不保證程式便宜**——那支害機器慢 57% 的程式完全合法 |
 | [1](sprint2-day1-bpftrace-basics.md) | bpftrace 三支經典工具 | 三支工具加自寫的那支,**沒有任何一個欄位說得出事件屬於哪顆 pod** |
 | [2](sprint2-day2-bpftrace-kubernetes.md) | 接回 Kubernetes | cgroup id 換算回 pod 名字的五步鏈,**整條不碰 API server** |
-| [3](sprint2-day3-falco-basics.md) | Falco 與出廠規則 | 出廠只有 **25 條**規則,而閒置 8 分 28 秒 **0 筆告警** |
+| [3](sprint2-day3-falco-basics.md) | Falco 與預設規則 | 預設只有 **25 條**規則,而閒置 8 分 28 秒 **0 筆告警** |
 | [4](sprint2-day4-falco-custom-rules.md) | 自訂規則與誤報調校 | 誤報 180 筆/分調到 0,**代價是兩條外洩通道,而且量得出來** |
 | [5](sprint2-day5-tetragon-basics.md) | Tetragon 與 TracingPolicy | 核心層過濾是真的(3000 次不符合,**0 筆出核心**),但底層 sensor 同窗口匯出 6016 筆 |
 | [6](sprint2-day6-tetragon-enforcement.md) | 從偵測到攔截 | SIGKILL 真的**擋住**了外洩(5/5、0 位元組),而理由是掛勾點在操作之前 |
@@ -54,10 +54,10 @@ flowchart TB
 
 | | bpftrace | Falco | Tetragon | Cilium + Hubble |
 |---|---|---|---|---|
-| 形態 | 臨場,用完就走 | 常駐 DaemonSet | 常駐 DaemonSet | 資料平面本身 |
+| 形態 | 隨用隨開,非常駐 | 常駐 DaemonSet | 常駐 DaemonSet | 資料平面本身 |
 | 掛在哪 | 自選探針 | syscall | syscall、LSM | pod veth、socket、endpoint |
 | **交付什麼** | 原始事件 | **判斷**(規則名、嚴重度、MITRE) | **紀錄與動作** | **管制與流量圖** |
-| 沒設定時 | 什麼都沒有 | [25 條出廠規則](sprint2-day3-falco-basics.md#mine-2) | [底層 sensor 永遠開著](sprint2-day5-tetragon-basics.md#mine-5) | 全通 |
+| 沒設定時 | 什麼都沒有 | [25 條預設規則](sprint2-day3-falco-basics.md#mine-2) | [底層 sensor 永遠開著](sprint2-day5-tetragon-basics.md#mine-5) | 全通 |
 | 要人再判斷嗎 | 是 | 否 | **是** | 是 |
 
 ### 同樣四個偏離動作,誰看到什麼
@@ -67,7 +67,7 @@ Day 5 讓 Falco 與 Tetragon 同時開著跑同一批動作,這是那次的結�
 | 動作 | Falco | Tetragon |
 |---|---|---|
 | 有終端機的 fork shell | 2 筆具名告警 | 18 筆無名事件 |
-| **無終端機的 web shell** | **1 筆**(出廠規則靜音,靠自訂規則) | 18 筆,**與上一列組成完全相同** |
+| **無終端機的 web shell** | **1 筆**(預設規則靜音,靠自訂規則) | 18 筆,**與上一列組成完全相同** |
 | `nsenter` 進目標 pod | 2 筆,**pod 認錯** | 34 筆,**pod 認錯** |
 | 直接讀敏感檔 | 1 筆 | 8 筆 |
 | **總數** | **6** | **78** |
@@ -138,7 +138,7 @@ Day 5 讓 Falco 與 Tetragon 同時開著跑同一批動作,這是那次的結�
 
 **什麼時候用哪一個**,只用量到的東西講:
 
-- **臨場追蹤(bpftrace)**:回答「現在這一秒發生什麼」。成本是人的注意力——[必須剛好在看](sprint2-day2-bpftrace-kubernetes.md)。適合診斷一個正在發生的具體問題,不適合當防線。
+- **即時追蹤(bpftrace)**:回答「現在這一秒發生什麼」。成本是人的注意力——[必須剛好在看](sprint2-day2-bpftrace-kubernetes.md)。適合診斷一個正在發生的具體問題,不適合當防線。
 - **規則引擎(Falco)**:回答「有沒有已知壞事」。誤報低、可全叢集共用,**代價是沒寫規則的事一律看不見**。它交付的是**判斷**,所以它是唯一一個「有人會被叫醒」的工具。
 - **核心層攔截(Tetragon)**:回答「這個動作不准發生」。範圍能被界定清楚時很強(成分固定的工作負載命名空間),範圍界定不了時無效。**攔截交付的是「這個動作沒有發生」,不是「這個攻擊者被處理了」**——五次攔截成功對攻擊者的代價只是五個行程。
 - **網路層(Cilium + Hubble)**:回答「誰可以跟誰講話」,而且做得到 HTTP 方法這一層。它是唯一一個**繞不過**的執行點,但它的稽核軌跡**沒有行程身分**。
@@ -158,7 +158,7 @@ Day 5 讓 Falco 與 Tetragon 同時開著跑同一批動作,這是那次的結�
 
 - **host firewall 從頭到尾沒開。** [Day 8 地雷 9](sprint2-day8-cilium-network-policy.md#mine-9):任何 `hostNetwork` pod 完全豁免所有網路政策,而 [Day 9 探針 C](sprint2-day9-hubble.md#probe-c) 證明 Hubble 也看不出那是繞過。**這是本課環境最大的破口,而且是開著的。** 它的修補位置在 admission 層(誰能建 hostNetwork pod),不在網路層。
 - **DNS 外洩通道沒有關。** FQDN 政策擋掉的域名照樣被解析並進快取。要關得把比對樣式收成明確清單,而那跟 FQDN 政策的初衷打架。
-- **Hubble 沒有接出去。** 緩衝區只留兩三分鐘,所以「事後去查」在出廠設定下不成立;而一旦落地,落下去的就是含認證標頭的原文([Day 9 地雷 4](sprint2-day9-hubble.md#mine-4))。
+- **Hubble 沒有接出去。** 緩衝區只留兩三分鐘,所以「事後去查」在預設設定下不成立;而一旦寫入儲存,存下來的就是含認證標頭的原文([Day 9 地雷 4](sprint2-day9-hubble.md#mine-4))。
 
 **規模上的限制:**
 
@@ -170,7 +170,7 @@ Day 5 讓 Falco 與 Tetragon 同時開著跑同一批動作,這是那次的結�
 
 **一、不換 CNI 也能走 eBPF 資料平面。** Day 7 為了自管 Cilium 新建了一座叢集,因為 `--network-plugin none` 只能在建立時指定。如果你的叢集不能重建,[Calico 的 eBPF 資料平面](https://docs.tigera.io/calico/latest/operations/ebpf/enabling-ebpf)是另一條路——它可以在**既有叢集**上啟用,而且同樣會取代 kube-proxy。拿它跟本課 Day 7 的數字對照,是一個現成的比較題。
 
-**二、把 Falco 的規則庫打開。** [Day 3](sprint2-day3-falco-basics.md#mine-2) 量到出廠只有 25 條,而[官方規則庫](https://github.com/falcosecurity/rules)明講 stable 是唯一預設綁進去的,另外還有 incubating 與 sandbox 兩級。裝上去之後重跑一次 Day 3 的閒置量測,就會知道「Falco 很吵」這個名聲到底屬於哪一級。
+**二、把 Falco 的規則庫打開。** [Day 3](sprint2-day3-falco-basics.md#mine-2) 量到預設只有 25 條,而[官方規則庫](https://github.com/falcosecurity/rules)明講 stable 是唯一預設綁進去的,另外還有 incubating 與 sandbox 兩級。裝上去之後重跑一次 Day 3 的閒置量測,就會知道「Falco 很吵」這個名聲到底屬於哪一級。
 
 **三、把兩條資料線接起來。** 本 sprint 最明確的一個缺口:[Hubble 說不出一條 flow 是哪個行程發的](sprint2-day9-hubble.md),而 Tetragon 說得出。這兩份資料在本課的四套工具裡**沒有任何一個地方會合**。要回答「這條被擋的連線是哪支程式打的」,得自己把 Tetragon 的行程事件與 Hubble 的 flow 用時間與五元組對起來——這是一個真實存在、而且值得做的整合題。
 

@@ -2,7 +2,7 @@
 
 ![KAI Scheduler 官方標誌](../assets/logos/kai-scheduler-icon-color.svg){ align=right width="100" }
 
-> 先想像一個下午:批次評估任務把叢集僅有的兩張 T4 全部吃光,線上推論的 pod 進不來,只能 Pending。`kubectl get pods` 沒有任何錯誤——預設排程器不覺得哪裡有問題,在它眼裡每顆 pod 都是獨立個體,先到先贏,後到的等著。今天要裝的 KAI Scheduler 就是來處理這件事的:兩層佇列、保底配額、閒置時互相借卡、必要時把借出去的收回來。本章會把上面那個下午在兩張 T4 上真實重演一次,而章裡的雷都長在「直覺跟實作相反」的位置:安裝指令的版本字串少一個字母就抓不到 chart;把 pod 丟進叫做 `inference-prod` 的佇列,它拿到的優先權其實是 `train`;而優先權調到最高的那顆,反倒是唯一卡在 Pending 的。
+> 先想像一個下午:批次評估任務把叢集僅有的兩張 T4 全部吃光,線上推論的 pod 進不來,只能 Pending。`kubectl get pods` 沒有任何錯誤——預設排程器不覺得哪裡有問題,它把每顆 pod 都當成獨立個體,先到先贏,後到的等著。今天要裝的 KAI Scheduler 就是來處理這件事的:兩層佇列、保底配額、閒置時互相借卡、必要時把借出去的收回來。本章會把上面那個下午在兩張 T4 上真實重演一次,而章裡的雷都長在「直覺跟實作相反」的位置:安裝指令的版本字串少一個字母就抓不到 chart;把 pod 丟進叫做 `inference-prod` 的佇列,它拿到的優先權其實是 `train`;而優先權調到最高的那顆,反倒是唯一卡在 Pending 的。
 
 !!! abstract "你在課程的哪裡"
     - **Day 0**:AKS 叢集與兩張 T4 spot 已就緒,收工歸零的循環驗證過。
@@ -17,15 +17,15 @@
 2. **打分(Score)**:對活下來的節點排名,挑一個最順眼的,例如剩餘資源多、映像已經在本機。
 3. **繫結(Bind)**:把 pod 和節點寫在一起,之後就是 kubelet 的事了。
 
-這套流程有兩個特徵,是今天整章的伏筆。第一,**決策單位是一顆 pod**:排程器眼裡沒有「這三顆是同一份訓練工作」的概念,每顆各排各的。第二,它並非不會搶占——原生的 PriorityClass 可以讓高優先權 pod 把低優先權 pod 擠下去,但粒度同樣是**一顆對一顆**。
+這套流程有兩個特徵,是今天整章的伏筆。第一,**決策單位是一顆 pod**:排程器沒有「這三顆是同一份訓練工作」的概念,每顆各排各的。第二,它並非不會搶占——原生的 PriorityClass 可以讓高優先權 pod 把低優先權 pod 擠下去,但粒度同樣是**一顆對一顆**。
 
-還有一個容易被忽略的機制:pod spec 裡的 `schedulerName` 欄位。一個叢集其實可以同時跑好幾個排程器,pod 沒寫這欄就歸預設排程器管,寫了就歸指定的那位管。KAI 能與 kube-scheduler 並存,靠的正是這個內建機制——它不是取代預設排程器,而是並存的第二個排程器。
+還有一個容易被忽略的機制:pod spec 裡的 `schedulerName` 欄位。一個叢集其實可以同時跑好幾個排程器,pod 沒寫這欄就歸預設排程器管,寫了就歸指定的那個排程器管。KAI 能與 kube-scheduler 並存,靠的正是這個內建機制——它不是取代預設排程器,而是並存的第二個排程器。
 
 ## 為什麼還要再裝一個排程器
 
-先說句公道話:kube-scheduler 很擅長它被設計來做的事——排無狀態、彼此獨立、可以互相替換的服務,上面那套流程在那個世界裡運作得又快又穩。問題是 GPU 叢集要回答的是另一類問題——「推論組跟批次組各該分到幾張卡」「離峰時能不能讓批次多借兩張,尖峰再還回來」「一份訓練工作要 8 個 worker,只給 7 個算不算成功」。這些問題的主詞是「一組人」或「一份工作」,不是單一 pod,預設排程器沒有對應的概念可以表達。
+持平說,kube-scheduler 很擅長它被設計來做的事——排無狀態、彼此獨立、可以互相替換的服務,上面那套流程在那個世界裡運作得又快又穩。問題是 GPU 叢集要回答的是另一類問題——「推論組跟批次組各該分到幾張卡」「離峰時能不能讓批次多借兩張,尖峰再還回來」「一份訓練工作要 8 個 worker,只給 7 個算不算成功」。這些問題的主詞是「一組人」或「一份工作」,不是單一 pod,預設排程器沒有對應的概念可以表達。
 
-KAI Scheduler 的來歷值得一提:它不是從零寫起的新專案,前身是 Run:ai 的商用排程引擎——NVIDIA 在 2024 年收購 Run:ai 之後,2025 年把引擎以 Apache 2.0 開源,同年 12 月進 CNCF sandbox(截至 2026-08 仍在 sandbox 階段)。也就是說,你今天裝的是一個在商用環境跑過多年的引擎,不是實驗品。它不取代 kube-scheduler,而是並存:沒指定 `schedulerName` 的 pod 照常由預設排程器處理,只有明講要走 KAI 的才進它的佇列體系。這個「並存」不是設定選項,是預設行為——也是它敢往已經在跑東西的叢集裡塞的原因。
+KAI Scheduler 的來歷值得一提:它不是從零寫起的新專案,前身是 Run:ai 的商用排程引擎——NVIDIA 在 2024 年收購 Run:ai 之後,2025 年把引擎以 Apache 2.0 開源,同年 12 月進 CNCF sandbox(截至 2026-08 仍在 sandbox 階段)。也就是說,你今天裝的是一個在商用環境跑過多年的引擎,不是實驗品。它不取代 kube-scheduler,而是並存:沒指定 `schedulerName` 的 pod 照常由預設排程器處理,只有明講要走 KAI 的才進它的佇列體系。這個「並存」不是設定選項,是預設行為——也是它能安全裝進正在運作中叢集的原因。
 
 本課程用的版本是 chart / appVersion `v0.16.8`,叢集是 Day 0 蓋的 AKS `<cluster>`(K8s 1.35.6),兩張 T4 spot。
 
@@ -229,7 +229,7 @@ inference                 125          false            66s    PreemptLowerPrior
 train                     50           false            66s    PreemptLowerPriority
 ```
 
-CRD 分屬兩個 API group:排程原語(Queue / PodGroup / BindRequest)在 `scheduling.run.ai`——Run:ai 血統的殘留;operator 自己的設定(Config / SchedulingShard / Topology)在 `kai.scheduler`。兩個 group 混在同一個 namespace 裡,寫 YAML 時 apiVersion 很容易挑錯。另外裝完就自帶一組 `default-parent-queue` → `default-queue` 階層,以及那四個 PriorityClass。
+CRD 分屬兩個 API group:排程原語(Queue / PodGroup / BindRequest)在 `scheduling.run.ai`——Run:ai 時期留下來的命名;operator 自己的設定(Config / SchedulingShard / Topology)在 `kai.scheduler`。兩個 group 混在同一個 namespace 裡,寫 YAML 時 apiVersion 很容易挑錯。另外裝完就自帶一組 `default-parent-queue` → `default-queue` 階層,以及那四個 PriorityClass。
 
 ### 步驟 4:建立兩層佇列
 

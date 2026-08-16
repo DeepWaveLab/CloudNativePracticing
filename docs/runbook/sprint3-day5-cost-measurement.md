@@ -2,7 +2,7 @@
 
 ![WebAssembly 官方標誌](../assets/logos/webassembly-icon-color.svg){ align=right width="95" }
 
-> 前四天刻意一個比較宣稱都沒做,全部留到今天。這一章的主角不是三欄數字,是**怎麼判斷一個數字算不算數**——包括一個帶信賴區間的否定結論,以及一欄交白卷。
+> 前四天刻意一個比較宣稱都沒做,全部留到今天。這一章的重點不是三欄數字,是**怎麼判斷一個數字算不算數**——包括一個帶信賴區間的否定結論,以及一欄交白卷。
 
 !!! abstract "你在課程的哪裡"
     - **Day 2–4**:三條路線各自跑起來了,每一章都標明「這個數字只跑一次、不作比較宣稱」。
@@ -54,7 +54,7 @@ wasmtime-spin-v2    wasmtime-spin-v2
 
 RuntimeClass 住在 etcd,不隨 VM 生命週期消失。**於是叢集重啟後的那一刻,它處於一個特定狀態:`wasmedge` 這個名字在,而節點上沒有任何東西實作它。**
 
-跟 [Day 1 地雷 2](sprint3-day1-three-generations.md#mine-2) 那個出廠就壞掉的 `kata-vm-isolation` 變成同一類——差別只在這次是自己造成的。記成[地雷 1](#mine-1)。
+跟 [Day 1 地雷 2](sprint3-day1-three-generations.md#mine-2) 那個預設就壞掉的 `kata-vm-isolation` 變成同一類——差別只在這次是自己造成的。記成[地雷 1](#mine-1)。
 
 !!! warning "這件事改變了 Day 8 的驗收設計"
     Day 8 原訂「移除全部 SpinKube 元件之後,節點的 containerd 設定與 Day 1 基準逐字比對」。前提成立,**但今天的結果同時暴露一個弱點**:
@@ -146,7 +146,7 @@ verdict: measurable
 
 先把五組中位數畫在同一把尺上——**wasmedge 與 runc 幾乎貼在一起,而兩者都離地板很遠**:
 
-<svg viewBox="0 0 660 210" role="img" aria-label="冷啟動中位數(毫秒,每批 n=50)" style="font-family: var(--md-text-font-family, sans-serif)" width="100%" style="max-width:660px; font-family: var(--md-text-font-family, sans-serif);">
+<svg viewBox="0 0 660 210" role="img" aria-label="冷啟動中位數(毫秒,每批 n=50)" width="100%" style="max-width:660px; font-family: var(--md-text-font-family, sans-serif);">
 <text x="0" y="18" font-size="15" font-weight="600" fill="var(--md-default-fg-color)">冷啟動中位數(毫秒,每批 n=50)</text>
 <text x="160" y="50" font-size="13" text-anchor="end" fill="var(--md-default-fg-color)">地板(空指令)</text>
 <rect x="170" y="34" width="33" height="22" rx="2" fill="#9aa0a6"/>
@@ -166,7 +166,7 @@ verdict: measurable
 </svg>
 
 
-對照兩者與地板的距離,那個就非常清楚:
+對照兩者與地板的距離,差距就很清楚:
 
 ```text
 wasmedge vs harness   批次 A CI = [+144.0, +157.0] ms   measurable
@@ -256,7 +256,7 @@ runc     n=3 shim_pss_KiB=13885  shim_procs=3
 /usr/local/bin/containerd-shim-wasmedge-v1  109.2 MiB    (13.0 倍)
 ```
 
-<svg viewBox="0 0 660 108" role="img" aria-label="shim 二進位檔大小(MiB)" style="font-family: var(--md-text-font-family, sans-serif)" width="100%" style="max-width:660px; font-family: var(--md-text-font-family, sans-serif);">
+<svg viewBox="0 0 660 108" role="img" aria-label="shim 二進位檔大小(MiB)" width="100%" style="max-width:660px; font-family: var(--md-text-font-family, sans-serif);">
 <text x="0" y="18" font-size="15" font-weight="600" fill="var(--md-default-fg-color)">shim 二進位檔大小(MiB)</text>
 <text x="160" y="50" font-size="13" text-anchor="end" fill="var(--md-default-fg-color)">runc 的 shim</text>
 <rect x="170" y="34" width="30" height="22" rx="2" fill="#4c7bd9"/>
@@ -309,14 +309,14 @@ wasmcloud_ready  n=20  min 1422  p25 1979.5  median 2302  p75 5049.2  max 12699 
 | 同一顆節點 | 達成 | 全部在同一顆 `Standard_D2as_v5` 上 |
 | **冷啟動** | **部分達成** | wasmedge 與 runc 有 2×n=50 的乾淨數據,**結論是「差異落在雜訊邊緣、不能排名」**;wasmCloud 量測平面不同,不可比 |
 | **記憶體足跡** | **部分達成** | shim 常駐與邊際、容器 cgroup 都有;**wasmCloud 的「每個元件多少」沒拿到** |
-| **映像大小** | **未達成** | 打包配方設計完整,**但成品大小沒有落地** |
+| **映像大小** | **未達成** | 打包配方設計完整,**但成品大小沒有留下紀錄** |
 | **方法學限制寫清楚** | 達成 | null control、bootstrap CI、兩批獨立重複、判定不一致如實記錄 |
 
 **整體:部分通過。** 最有價值的產出不是三欄數字,是**那個帶信賴區間的否定結論**,以及記憶體的結構性差異。
 
 ## 誠實的差距
 
-- **映像大小整欄沒有數據。** 打包配方設計完整(含／不含 base image 兩版),但成品大小只印在建置 pod 的 stdout,沒有落地。**這一欄要補做才算完整。**
+- **映像大小整欄沒有數據。** 打包配方設計完整(含／不含 base image 兩版),但成品大小只印在建置 pod 的 stdout,沒有存下來。**這一欄要補做才算完整。**
 - **wasmCloud 沒有可比的冷啟動數字。** 只有端到端的 2.3 秒,而那條路徑包含整個 Kubernetes 控制平面。
 - **wasmCloud 的「每個元件多少記憶體」沒拿到。**
 - **冷啟動兩批判定不一致,沒有跑第三批。** 要定論需要更大的 n 或更多批次,所以結論只能是「落在雜訊邊緣」。

@@ -418,7 +418,7 @@ KAI 七元件(跨 Day 1–3):                     全部 Running,RESTARTS 0,age 
 
 ### 步驟 7:GPU Operator 到底需不需要(結清 Day 1 的懸案)
 
-Day 1 步驟 5 留了一個沒答完的問題:KAI 的 README 把 NVIDIA GPU Operator 列成前置條件,但整張卡配置在只有 device plugin 的叢集上照樣跑通,當時的推測是「KAI 的 GPU sharing/fraction 需要 runtime class 這類 Operator 帶進來的設定」。今天的環境正好能驗這個問題的另一半:
+Day 1 步驟 5 留了一個沒答完的問題:KAI 的 README 把 NVIDIA GPU Operator 列成前置條件,但整張卡配置在只有 device plugin 的叢集上照樣跑通,Day 1 留下的推測是「KAI 的 GPU sharing/fraction 需要 runtime class 這類 Operator 帶進來的設定」。今天的環境正好能驗這個問題的另一半:
 
 ```console
 $ kubectl get ds,deploy -A | grep -iE "nvidia|dcgm|nfd|node-feature|mig|gpu-feature"

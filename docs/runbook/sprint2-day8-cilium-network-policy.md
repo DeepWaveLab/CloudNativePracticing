@@ -91,7 +91,7 @@ $ cilium-dbg identity get 53393
         k8s:io.kubernetes.pod.namespace=netlab
 ```
 
-只有五個標籤。而 pod 身上實際掛著的還有 `pod-template-hash` 與 `topology.kubernetes.io/*`——**那些不在 identity 裡**,Cilium 出廠的標籤過濾器把它們排除了。
+只有五個標籤。而 pod 身上實際掛著的還有 `pod-template-hash` 與 `topology.kubernetes.io/*`——**那些不在 identity 裡**,Cilium 預設的標籤過濾器把它們排除了。
 
 這不是細節:**如果 `pod-template-hash` 算數,同一個 Deployment 每次滾動更新都會生出一個新 identity**,政策要嘛跟著失效、要嘛 identity 表爆炸。
 
@@ -296,7 +296,7 @@ $ PUT → 403     DELETE → 403
 
 **同一顆 pod、同一個 Service、同一個 8080/TCP,只有 HTTP 方法不同,結果不同。** 這是 L4 做不到的區分——在封包層看,GET 和 POST 是一模一樣的 TCP 連線。
 
-### 客戶端看到的東西:L7 與 L4 的差別落地的地方
+### 客戶端看到的東西:L7 與 L4 的差別顯現的地方
 
 ```console
 ### L7 拒絕（POST → echo7）
@@ -551,7 +551,7 @@ $ cilium-dbg bpf policy get 680
 Allow    Ingress     reserved:host      ANY      NONE      968     12
 ```
 
-`ANY/ANY`、無條件,而且**不是任何一條政策寫出來的**——是 `Host firewall: Disabled`(出廠預設)的結果。
+`ANY/ANY`、無條件,而且**不是任何一條政策寫出來的**——是 `Host firewall: Disabled`(預設)的結果。
 
 **這條規則有一半是必要的**:節點自己出去的流量(kubelet、系統服務、節點探針)不受任何 CNP 管,否則第一條 default-deny 就會切斷節點自己的健康檢查。
 
@@ -569,7 +569,7 @@ Allow    Ingress     reserved:host      ANY      NONE      968     12
 - **網路政策只會放寬,不會收緊。** 多條規則取聯集,加一條更嚴格的規則不存在。一條圖方便的寬規則會讓之後所有細緻規則變成裝飾品,而寫細緻規則的人自己測的時候會全部通過。
 - **一條無效的網路政策是 fail-open。** `kubectl apply` 成功、物件列得出來、流量照舊,真相只在 `.status.conditions` 的 `Valid` 欄位裡。**驗收要檢查那個欄位,不是退出碼。**
 - **L7 拒絕與 L4 丟包對呼叫端是兩件完全不同的事。** 前者 4 毫秒回一個 403、不會被重試、日誌裡是應用層事件;後者要等連線逾時、會被重試、看起來跟「對方掛了」一模一樣。代價是每個請求多約 0.5 毫秒,以及一個會回話、可被逐一探測的執行點。
-- **網路政策的保證,取決於「誰能建 hostNetwork pod」。** 出廠設定下那類 pod 完全豁免所有 CNP,而這件事在任何一條政策的內容裡都看不出來。網路層的邊界,實際上是由 admission 層決定的。
+- **網路政策的保證,取決於「誰能建 hostNetwork pod」。** 預設設定下那類 pod 完全豁免所有 CNP,而這件事在任何一條政策的內容裡都看不出來。網路層的邊界,實際上是由 admission 層決定的。
 
 ## 延伸閱讀
 

@@ -1,4 +1,4 @@
-# Day 3: 裝上 Falco,讀懂它出廠帶的規則
+# Day 3: 裝上 Falco,讀懂它預設帶的規則
 
 ![Falco 官方標誌](../assets/logos/falco-icon-color.svg){ align=right width="95" }
 
@@ -6,10 +6,10 @@
 
 !!! abstract "你在課程的哪裡"
     - **Day 0–2**:知道 eBPF 程式怎麼掛進核心、會用 bpftrace 追 syscall,也會把核心事件裡的 cgroup id 換算回 pod 名字,並替一顆 pod 手工建立行為基線。
-    - **今天**:在叢集上裝 Falco,拆解一條出廠規則的完整結構,觸發它並指出告警裡哪個欄位認出了 pod;然後把同樣的偏離動作拿去跟 Day 2 的手工基線對打。
-    - **Day 4**:今天會找到出廠規則的兩個具體空白,下一章自己寫規則把它們補起來。
+    - **今天**:在叢集上裝 Falco,拆解一條預設規則的完整結構,觸發它並指出告警裡哪個欄位認出了 pod;然後把同樣的偏離動作拿去跟 Day 2 的手工基線對打。
+    - **Day 4**:今天會找到預設規則的兩個具體空白,下一章自己寫規則把它們補起來。
 
-## 一個常駐元件跟一支臨場工具,差在哪裡
+## 常駐元件與隨用工具,差在哪裡
 
 Day 2 結尾列過手工做法辦不到的七件事。今天要關掉的是其中四件——沒有持久化、沒有告警、沒有規則語言、必須剛好在看。Falco 用一個 DaemonSet 換掉這四件:每顆節點一份、全時間執行、規則寫在檔案裡、告警印到標準輸出。
 
@@ -21,7 +21,7 @@ Day 2 結尾列過手工做法辦不到的七件事。今天要關掉的是其�
 |---|---|---|
 | 1 | 選 driver | 選錯的話後面全部白做,而預設值不會告訴你它選了什麼 |
 | 2 | 安裝 | 要先知道它裝出了哪些東西,才知道出事時該看哪一個 |
-| 3 | 讀出廠規則 | **今天的重心**;讀不懂規則語言,Day 4 寫不出規則 |
+| 3 | 讀預設規則 | **今天的重心**;讀不懂規則語言,Day 4 寫不出規則 |
 | 4 | 觸發一條規則 | 驗收:告警裡哪個欄位認出了 pod |
 | 5 | 跟 Day 2 的基線對打 | 同樣的偏離動作,兩種方法各抓到什麼 |
 | 6 | 量噪音與資源 | 「裝一下 Falco」實際上要付什麼 |
@@ -140,7 +140,7 @@ engine:
 
 第二個數字看起來很難看,其實是本章最好的消息:中間那 12 分鐘什麼都沒發生,因為預設規則集在正常運作的叢集上真的不叫。第一筆告警出現的時間,就是有人動手的時間。步驟 6 有完整量測。
 
-## 步驟 3: 讀懂出廠規則 {#step-3}
+## 步驟 3: 讀懂預設規則 {#step-3}
 
 ### 先數一數手上有幾條
 
@@ -180,7 +180,7 @@ $ kubectl -n falco exec <falco-pod> -c falco -- ls -la /etc/falco/
 
 優先級分布是 CRITICAL 3、WARNING 11、NOTICE 7、INFO 1。
 
-25 這個數字為什麼重要,見[地雷 2](#mine-2)。更值得先看的是這 25 條的**取捨形狀**:全部都在描述**已知的攻擊手法**——載入核心模組、`release_agent` 容器逃逸、`memfd_create` 無檔案執行、翻找私鑰、清日誌。沒有一條在管「這個容器今天做了以前沒做過的事」。那正是 Day 2 手工基線在做的事,而 Falco 出廠不做。步驟 5 會把這件事量出來。
+25 這個數字為什麼重要,見[地雷 2](#mine-2)。更值得先看的是這 25 條的**取捨形狀**:全部都在描述**已知的攻擊手法**——載入核心模組、`release_agent` 容器逃逸、`memfd_create` 無檔案執行、翻找私鑰、清日誌。沒有一條在管「這個容器今天做了以前沒做過的事」。那正是 Day 2 手工基線在做的事,而 Falco 預設不做。步驟 5 會把這件事量出來。
 
 ### 完整解剖一條規則
 
@@ -392,9 +392,9 @@ k8s.ns.name    = ebpf-lab          ← namespace
 
 ## 步驟 5: 跟 Day 2 的手工基線正面對照
 
-同樣四個偏離動作,Day 2 用 bpftrace 加手刻基線比對,今天用 Falco 出廠規則。
+同樣四個偏離動作,Day 2 用 bpftrace 加手刻基線比對,今天用 Falco 預設規則。
 
-| 偏離動作 | Day 2 手工基線 | Falco 0.44.1 出廠規則 |
+| 偏離動作 | Day 2 手工基線 | Falco 0.44.1 預設規則 |
 |---|---|---|
 | 容器內開互動式 shell | 抓到 | 抓到,具名 `Terminal shell in container` |
 | 讀 `/etc/shadow` | 抓到 | 抓到,具名 `Read sensitive file untrusted` |
@@ -467,7 +467,7 @@ chmod +x falco-alerts.sh
 
 這個數字的適用範圍要老實講:**15 分鐘、三顆節點、工作負載很單純的實驗室叢集,不能外推到生產環境。** 真實叢集會有 CI 跑腳本、備份工具讀檔案、健康檢查開 shell。`Run shell untrusted` 的 `desc` 自己就寫了 "This rule can be noisier… Allocate time to tune this rule",光是它的排除清單就佔了規則檔三十幾行。
 
-但這個數字仍然推翻了一個具體的誤解:**「Falco 一裝下去就淹沒在告警裡」對出廠的 25 條 stable 規則不成立**,那個名聲屬於另外幾套要自己加裝的規則集。
+但這個數字仍然推翻了一個具體的誤解:**「Falco 一裝下去就淹沒在告警裡」對預設的 25 條 stable 規則不成立**,那個名聲屬於另外幾套要自己加裝的規則集。
 
 ### 資源:實測與保留
 
@@ -485,7 +485,7 @@ chmod +x falco-alerts.sh
 - **CPU 隨節點忙碌程度走。** 跑著 Sprint 1 整套東西的那顆節點,Falco 用量穩定比閒置節點高 50% 到 100%。這很合理——Falco 的工作量正比於節點上發生的 syscall 數量,跟有沒有告警無關。**沒有告警不等於沒有成本**,每一個 `execve` 都要進使用者空間比對 25 條規則。
 - **記憶體幾乎不動。** 全程平坦,因為主要是 ring buffer(8 MB)與行程表這些預先配置好的結構。
 
-換算到規模:一座 100 節點的叢集,Falco 預設會**保留** 10 vCPU 與 51.2 GB 記憶體,實際用掉大約 2 vCPU 與 11 GB。這就是「裝一下 Falco」的真實帳單,而它跟 Day 2 那種「要用的時候才進去跑 bpftrace」的臨場做法是完全不同量級的承諾。反過來說,Day 2 那套的成本是**人的注意力**——必須剛好在看——那個成本才是真正貴的。
+換算到規模:一座 100 節點的叢集,Falco 預設會**保留** 10 vCPU 與 51.2 GB 記憶體,實際用掉大約 2 vCPU 與 11 GB。這就是「裝一下 Falco」的真實帳單,而它跟 Day 2 那種「要用的時候才進去跑 bpftrace」的隨用做法是完全不同量級的承諾。反過來說,Day 2 那套的成本是**人的注意力**——必須剛好在看——那個成本才是真正貴的。
 
 ## 誠實的差距
 
@@ -502,7 +502,7 @@ chmod +x falco-alerts.sh
 | DaemonSet 覆蓋到所有目標節點 | `kubectl get ds falco` 的 DESIRED 等於節點數,不是 1 | DESIRED 3 / READY 3 |
 | 規則載入無誤 | 啟動日誌每一個規則檔後面都跟著 `schema validation: ok` | `falco_rules.yaml \| schema validation: ok` |
 | **規則命中並指名 pod** | 告警的 `rule` 是具名規則,且 `k8s.pod.name` 等於被操作的那顆 pod | `Terminal shell in container` + `Read sensitive file untrusted`,兩筆都是 `baseline-nginx` |
-| 出廠規則集的實際規模 | 數 `- rule:` 的出現次數 | 25 條(87 macro / 49 list) |
+| 預設規則集的實際規模 | 數 `- rule:` 的出現次數 | 25 條(87 macro / 49 list) |
 | 閒置噪音 | 無人操作的窗口內告警數 | 8 分 28 秒 × 3 節點 = 0 筆 |
 
 ## 地雷記錄
@@ -546,11 +546,11 @@ priority 0 比每一個系統元件都低,在滿載的節點上它是搶佔演�
 
 **修法**沒有漂亮的:提高 priority 不會變出 CPU,只是換一個受害者——在這座叢集上把 Falco 設成 `system-node-critical`,代價是踢掉 KAI 或 HAMi 的元件。誠實的結論是**這顆節點的規格不夠跑 Falco**。「每個節點多 100m CPU、512Mi 記憶體」聽起來很少,但在 2 vCPU 的節點上那是全部容量的 5%,而且是保留量不是用量([地雷 7](#mine-7))。
 
-### 地雷 2:出廠只有 25 條規則,而規則版本是另一條版本線 {#mine-2}
+### 地雷 2:預設只有 25 條規則,而規則版本是另一條版本線 {#mine-2}
 
 **症狀**:寫好一個測試動作、確信 Falco 應該要報,結果什麼都沒有,於是開始懷疑安裝壞了。
 
-**根因**:Falco 的規則走成熟度分級(stable、incubating、sandbox),**出廠只裝 stable 這 25 條**,其餘要另外 `falcoctl artifact install`。絕大多數「Falco 沒報」的情況,只是它沒有那條規則。
+**根因**:Falco 的規則走成熟度分級(stable、incubating、sandbox),**預設只裝 stable 這 25 條**,其餘要另外 `falcoctl artifact install`。絕大多數「Falco 沒報」的情況,只是它沒有那條規則。
 
 再往下一層:規則的版本(`falco-rules:5`)跟 Falco 本體的版本(0.44.1)是**兩條獨立的版本線**,由 init 容器從 OCI registry 拉取。升級 Falco 不等於升級規則,反之亦然。
 
@@ -592,7 +592,7 @@ tty=/dev/pts/0
 
 **教訓**:這顆地雷的殺傷力在方向——它讓「規則沒報」看起來像 Falco 的問題,其實是觸發方式的問題。照文件寫自動化測試來驗證 Falco 裝好沒的人都會踩到,然後得出「Falco 不可靠」的結論,而 Falco 從頭到尾都是對的。反過來也要記住:**真人在終端機打 `kubectl exec -it` 一定會被抓,腳本裡的 `exec` 不會。**
 
-### 地雷 4:出廠規則沒有任何一條在管「新的對外連線」 {#mine-4}
+### 地雷 4:預設規則沒有任何一條在管「新的對外連線」 {#mine-4}
 
 **症狀**:從容器連一個沒連過的位址,連線成功,Falco 零告警。
 
@@ -631,7 +631,7 @@ Warning  Read sensitive file untrusted
 
 **後果很具體**:告警指向的是攻擊的發起端,不是受害端。調查員照著 `k8s.pod.name` 去看,會看到一個什麼都沒有的容器,而真正被翻的那顆 pod 在告警裡完全沒出現。
 
-好消息是**訊號沒有消失,只是被貼錯標籤**——`proc.name`、`pname`、`fd.name` 全都在,而且「一個特權容器裡冒出 `nsenter`」本身就是極強的指標。出廠 25 條沒有任何一條在看 `nsenter`。
+好消息是**訊號沒有消失,只是被貼錯標籤**——`proc.name`、`pname`、`fd.name` 全都在,而且「一個特權容器裡冒出 `nsenter`」本身就是極強的指標。預設 25 條沒有任何一條在看 `nsenter`。
 
 ### 地雷 6:`container_entrypoint` 讓 shell 規則只抓得到第一層 {#mine-6}
 
@@ -697,13 +697,13 @@ Terminal shell in container   proc=bash pname=runc   cmd=bash -c bash -c "echo f
 
 - **[Falco 規則的三個基本元件](https://falco.org/docs/concepts/rules/basic-elements/)** —— 官方對 rule、macro、list 的定義,以及 `condition`／`output`／`priority`／`tags` 各自的角色,對得上步驟 3 的解剖。
 - **[核心事件來源與 driver 選擇](https://falco.org/docs/concepts/event-sources/kernel/)** —— 說明 modern eBPF probe 需要 BTF 與 ring buffer 支援,以及它靠 CO-RE 免去逐核心版本編譯,正是步驟 1 釘死 `modern_ebpf` 的依據。
-- **[出廠規則清單與成熟度分級](https://falco.org/docs/reference/rules/default-rules/)** —— 官方明載「預設只載入 stable 規則」,incubating 與 sandbox 要另外安裝,這是地雷 2 的一手來源。
+- **[預設規則清單與成熟度分級](https://falco.org/docs/reference/rules/default-rules/)** —— 官方明載「預設只載入 stable 規則」,incubating 與 sandbox 要另外安裝,這是地雷 2 的一手來源。
 - **[事件與條件可用的欄位總表](https://falco.org/docs/reference/rules/supported-fields/)** —— 寫規則時查欄位名稱用;`evt.*`／`proc.*` 與 `container.*`／`k8s.*` 分屬不同來源,在這裡看得最清楚。
 - **[Falco Helm chart 的參數表](https://github.com/falcosecurity/charts/tree/master/charts/falco)** —— `driver.kind` 預設 `auto`、`customRules` 的用法都在這份 README 的參數表裡,Day 4 會直接用到。
 
 ## 下一步
 
-今天找到兩個具體的空白:出廠規則不管「沒連過的對外連線」([地雷 4](#mine-4)),也抓不到「容器裡已經在跑的東西再開 shell」([地雷 6](#mine-6))。兩個都不是 bug,是規則寫死的取捨——而規則是可以自己寫的。[Day 4](sprint2-day4-falco-custom-rules.md) 用今天學到的 `list`、`macro`、`rule` 三層結構,一條一條把這兩個洞補起來,然後面對寫規則真正困難的部分:誤報,以及調校誤報要付出的偵測力。
+今天找到兩個具體的空白:預設規則不管「沒連過的對外連線」([地雷 4](#mine-4)),也抓不到「容器裡已經在跑的東西再開 shell」([地雷 6](#mine-6))。兩個都不是 bug,是規則寫死的取捨——而規則是可以自己寫的。[Day 4](sprint2-day4-falco-custom-rules.md) 用今天學到的 `list`、`macro`、`rule` 三層結構,一條一條把這兩個洞補起來,然後面對寫規則真正困難的部分:誤報,以及調校誤報要付出的偵測力。
 
 ---
 

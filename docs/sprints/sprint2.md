@@ -13,7 +13,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;
 [![Cilium](../assets/logos/cilium-icon-color.svg){ width="72" }](https://cilium.io/)
 
-*四位主角:bpftrace(自己動手看)、Falco(規則引擎替你判斷)、Tetragon(在核心裡攔下來)、Cilium 與 Hubble(換掉網路資料平面並看清楚流量)。*
+*四套工具:bpftrace(自己動手看)、Falco(規則引擎替你判斷)、Tetragon(在核心裡攔下來)、Cilium 與 Hubble(換掉網路資料平面並看清楚流量)。*
 
 </div>
 
@@ -49,11 +49,11 @@
 
 -   ![Falco](../assets/logos/falco-icon-color.svg){ width="44" }
 
-    **Day 3 · [Falco 安裝與出廠規則](../runbook/sprint2-day3-falco-basics.md)**
+    **Day 3 · [Falco 安裝與預設規則](../runbook/sprint2-day3-falco-basics.md)**
 
     ---
 
-    出廠只有 25 條規則,而閒置八分半是零告警。完整解剖一條規則的 condition 怎麼收斂到 syscall 欄位。
+    預設只有 25 條規則,而閒置八分半是零告警。完整解剖一條規則的 condition 怎麼收斂到 syscall 欄位。
 
 -   ![Falco](../assets/logos/falco-icon-color.svg){ width="44" }
 

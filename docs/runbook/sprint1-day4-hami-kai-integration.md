@@ -183,7 +183,7 @@ sp-4 最後去了分數低的 `vmss00000c`。annotation 沒有換掉評分函式
 
 一行 annotation 就把「集中或分散」交到租戶手上,不必重裝、不必改全域值、不必重啟排程器。代價是這件事**由租戶自己宣告**:沒有任何機制阻止所有人都寫 `spread` 把節點撐開,也沒有機制阻止所有人都寫 `binpack` 把風險疊在同一台。在 spot 叢集上,這個旋鈕的一端是省錢、另一端是一台被回收要死幾個租戶,而 HAMi 不提供治理。要強制或改寫這個 annotation,得靠外部的 policy engine(OPA、Kyverno)。
 
-### 步驟 2:裝上整合的兩個元件,並確認旗標真的落地
+### 步驟 2:裝上整合的兩個元件,並確認旗標真的生效
 
 官方文件第一步是 `helm install kai-scheduler oci://ghcr.io/nvidia/kai-scheduler ...`,這個位址跑不動:
 
@@ -726,7 +726,7 @@ Config CR:  admission.gpuSharing                  = False
 | 檢查項 | 指令 | 期待結果 |
 |---|---|---|
 | annotation 換掉了擺法 | 四顆帶 `spread` 的 pod,看 `hami.io/vgpu-devices-allocated` | 出現兩個不同的 GPU UUID,兩台節點各 2 顆 |
-| 整合旗標真的落地 | 看 `admission` Deployment 的 args(不看 `Config` CR 的 `spec.global`) | 有 `--gpu-sharing-enabled=true` 與 `--hami-core-enabled=true`,且 `--gpu-fraction-runtime-class-name` 是空字串 |
+| 整合旗標真的生效 | 看 `admission` Deployment 的 args(不看 `Config` CR 的 `spec.global`) | 有 `--gpu-sharing-enabled=true` 與 `--hami-core-enabled=true`,且 `--gpu-fraction-runtime-class-name` 是空字串 |
 | KAI 知道卡有多大 | `kubectl get node -l gpu=on -o json \| jq '.items[].metadata.labels'` | 有 `nvidia.com/gpu.memory: "16384"`,不是缺項 |
 | 節點回到原廠帳本 | `kubectl get node -o json \| jq '.items[].status.capacity'` | `nvidia.com/gpu: 1`,不是 10 |
 | 共卡 pod 真的被切 | `kubectl -n day4-lab logs kai-shared-1` | `nvidia-smi` 顯示 4259MiB,首行有 `[HAMI-core Msg` |
@@ -739,7 +739,7 @@ Config CR:  admission.gpuSharing                  = False
 
 **症狀**:`kubectl apply` 直接回 `Forbidden ... RuntimeClass "nvidia" not found`。pod 物件根本沒建成,狀態欄裡不會出現 Pending 或 CrashLoop,`kubectl get pods` 什麼都查不到,很容易誤判成 YAML 寫錯。
 
-**根因**:KAI chart 的 `admission.gpuFractionRuntimeClassName` 預設值就是 `nvidia`(`values.yaml` 第 203 行),admission 會把它蓋到每顆共卡 pod 上。這個 RuntimeClass 通常由 NVIDIA GPU Operator 或原廠 device plugin 建立,AKS 兩者都沒有,`kubectl get runtimeclass` 只有 `runc` 與 `kata-vm-isolation`。KAI 的 GPU sharing 文件在講 binder 佔位 pod 的 Runtime Class 時,把同一個假設寫得很直白:「By default, KAI Scheduler uses the `nvidia` Runtime Class, which is typically configured by the NVIDIA device plugin.」——那一段的主角是佔位 pod 的孿生旗標,不是 admission 這個預設,但「預設用 nvidia、預期由 device plugin 建好」的假設兩處相同。
+**根因**:KAI chart 的 `admission.gpuFractionRuntimeClassName` 預設值就是 `nvidia`(`values.yaml` 第 203 行),admission 會把它蓋到每顆共卡 pod 上。這個 RuntimeClass 通常由 NVIDIA GPU Operator 或原廠 device plugin 建立,AKS 兩者都沒有,`kubectl get runtimeclass` 只有 `runc` 與 `kata-vm-isolation`。KAI 的 GPU sharing 文件在講 binder 佔位 pod 的 Runtime Class 時,把同一個假設寫得很直白:「By default, KAI Scheduler uses the `nvidia` Runtime Class, which is typically configured by the NVIDIA device plugin.」——那一段的重點是佔位 pod 的孿生旗標,不是 admission 這個預設,但「預設用 nvidia、預期由 device plugin 建好」的假設兩處相同。
 
 **修法**:`--set admission.gpuFractionRuntimeClassName=""`。清空就好,AKS GPU 節點的預設 runtime 本來就吃得到卡(Day 3 整天沒用過 `runtimeClassName`)。文件另外提到一個孿生旗標 `binder.resourceReservation.runtimeClassName` 管佔位 pod,但 v0.16.8 的 `values.yaml` 裡它沒有預設值,本次佔位 pod 也確實沒被擋過——**可設的旗標與已設的預設是兩件事**,讀 chart 文件時要分清楚。
 
@@ -813,7 +813,7 @@ $ kubectl annotate node <gpu-nodes> \
 - 放置策略是一行 annotation 的事,代價卻寫在爆炸半徑上。spot 叢集上,binpack 與 spread 的距離就是「省一台機器」與「一次死四個租戶」的距離,而選擇權預設在租戶手上——HAMi 不提供治理,要管就得外掛 policy engine。
 - 節點上 `nvidia.com/gpu` 只能有一個供應者。這條限制決定了任兩套 GPU 方案能不能並存,而且判斷只要一個問題:誰在宣告這個資源。
 - fallback 到一個算得動的小數字,是最難查的一種失敗。它不報錯、不告警,只是讓某類請求永遠排不上;看到「資源有、衍生資源沒有」的訊息,順著推導鏈往上找標籤,別在請求量上打轉。
-- 精度與可觀測性在這兩條路上剛好相反。HAMi 記到 MiB 但帳本藏在行程記憶體,KAI 只記到 0.01 張卡卻把結果寫成一個 ConfigMap;兩邊的 metrics 也毫無交集,一邊只講裝置、一邊只講佇列。哪一邊比較痛,取決於你平常是在做容量規劃還是在追一顆跑錯的 pod。
+- 精度與可觀測性在這兩條路上剛好相反。HAMi 記到 MiB 但帳本藏在行程記憶體,KAI 只記到 0.01 張卡卻把結果寫成一個 ConfigMap;兩邊的 metrics 也毫無交集,一邊只講裝置、一邊只講佇列。哪一邊代價比較高,取決於你平常是在做容量規劃還是在追一顆跑錯的 pod。
 - 卸載乾不乾淨不能只看 `helm list`。寫在 node 物件上的 label 與 annotation、安裝 hook 生出來的 secret、`--create-namespace` 留下的空殼,helm 一個都不認得,而下一套方案會被它們騙。
 
 ## 延伸閱讀

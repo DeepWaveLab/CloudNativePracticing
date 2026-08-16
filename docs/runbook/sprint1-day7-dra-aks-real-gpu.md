@@ -99,7 +99,7 @@ pool=gpudra                                ← 我們貼的,唯一一個
 (沒有 nvidia.com/gpu.present;也沒有任何 feature.node.kubernetes.io/* ——叢集沒裝 NFD)
 ```
 
-**第二項是汙點**:只有 `kubernetes.azure.com/scalesetpriority=spot:NoSchedule` 那一個,AKS 不會替 GPU 池自動加 `nvidia.com/gpu` 汙點。**第三項是節點上有沒有 classic device plugin 落地**:`kubectl get pods -A -o wide | grep aks-gpudra` 只列出 AKS 自己的六個系統 DaemonSet(CNI、ip-masq、node-manager、兩個 CSI、kube-proxy);HAMi 的 `hami-device-plugin` 與 Day 5 的映像預熱 DaemonSet 在這台機器上的 `DESIRED` 都是 0。隔離成立。
+**第二項是汙點**:只有 `kubernetes.azure.com/scalesetpriority=spot:NoSchedule` 那一個,AKS 不會替 GPU 池自動加 `nvidia.com/gpu` 汙點。**第三項是節點上有沒有部署 classic device plugin**:`kubectl get pods -A -o wide | grep aks-gpudra` 只列出 AKS 自己的六個系統 DaemonSet(CNI、ip-masq、node-manager、兩個 CSI、kube-proxy);HAMi 的 `hami-device-plugin` 與 Day 5 的映像預熱 DaemonSet 在這台機器上的 `DESIRED` 都是 0。隔離成立。
 
 **第四項是節點的資源帳**,這是今天全天的對照基準:
 
@@ -261,7 +261,7 @@ W0805 08:45:31.616654 nvlib.go:543] error getting PCIe root for device 0, contin
   devices/LNXSYSTM:00/LNXSYBUS:00/ACPI0004:00/MSFT1000:00/47505500-…/pci0001:00/0001:00:00.0
 ```
 
-driver 的處理很得體:印一行警告然後繼續,不中斷。代價是供給表上少了一個屬性,而少的那個正好是拓樸感知選擇器要用的,見[地雷 4](#mine-4)。
+driver 沒有因此中斷:印一行警告然後繼續。代價是供給表上少了一個屬性,而少的那個正好是拓樸感知選擇器要用的,見[地雷 4](#mine-4)。
 
 ### 步驟 4:今天的判定關卡——整卡配置在 T4 上到底能不能動
 
@@ -552,7 +552,7 @@ claim 這一邊沒有 ownerReference(具名 claim 不屬於任何 pod),`reserved
 
 v0.4.1 的 GPU 共享策略(TimeSlicing、MPS)是透過 claim 的 **opaque config** 指定的:claim 除了寫「我要一顆裝置」,還可以夾帶一段只有該廠商 driver 看得懂的參數。這條管道被 driver 自己的 feature gate 擋著——`TimeSlicingSettings`、`MPSSupport`、`DynamicMIG`、`PassthroughSupport` 四個都是 alpha 且預設 false,只有 `IMEXDaemonsWithDNSNames` 是 beta 且預設 true。
 
-關鍵區別是:**這些是 driver 程序自己的旗標,不是 apiserver 的。** [Day 6 地雷 1](sprint1-day6-dra-simulated-devices.md#mine-1) 記的是「AKS 把 DRA 的 alpha gate 全部設 0,而且改不了」,那句話管得到的只有 `resource.k8s.io` 這組 API 的行為;driver 端的 gate 是 chart 的一個值,想開就開——`helm upgrade … --set featureGates.TimeSlicingSettings=true` 花 37 秒(含 DaemonSet 重啟)走到 REVISION 3,plugin log 的 `Feature gates: map[string]bool{…, "TimeSlicingSettings":true, …}` 確認旗標落地。claim 因此可以帶著廠商參數(`day7-manifests/04-timeslicing-config.yaml`):
+關鍵區別是:**這些是 driver 程序自己的旗標,不是 apiserver 的。** [Day 6 地雷 1](sprint1-day6-dra-simulated-devices.md#mine-1) 記的是「AKS 把 DRA 的 alpha gate 全部設 0,而且改不了」,那句話管得到的只有 `resource.k8s.io` 這組 API 的行為;driver 端的 gate 是 chart 的一個值,想開就開——`helm upgrade … --set featureGates.TimeSlicingSettings=true` 花 37 秒(含 DaemonSet 重啟)走到 REVISION 3,plugin log 的 `Feature gates: map[string]bool{…, "TimeSlicingSettings":true, …}` 確認旗標生效。claim 因此可以帶著廠商參數(`day7-manifests/04-timeslicing-config.yaml`):
 
 ```bash
 cat > 04-timeslicing-config.yaml <<'EOF'
@@ -722,7 +722,7 @@ No resources found
 |---|---|---|
 | 隔離成立 | `kubectl get pods -A -o wide \| grep <gpudra 節點>` | 只有 AKS 系統 DaemonSet;HAMi device plugin 的 `DESIRED` 是 0 |
 | 節點帳上沒有 GPU | `kubectl get node <n> -o jsonpath='{.status.allocatable}'` | 沒有 `nvidia.com/gpu` 這個鍵 |
-| kubelet plugin 真的落地 | `kubectl -n dra-driver-nvidia-gpu get ds` | `DESIRED` 是 1 而不是 0——0 代表 affinity 沒清掉 |
+| kubelet plugin 真的部署到節點 | `kubectl -n dra-driver-nvidia-gpu get ds` | `DESIRED` 是 1 而不是 0——0 代表 affinity 沒清掉 |
 | 供給表帶著真屬性 | `kubectl get resourceslice -o yaml` | `productName: Tesla T4`、`capacity.memory: 16Gi` |
 | 整卡配置成立且走 CDI | pod 內 `nvidia-smi -L` 與 `env \| grep NVIDIA_VISIBLE_DEVICES` | UUID 與 ResourceSlice 的 `uuid` 屬性逐字相同;環境變數等於 `void`,而 `/dev/nvidia0` 仍在容器裡 |
 | 不可滿足的 claim 停在門口 | `kubectl -n dra-3a get pod,resourceclaim` | claim 是 `pending`、pod 是 `Pending`,不是配置到一半 |
@@ -803,7 +803,7 @@ No resources found
 
 想往下深挖,從這幾份開始:
 
-- **[dra-driver-nvidia-gpu 專案首頁](https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu)** —— 本章主角的原始碼與 chart,README 開宗明義寫著 GPU kubelet plugin 在 chart 裡預設是關的,對應步驟 2 的兩道鎖。
+- **[dra-driver-nvidia-gpu 專案首頁](https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu)** —— 本章主題的原始碼與 chart,README 開宗明義寫著 GPU kubelet plugin 在 chart 裡預設是關的,對應步驟 2 的兩道鎖。
 - **[dra-driver-nvidia-gpu v0.4.1 的前置條件文件](https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu/blob/v0.4.1/docs/prerequisites.md)** —— Kubernetes ≥ 1.34.2、driver ≥ v565、runtime 啟用 CDI,以及那句把 NFD 列為需求的話,步驟 1 那張五項對照表的出處。
 - **[deviceinfo.go(v0.4.1)](https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu/blob/v0.4.1/cmd/gpu-kubelet-plugin/deviceinfo.go)** —— ResourceSlice 上每個屬性怎麼組出來的,`driverVersion` 與 `cudaComputeCapability` 走 semver 那兩行就在這裡,[地雷 6](#mine-6) 的根因。
 - **[Container Device Interface 規格](https://github.com/cncf-tags/container-device-interface/blob/main/SPEC.md)** —— `containerEdits`、`deviceNodes`、`hooks`、`env` 各欄位的定義,步驟 4 那份 `/var/run/cdi` 宣告檔照著讀就懂。

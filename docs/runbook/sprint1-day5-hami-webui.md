@@ -89,7 +89,7 @@ webhook                  → 只剩 mutating-kai-admission 加 AKS 自己的三�
 
 五項全乾淨,但原因分兩種。secret 與空 namespace 是 Day 4 結束時手動刪的;節點 annotation 與 `capacity` 這兩項則是因為節點根本是新的——Day 4 那兩台 `…00000b`／`…00000c` 連同殘留一起被 scale-to-0 銷毀,今天開起來的是 `…00000d`／`…00000e`。
 
-這給了一條在 spot 或可縮放節點池上很省事的規則:**寫在 node 物件上的髒東西,把池子縮到 0 就免費清掉了**。長生命週期的固定節點沒有這個機制,那些 annotation 會一直躺著騙下一套方案。
+這給了一條在 spot 或可縮放節點池上很省事的規則:**寫在 node 物件上的髒東西,把池子縮到 0 就免費清掉了**。長生命週期的固定節點沒有這個機制,那些 annotation 會一直留著,誤導下一套方案。
 
 裝 HAMi 之前沿用 Day 3 那道映像存在性預檢,先問一次阿里雲 registry 有沒有對應 K8s 版本的 `kube-scheduler`:
 
@@ -146,7 +146,7 @@ dependencies:
 - name: kube-prometheus-stack  version: 62.6.0   condition: kube-prometheus-stack.enabled  # default false
 ```
 
-chart 自己的 values 已經先關掉 alertmanager、grafana、nodeExporter、defaultRules 與 kubernetesServiceMonitors。要跑起來還得補三刀,兩刀是打開(否則根本裝不成)、一刀是關掉:
+chart 自己的 values 已經先關掉 alertmanager、grafana、nodeExporter、defaultRules 與 kubernetesServiceMonitors。要跑起來還得改三個設定,兩個是打開(否則根本裝不成)、一個是關掉:
 
 ```bash
 cat > 02-hami-webui-values.yaml <<'EOF'
@@ -489,7 +489,7 @@ dial tcp: lookup ... no such host
 printf "http://%s-kube-prometh-prometheus.%s.svc.cluster.local:9090" (fullname) (namespace)
 ```
 
-kube-prometheus-stack 62.6.0 實際建出來的 Service 叫 `hami-webui-kube-prometheus-prometheus`。`kube-prometh` 對 `kube-prometheus`——chart 抄的是舊版 kube-prometheus-stack 的名稱截斷規則,而 subchart 早就換了。兩邊都不會報錯,因為 ConfigMap 裡那只是一段文字。
+但 subchart(kube-prometheus-stack)實際建出來的 Service 叫 `...-kube-prometheus-prometheus`。`kube-prometh` 對 `kube-prometheus`——chart 抄的是舊版的名稱截斷規則,subchart 早就換了。兩邊都不會報錯,因為 ConfigMap 裡那只是一段文字。
 
 **修法**:即使用的就是自帶那一套,也改走外接開關,把位址明寫出來:
 
@@ -614,7 +614,7 @@ kubectl -n kube-system patch deploy hami-webui \
 
 想往下深挖,從這幾份開始:
 
-- **[HAMi-WebUI 專案首頁](https://github.com/Project-HAMi/HAMi-WebUI)** —— 本章主角的原始碼,後端 `server/api/v1/*.proto` 的路由定義與 `server/internal/exporter/exporter.go` 的 PromQL 查詢都在裡面,對應[地雷 3](#mine-3) 與[地雷 5](#mine-5)。
+- **[HAMi-WebUI 專案首頁](https://github.com/Project-HAMi/HAMi-WebUI)** —— 本章主題的原始碼,後端 `server/api/v1/*.proto` 的路由定義與 `server/internal/exporter/exporter.go` 的 PromQL 查詢都在裡面,對應[地雷 3](#mine-3) 與[地雷 5](#mine-5)。
 - **[HAMi-WebUI Helm 安裝指南](https://github.com/Project-HAMi/HAMi-WebUI/blob/main/docs/installation/helm/index.md)** —— 官方的前置條件(Prometheus > 2.8.0)與 `externalPrometheus.address` 的寫法,本章步驟 2 兩條路的出處。
 - **[Prometheus scrape_config 設定說明](https://prometheus.io/docs/prometheus/latest/configuration/configuration/)** —— `honor_labels` 的完整定義,包含「設為 false 時衝突標籤會被改名成 `exported_<原名>`」這句話,[地雷 3](#mine-3) 的根因就在這一段。
 - **[NVIDIA dcgm-exporter](https://github.com/NVIDIA/dcgm-exporter)** —— `DCGM_FI_DEV_GPU_UTIL` 等指標的定義與 DaemonSet 部署方式,卡片詳情頁的溫度、功耗、整卡使用率全部由它供應。

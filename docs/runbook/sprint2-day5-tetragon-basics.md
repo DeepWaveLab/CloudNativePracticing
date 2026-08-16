@@ -5,7 +5,7 @@
 > Falco 用使用者空間的規則引擎把 syscall 事件變成有名字的告警。Tetragon 走另一條路:過濾在核心裡做完,輸出的是紀錄而不是判斷。今天把 Tetragon 裝在同一座叢集上,寫第一條 TracingPolicy,然後讓兩套工具同時看同一批動作——最值得記住的結論來自它們**答案一樣錯**的那一格。
 
 !!! abstract "你在課程的哪裡"
-    - **Day 3–4**:Falco 裝好了、讀得懂規則語言、補過兩個出廠規則的洞,也知道調校誤報要交出多少偵測力。
+    - **Day 3–4**:Falco 裝好了、讀得懂規則語言、補過兩個預設規則的洞,也知道調校誤報要交出多少偵測力。
     - **今天**:裝 Tetragon、拆解一條 TracingPolicy、量出「核心裡過濾」跟「使用者空間比對」差在哪,然後四個偏離動作兩套工具同時看。驗收是 TracingPolicy 產出的事件能對回自己的操作。
     - **Day 6**:今天所有跟攔截有關的開關都刻意關著。下一章才把它從「看」切到「殺」。
 
@@ -20,7 +20,7 @@ Tetragon 交付的是**紀錄**:行程執行了什麼、參數是什麼、父行
 | 步驟 | 做什麼 | 為什麼排在這 |
 |---|---|---|
 | 1 | 安裝 | 它裝出來的東西跟 Falco 不一樣,而且有一樣是 Helm 沒告訴你的 |
-| 2 | 量出廠狀態的事件率 | **同一顆節點同一段時間,量到 0 與每分鐘 1915 筆兩個答案**,只做一半會得到錯的結論 |
+| 2 | 量預設狀態的事件率 | **同一顆節點同一段時間,量到 0 與每分鐘 1915 筆兩個答案**,只做一半會得到錯的結論 |
 | 3 | `tetra` CLI 與 pod 身分 | 事件從哪來、身分怎麼查出來,決定了步驟 5 的結果 |
 | 4 | 第一條 TracingPolicy | 驗收,以及核心層過濾的實證 |
 | 5 | 四個偏離,兩套工具同時看 | **今天的重點** |
@@ -42,7 +42,7 @@ cilium/tetragon   1.6.0   1.6.0
 
 chart 版本與 app 版本同號。這跟 Falco 的 `falco-9.1.0` 對 `0.44.1` 是兩條獨立版本線不一樣,抄錯會誤判升級範圍。
 
-安裝時 values 幾乎是空的,而這是刻意的:Day 3 對 Falco 釘死 `driver.kind` 是因為 `auto` 會藏起實際載入的東西;Tetragon 沒有這個選擇要做,而「出廠狀態下它會吐什麼」這個問題的誠實答案,就是不要先去動它的事件管線。
+安裝時 values 幾乎是空的,而這是刻意的:Day 3 對 Falco 釘死 `driver.kind` 是因為 `auto` 會藏起實際載入的東西;Tetragon 沒有這個選擇要做,而「預設狀態下它會吐什麼」這個問題的誠實答案,就是不要先去動它的事件管線。
 
 ```console
 $ helm install tetragon cilium/tetragon --version 1.7.0 -n tetragon --create-namespace --wait
@@ -65,7 +65,7 @@ $ helm template cilium/tetragon --version 1.7.0 | grep '^kind:' | sort | uniq -c
 | `tetragon` | **DaemonSet**,每節點一顆,2 個容器 | `tetragon`(privileged,掛 BPF 程式、寫 JSON 到節點上的檔案)加 `export-stdout`(把那個檔案 `tail -q -F` 到 stdout) |
 | `tetragon-operator` | **Deployment**,單副本 | 只做一件事:建 CRD。之後基本閒置(實測 1m / 19Mi) |
 
-那個 `export-stdout` sidecar 看起來像實作細節,其實是步驟 2 的主角。
+那個 `export-stdout` sidecar 看起來像實作細節,其實是步驟 2 的重點。
 
 ### 啟動日誌裡的三行
 
@@ -88,11 +88,11 @@ msg="Available sensors" sensors=__base__
 2. **`lsm: true`。** Day 0 從開機參數推論 BPF LSM 是開的,今天 Tetragon **自己偵測後回報同一個答案**。連同 `override_return`、`signal`、`fmodret`——Day 6 攔截需要的四項核心能力這座叢集全有。今天一項都不用。
 3. **`kprobe_multi: false`。** 這顆核心沒有這個功能,所以一個符號要掛一支 kprobe,不能一支程式掛一批。今天只用一個符號所以無感;寫到幾十個掛勾的策略時,這是載入時間與核心記憶體的差別。
 
-零策略時只有 `__base__` 一個 sensor。**這就是「出廠狀態」的定義**,下一步要量的就是它。
+零策略時只有 `__base__` 一個 sensor。**這就是「預設狀態」的定義**,下一步要量的就是它。
 
 CRD 的部分有一個坑,見[地雷 1](#mine-1)。
 
-## 步驟 2: 出廠狀態到底吵不吵——一邊是 0,一邊是每分鐘 1915 筆 {#step-2}
+## 步驟 2: 預設狀態到底吵不吵——一邊是 0,一邊是每分鐘 1915 筆 {#step-2}
 
 ### 答案一:匯出的事件流
 
@@ -103,7 +103,7 @@ Tetragon 匯出事件:0 筆 / 132 秒
 同窗口 Falco 告警:0 筆
 ```
 
-**兩邊都是零。** 如果只做到這裡,結論會是「Tetragon 出廠跟 Falco 一樣安靜」——而這是錯的。
+**兩邊都是零。** 如果只做到這裡,結論會是「Tetragon 預設跟 Falco 一樣安靜」——而這是錯的。
 
 先看一件小事:安裝當下就有 23 筆事件,而且時間戳往前跨了好幾分鐘:
 
@@ -313,7 +313,7 @@ ID  NAME          STATE     FILTERID  NAMESPACE  SENSORS         KERNELMEMORY  M
 3   lab-etc-read  enabled   3         ebpf-lab   generic_kprobe  462.15 kB     monitor_only
 ```
 
-`MODE: monitor_only` 是 agent 自己判定的——**今天的「只觀察」不是靠自律,是策略裡沒有任何動作,agent 據此標記的狀態**。`KERNELMEMORY 462.15 kB` 是一條策略在核心裡的固定成本,這個數字 Falco 沒有對應物。
+`MODE: monitor_only` 是 agent 自己判定的——**今天的「只觀察」不是 agent 自行節制,是策略裡沒有任何動作,agent 據此標記的狀態**。`KERNELMEMORY 462.15 kB` 是一條策略在核心裡的固定成本,這個數字 Falco 沒有對應物。
 
 ### 驗收
 
@@ -365,12 +365,12 @@ $ kubectl -n ebpf-lab exec baseline-nginx -- bash -c \
 
 ## 步驟 5: 四個偏離,兩套工具同時看
 
-Falco 維持 [Day 4](sprint2-day4-falco-custom-rules.md) 結束時的狀態(25 條出廠加 2 條自訂),Tetragon 是 `__base__` 加一條 `lab-etc-read`。一次動作,兩份輸出。
+Falco 維持 [Day 4](sprint2-day4-falco-custom-rules.md) 結束時的狀態(25 條預設加 2 條自訂),Tetragon 是 `__base__` 加一條 `lab-etc-read`。一次動作,兩份輸出。
 
 | 偏離 | Falco 說了什麼 | 怪到哪顆 pod | Tetragon 說了什麼 | 怪到哪顆 pod |
 |---|---|---|---|---|
-| **A** `bash -c "…" & wait`(有 pty) | 2 筆:出廠 `Terminal shell in container` 加自訂 `Shell spawned by non-runtime parent` | `baseline-nginx` ✓ | **18 筆**:3 exec、3 exit、12 kprobe。無規則名、無嚴重度 | `baseline-nginx` ✓ |
-| **B** 同上但**無終端機** | **1 筆**:只有自訂規則。出廠規則靜音 | `baseline-nginx` ✓ | **18 筆,與 A 完全相同的組成** | `baseline-nginx` ✓ |
+| **A** `bash -c "…" & wait`(有 pty) | 2 筆:預設 `Terminal shell in container` 加自訂 `Shell spawned by non-runtime parent` | `baseline-nginx` ✓ | **18 筆**:3 exec、3 exit、12 kprobe。無規則名、無嚴重度 | `baseline-nginx` ✓ |
+| **B** 同上但**無終端機** | **1 筆**:只有自訂規則。預設規則靜音 | `baseline-nginx` ✓ | **18 筆,與 A 完全相同的組成** | `baseline-nginx` ✓ |
 | **C** `nsenter` 進 `baseline-nginx` 讀 `/etc/shadow` | 2 筆 | **呼叫端** ✗ | **34 筆**,含 `nsenter` 指令與完整參數 | **呼叫端** ✗ |
 | **D** 直接在 `baseline-nginx` 裡讀 `/etc/shadow` | 1 筆 | `baseline-nginx` ✓ | **8 筆**:2 exec、2 exit、**4 kprobe(策略產生的)** | `baseline-nginx` ✓ |
 
@@ -436,8 +436,8 @@ Tetragon 的部署預設見[地雷 8](#mine-8)。
 | 策略真的載入 | `tetra tracingpolicy list` 的 `STATE` 是 `enabled`,不是 `kubectl apply` 成功 | `enabled` / `generic_kprobe` / `462.15 kB` |
 | **策略事件對得回操作** | 事件的 `policy_name`、`file_arg.path`、`int_arg`、`process.binary`、`pod` 五項全部對應到自己做的那一件事 | 五項全中,延遲 1.0 毫秒 |
 | 核心層過濾是真的 | 3000 次不符合選擇器的操作,策略事件數 | **0 筆** |
-| 出廠事件率(匯出後) | 閒置窗口的匯出事件數 | 0 筆 / 132 秒 |
-| 出廠事件率(核心側) | 同一顆節點直接接 gRPC 的事件數 | **1915 筆/分鐘** |
+| 預設事件率(匯出後) | 閒置窗口的匯出事件數 | 0 筆 / 132 秒 |
+| 預設事件率(核心側) | 同一顆節點直接接 gRPC 的事件數 | **1915 筆/分鐘** |
 | BPF LSM 可用 | agent 自己回報的能力字串 | `lsm: true`、`override_return: true`、`signal: true`、`fmodret: true` |
 
 ## 地雷記錄
@@ -490,7 +490,7 @@ export-denylist: |-
 
 1. **這是 chart 的預設,不是 Tetragon 的預設。** 讀 Tetragon 的概念文件不會知道,`kubectl get ds` 不會顯示,agent 啟動日誌裡有但埋在 40 個其他鍵值之間。
 2. **它過濾在最貴的一關。** BPF 程式跑了、ring buffer 佔了、protobuf 解完了、pod 反查也做了,才在匯出層丟掉。核心層過濾的省錢效果在這一段完全沒有發生。
-3. **它把整台主機從視野裡拿掉。** [地雷 6](#mine-6) 的攻擊路徑起點是「拿到節點 root」;一個在節點上直接跑、不在任何容器裡的行程,命名空間就是空字串——**出廠設定下,它一筆都不會出現在匯出的事件流裡**。
+3. **它把整台主機從視野裡拿掉。** [地雷 6](#mine-6) 的攻擊路徑起點是「拿到節點 root」;一個在節點上直接跑、不在任何容器裡的行程,命名空間就是空字串——**預設設定下,它一筆都不會出現在匯出的事件流裡**。
 
 還有一個細節說明這份清單是怎麼寫出來的:chart 預設把 Tetragon 裝在 `kube-system`,所以它自己被排除。裝在別的命名空間,Tetragon 就會報自己。
 
@@ -604,7 +604,7 @@ baseline-nginx                    ← hostname 回報的是被進入的那顆
 | Day 3 Falco(全節點探針加執行期反查) | 看得到,**pod 認錯** |
 | Day 5 Tetragon(全節點探針加核心層 cgroup id) | 看得到,**pod 認錯** |
 
-好消息跟 Day 3 一樣:**訊號沒有消失,只是貼錯標籤**。而 Tetragon 多給了一樣 Falco 沒有的東西——**`nsenter` 這個指令本身連同完整參數就是一筆頭等事件,零策略、零規則**。Day 3 記過「出廠 25 條沒有一條在看 `nsenter`」;Tetragon 不需要有人先想到要看它。調查員拿到錯的 pod 名字之後,往上一層看 `parent=/usr/bin/nsenter`、再看 `-t 21743` 這個參數,**真正的目標就在裡面**。
+好消息跟 Day 3 一樣:**訊號沒有消失,只是貼錯標籤**。而 Tetragon 多給了一樣 Falco 沒有的東西——**`nsenter` 這個指令本身連同完整參數就是一筆頭等事件,零策略、零規則**。Day 3 記過「預設 25 條沒有一條在看 `nsenter`」;Tetragon 不需要有人先想到要看它。調查員拿到錯的 pod 名字之後,往上一層看 `parent=/usr/bin/nsenter`、再看 `-t 21743` 這個參數,**真正的目標就在裡面**。
 
 ### 地雷 7:Tetragon 的事件裡沒有 tty 欄位 {#mine-7}
 
@@ -620,7 +620,7 @@ process struct keys: arguments, auid, binary, cwd, docker, exec_id, flags,
 
 [Day 3 地雷 3](sprint2-day3-falco-basics.md#mine-3) 的整個故事、Day 4「`tty=0` 本身就是『不是真人打的 `kubectl exec`』的訊號」那個結論——**在 Tetragon 的預設事件裡不存在**。
 
-反過來,B 這一格也是 Falco 出廠規則最難看的一格:只報 1 筆,而且是自訂規則報的,出廠的 `Terminal shell in container` 因為 `proc.tty != 0` 完全靜音。Tetragon 在這裡的 18 筆雖然沒有任何判斷,但它**至少沒有漏**。
+反過來,B 這一格也是 Falco 預設規則最難看的一格:只報 1 筆,而且是自訂規則報的,預設的 `Terminal shell in container` 因為 `proc.tty != 0` 完全靜音。Tetragon 在這裡的 18 筆雖然沒有任何判斷,但它**至少沒有漏**。
 
 **這一格就是工具分工的核心:Falco 有一個 Tetragon 沒有的欄位,Tetragon 有一個 Falco 沒有的保證——它不做判斷,所以不會判斷錯。**
 

@@ -294,7 +294,7 @@ TIME     PID      COMM             SADDR            SPORT  DADDR         DPORT
 
 三支的「目標值可不可信」各有各的走樣,沒辦法擺進同一欄比:execsnoop 的 argv 截在第 16 個參數;opensnoop 給的是原樣字串,相對路徑不還原;tcpconnect 的 IP 可信,但只涵蓋 TCP。
 
-事件密度那一列值得單獨記住:同樣 22 秒、同一台幾乎閒置的 2 vCPU 節點,開檔比執行行程密集約 70 倍(約 1,100 筆/秒),這決定了哪一種追蹤可以整天開著、哪一種只能臨場開。至於最後一列——**沒有一支工具說得出「這是哪個 pod」**——那不是三支工具寫得不好,是它們掛的位置比容器更低一層。要把事件接回 Kubernetes 物件,得自己補 cgroup id 或 namespace 的對應,那是 Day 2 的題目。
+事件密度那一列值得單獨記住:同樣 22 秒、同一台幾乎閒置的 2 vCPU 節點,開檔比執行行程密集約 70 倍(約 1,100 筆/秒),這決定了哪一種追蹤可以整天開著、哪一種只能臨時開。至於最後一列——**沒有一支工具說得出「這是哪個 pod」**——那不是三支工具寫得不好,是它們掛的位置比容器更低一層。要把事件接回 Kubernetes 物件,得自己補 cgroup id 或 namespace 的對應,那是 Day 2 的題目。
 
 ### 步驟 3:自寫腳本,追出指定目錄的寫入者
 
@@ -469,7 +469,7 @@ Need to get 13.9 MB of archives.
   完成(9.2 秒)
 ```
 
-9.2 秒、13.9 MB,比預期便宜太多。回頭查那 22 個套件是什麼,答案改掉了原本的結論:新裝的絕大多數是 Python 3 執行環境,而 LLVM 18(約 120 MB)早就在了,是 bpftrace 自己裝進來的。完整證據與這句話該怎麼改寫,見[地雷 7](#mine-7)。
+9.2 秒、13.9 MB,比預期便宜太多。細查那 22 個套件是什麼,結論反了過來:新裝的絕大多數是 Python 3 執行環境,而 LLVM 18(約 120 MB)早就在了,是 bpftrace 自己裝進來的。完整證據與這句話該怎麼改寫,見[地雷 7](#mine-7)。
 
 #### 在容器裡執行的前置條件
 
@@ -498,7 +498,7 @@ flock            29422   978       0 /usr/bin/flock -e 10
 
 #### 啟動延遲與輸出差異
 
-兩支同名工具,量到第一個位元組落地為止(兩邊都要先編譯、過 verifier、掛上探針才會有輸出,所以是對等比較):
+兩支同名工具,量到第一個位元組輸出為止(兩邊都要先編譯、過 verifier、掛上探針才會有輸出,所以是對等比較):
 
 | 回合 | `execsnoop.bt`(bpftrace) | `execsnoop-bpfcc`(bcc) |
 |---|---|---|
@@ -507,7 +507,7 @@ flock            29422   978       0 /usr/bin/flock -e 10
 | 3 | 157 ms | 2,110 ms |
 | 中位數 | 157 ms | 2,182 ms |
 
-約 14 倍。對「臨場診斷」這個用途,這個差距是體感等級的:出事的時候你會連下十次不同的 one-liner,bpftrace 是按下去就有,bcc 是每次等兩秒。
+約 14 倍。對「即時診斷」這個用途,這個差距是體感等級的:出事的時候你會連下十次不同的 one-liner,bpftrace 是按下去就有,bcc 是每次等兩秒。
 
 同一段動作(唯一命名的腳本加一個必定失敗的 exec),bcc 版的輸出:
 
@@ -585,19 +585,18 @@ $ kubectl -n ebpf-lab exec ebpf-lab-przdr -- \
 
 ### 地雷 1:叢集停機期間 API server 的 DNS 紀錄會消失,工作站把那個 NXDOMAIN 快取起來 {#mine-1}
 
-**症狀**:`az aks start` 完成、`az aks show` 回報 `Running`,`kubectl` 卻一直說 `no such host`。同一個名字用 `nslookup` 與 `dig` 查都解得到,`dscacheutil` 與 Python 的 `socket.getaddrinfo()` 都解不到,`curl` 的 `%{http_code}` 是 000。等 5 分鐘、關掉 sandbox 重試、換 `GODEBUG=netdns=cgo`,三次都一樣。
+**症狀**:`az aks start` 完成、`az aks show` 回報 `Running`,`kubectl` 卻一直說 `no such host`。
 
-**根因**:AKS 停機時會撤掉 API server FQDN 的 A 紀錄。工作站在停機期間只要有任何一支程式問過那個名字(例如上一輪收工前的 `kubectl`),macOS 的 mDNSResponder 就會把「查無此名」記下來。叢集起來之後 A 紀錄回來了,TTL 只有 60 秒,但**負向快取不吃那個 TTL**。難查的地方在於兩類工具走不同的解析路徑:`nslookup` 與 `dig` 自己組封包直接問 DNS 伺服器,繞過系統解析器,所以永遠回報解析成功;`kubectl`、`curl`、Python 走 `getaddrinfo()`,讀到的是快取,所以永遠回報找不到主機。於是排除方向會集中在叢集狀態、kubeconfig 與網路,唯獨不會懷疑自己的工作站。
+**根因**:AKS 停機時會撤掉 API server FQDN 的 A 紀錄。停機期間本機只要有任何程式問過那個名字(例如上一輪收工前的 `kubectl`),系統解析器就會把「查無此名」記進負向快取。叢集起來後 A 紀錄回來、TTL 只有 60 秒,但**負向快取不吃那個 TTL**。難查的地方在於:`dig`/`nslookup` 直接問 DNS 伺服器、繞過系統解析器,永遠回報解得到;而 `kubectl`/`curl` 走系統解析器讀到的是快取,永遠回報找不到主機。於是排除方向會集中在叢集狀態、kubeconfig 與網路,唯獨不會懷疑本機。
 
-**修法**:不用 sudo 的正解是繞過名字解析,而不是繞過 TLS 驗證。
+**修法**:不用 sudo 的正解是繞過名字解析,而不是繞過 TLS 驗證:
 
 ```bash
 IP=$(dig +short <api-fqdn> | head -1)
-kubectl \
-  --server "https://$IP:443" --tls-server-name <api-fqdn> get nodes
+kubectl --server "https://$IP:443" --tls-server-name <api-fqdn> get nodes
 ```
 
-`--tls-server-name` 讓 SNI 與憑證驗證仍然用 FQDN,只有連線目標換成 IP,安全性一點都沒放掉。要根治就是 `sudo killall -HUP mDNSResponder`,但那需要 sudo。
+`--tls-server-name` 讓 SNI 與憑證驗證仍然用 FQDN,只有連線目標換成 IP,安全性一點都沒放掉。
 
 **教訓**:這條跟 eBPF 無關,卻直接來自本課程的成本紀律——頻繁停開叢集,就會反覆種下這顆雷。
 
@@ -615,7 +614,7 @@ kubectl \
 
 **症狀**:任何用到 `path()` 的腳本在編譯階段就被擋掉,訊息是 `ERROR: BPF_FUNC_d_path not available for your kernel version`。換成核心允許清單內的掛載點(`security_file_permission`)再試,一模一樣。
 
-**根因**:兩邊的說法直接衝突。`bpftool feature probe kernel` 列得出 `bpf_d_path`(kernel 6.8,這個 helper 從 5.10 就在),但 `bpftrace --info` 的能力表寫著 `dpath: no`:
+**根因**:兩邊的能力探測直接衝突。`bpftool feature probe kernel` 列得出 `bpf_d_path`(核心說有),但 `bpftrace --info` 的能力表寫著 `dpath: no`:
 
 ```console
 $ nsenter -t 1 -m -- bpftool feature probe kernel | grep -i d_path
@@ -625,9 +624,9 @@ $ bpftrace --info | sed -n '/Kernel helpers/,/^$/p'
   dpath: no                                     ← bpftrace 說沒有
 ```
 
-也就是說,擋下來的是 bpftrace 自己的能力偵測,不是核心。至於偵測為什麼失敗,最可能的解釋是 `bpf_d_path` 有核心允許清單(`btf_allowlist_d_path`,只有 `vfs_truncate`、`dentry_open`、`security_file_permission` 等少數函式可以呼叫),而 bpftrace 的偵測程式沒有掛在清單內的函式上,載入失敗就被記成「helper 不存在」——**這一層沒有直接量到,標記為推測**。
+擋下來的是 bpftrace 自己的能力偵測,不是核心。錯誤訊息指名的元件(kernel)不是有問題的元件。
 
-**修法**:不要等它修好,也不要去升級 kernel(換成 6.12 也一樣)。路徑自己從 dentry 鏈走出來,見步驟 3 的腳本。錯誤訊息指名的元件不一定是有問題的元件,兩個獨立的能力探測給出相反答案時,先確認是誰在做判斷。
+**修法**:不要等它修好,也不要去升級 kernel(換成更新版也一樣)。路徑自己從 dentry 鏈走出來,見步驟 3 的腳本。兩個獨立的能力探測給出相反答案時,先確認是誰在做判斷。
 
 ### 地雷 4:`mount --bind /proc/1/root/…` 綁到的是容器自己的目錄 {#mine-4}
 
@@ -639,9 +638,7 @@ $ bpftrace --info | sed -n '/Kernel helpers/,/^$/p'
 
 ### 地雷 5:`kill -INT` 停不掉正在編譯的 `execsnoop-bpfcc`,它會變成孤兒繼續跑 {#mine-5}
 
-**症狀**:量啟動延遲的腳本在偵測到第一個位元組之後送 `SIGINT`,bpftrace 每次都正常結束,`execsnoop-bpfcc` 卻繼續寫輸出;`ps -eo pid,etime,args` 抓到 `30868  04:04  /usr/bin/python3 /usr/sbin/execsnoop-bpfcc`,訊號送出去四分鐘後還在跑。
-
-**根因(推測)**:合理的解釋是 CPython 的訊號處理。`SIGINT` 只會設一個旗標,要等直譯器回到位元組碼邊界才丟 `KeyboardInterrupt`,而那時它正卡在 `libbcc` 的 clang 編譯裡——那是一次 ctypes 呼叫,兩秒起跳。這條推論沒有進一步驗證。
+**症狀**:量啟動延遲的腳本在偵測到第一個位元組之後送 `SIGINT`,bpftrace 每次都正常結束,`execsnoop-bpfcc` 卻繼續寫輸出;訊號送出去四分鐘後,`ps` 還抓得到它在跑。
 
 **修法**:收工紀律因此不同,bpftrace 可以 `SIGINT`,bcc 工具要準備好 `SIGKILL`。另外 `pkill -9 -f "execsnoop-bpfcc"` 會把自己那一行 `bash -c` 也殺掉(pattern 出現在自己的命令列裡),整個 `kubectl exec` 回 137;要嘛寫成 `pkill -f "[e]xecsnoop-bpfcc"`,要嘛就別用 `-f`。
 
@@ -655,8 +652,6 @@ $ bpftrace --info | sed -n '/Kernel helpers/,/^$/p'
 
 ### 地雷 7:「bcc 要編譯器、bpftrace 不用」是錯的——兩邊都依賴 LLVM {#mine-7}
 
-**症狀**:在已經裝了 bpftrace 的容器裡加裝 bcc,只多下載 13.9 MB、9.2 秒完成,跟「bcc 很重」的說法對不上。
-
 **根因**:`apt-cache depends` 兩行並排就結束了這個爭論:
 
 ```console
@@ -668,16 +663,16 @@ $ apt-cache depends libbpfcc | grep -iE 'llvm|clang'
   Depends: libllvm18
 ```
 
-兩支工具都在執行期把原始碼編成 BPF 位元碼,bpftrace 只是把編譯器藏在單一執行檔背後而已。而 13.9 MB 這個數字之所以小,正是因為 bpftrace 已經先把 LLVM 18(`dpkg-query` 顯示安裝後約 120 MB)拖進來了;在一個乾淨的 `ubuntu:24.04` 裡,bcc 那一整疊接近 190 MB。
+兩支工具都在執行期把原始碼編成 BPF 位元碼,bpftrace 只是把編譯器藏在單一執行檔背後而已——「bcc 要編譯器、bpftrace 不用」這句話,經不起一次 `apt-cache depends`。
 
-**修法**:選型理由改用量得出來的三項——型別來源(BTF 或 kernel headers)、啟動時間(157 ms 或 2,182 ms)、同名工具的預設行為差異(見[地雷 2](#mine-2))。一句經得起複誦、卻經不起 `apt-cache depends` 的說法,比沒有說法更危險。
+**修法**:選型理由改用量得出來的三項——型別來源(BTF 或 kernel headers)、啟動時間、同名工具的預設行為差異(見[地雷 2](#mine-2))。一句經得起複誦、卻經不起查證的說法,比沒有說法更危險。
 
 ## 帶得走的東西
 
 - 每一支追蹤工具的答案都有形狀,而形狀由掛載點決定。掛在 `sys_enter` 就分不出成敗,掛 `tcp_connect` 就看不到 UDP,掛 execve 就看不到 shell 內建指令。看到輸出之前先問「它掛在哪」,比看完輸出再猜可靠。
 - 核心裡沒有路徑字串,只有一條 dentry 鏈。`path()` 這類 helper 是把鏈走完的便利品,不是路徑的來源;便利品被關掉時,鏈還在那裡可以自己走。
 - 同一個檔案在容器裡與在節點上,eBPF 給的是同一條路徑。核心視角沒有容器這個概念,任何「這是哪顆 pod」的答案都得從別的地方接上來。
-- 事件密度是選型參數。同一台閒置節點上開檔比執行行程多 70 倍,「整天開著」與「臨場開」是兩種不同的工具設計,選錯的代價是把節點的 CPU 餵給自己的追蹤器。
+- 事件密度是選型參數。同一台閒置節點上開檔比執行行程多 70 倍,「整天開著」與「臨時開」是兩種不同的工具設計,選錯的代價是把節點的 CPU 餵給自己的追蹤器。
 - 可攜性有兩層,別混著講。原始碼層的可攜(同一份 `.bt` 在每顆節點對著自己的 BTF 重編)與目的檔層的可攜(一份 `.o` 搬著走)產生的結果可以一模一樣,但適用場景差很遠。同理,選型理由要能用一行指令驗證才算數——「依賴編譯器」「裝不起來」這類說法,`apt-cache depends` 一查就知道成不成立。
 
 ## 延伸閱讀

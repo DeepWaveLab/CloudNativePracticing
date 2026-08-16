@@ -166,7 +166,7 @@ day8-final 對 day8-s0(同一顆 VM、七份全比):
 | 要求 | 判定 | 說明 |
 |---|---|---|
 | 移除全部 SpinKube 元件後,節點與 Day 1 基準逐字比對 | **通過,但要加一個條件** | 官方路徑拆完**不足以**回到基準(殘留六行設定、死 handler、`/opt/rcm/`);**加五步手動收尾後**三份關鍵快照逐字相同 |
-| 比對的解釋唯一性 | 達成 | 同一 VM 生命週期(04:21 → 05:06),中途未停機 |
+| 比對的解釋唯一性 | 達成 | 同一 VM 生命週期,中途未停機 |
 | 兩個情境的對照 | 達成 | A:5 秒逐字還原;B:4 秒「成功」,設定一字未動 |
 
 !!! danger "這一天最重要的一句話"
@@ -226,11 +226,9 @@ day8-final 對 day8-s0(同一顆 VM、七份全比):
 
 ### 地雷 5:能同時緩解兩顆雷的開關存在、預設關著、沒有任何文件提 {#mine-5}
 
-**現象**:孤兒 Job 在三天內造成兩種失效([Day 7 地雷 1](sprint3-day7-spinkube-operator.md#mine-1) 的 panic 迴圈、本章[地雷 3](#mine-3) 的 no-op),當時查遍 chart 與文件找不到清理機制。
+孤兒 Job 在三天內造成兩種失效([Day 7 地雷 1](sprint3-day7-spinkube-operator.md#mine-1) 的 panic 迴圈、本章[地雷 3](#mine-3) 的 no-op)。緩解的開關其實早就有:helm value **`rcm.nodeInstallerJob.ttl`**,預設 `0`——而 `0` 走不進 `ttl > 0` 的條件,等於預設關著,文件也沒提。
 
-**事實**(查證 2026-08-11):機制早就有——helm value `rcm.nodeInstallerJob.ttl`,預設 `0` 而 `0` 走不進 `ttl > 0` 的條件;values.yaml 裡零註解,官網與 AKS 文件零提及。同一支檔案還說明了另一半:只有 install Job 被設 ownerReference,uninstall Job 不被任何東西回收——預設組態下,同一顆節點的第二次解除安裝必定落空,是寫死的。
-
-**判斷準則**:裝 rcm 一律帶 `--set rcm.nodeInstallerJob.ttl=<秒>`。它緩解孤兒 Job 的兩顆雷;不解刪除順序與手改設定那兩顆,那些沒有開關可繞。(TTL 的效果沒有在叢集上驗過,以上來自原始碼閱讀。)
+**判斷準則**:裝 rcm 一律帶 `--set rcm.nodeInstallerJob.ttl=<秒>`。它緩解 install Job 的孤兒問題;刪除順序與手改設定那兩顆雷它管不到,那些沒有開關可繞。(依 values 與原始碼判定,效果未在叢集上復現。)
 
 ## 這條路線收尾:SpinKube 適合誰
 

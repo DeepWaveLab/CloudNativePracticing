@@ -51,11 +51,11 @@ flowchart TB
     N --> C["crictl inspect<br/>pod 名字、namespace、容器名字"]
 ```
 
-這條鏈完全在節點上跑完,**沒有任何一步需要 API server**。對常駐的偵測元件來說這不是效率問題而是可用性問題:API server 不通的時候,節點上的偵測不該跟著失明。
+這條鏈完全在節點上跑完,**沒有任何一步需要 API server**。對常駐的偵測元件來說這不是效率問題而是可用性問題:API server 不通的時候,節點上的偵測不該跟著失效。
 
 ### 今天要走的路
 
-七個步驟:部署基線對象 → 把上面那條鏈跑通並拿任意事件驗證 → 走一次 pid 那條路並說明為什麼不選它 → 把過濾掛到 pod slice 上、寫出今天的主角腳本 → 量過濾前後的差距 → 做出 nginx 的啟動基線(本日驗收)→ 用三個刻意的偏離測試基線,再誠實列出這套做法辦不到的事。
+七個步驟:部署基線對象 → 把上面那條鏈跑通並拿任意事件驗證 → 走一次 pid 那條路並說明為什麼不選它 → 把過濾掛到 pod slice 上、寫出今天的核心腳本 → 量過濾前後的差距 → 做出 nginx 的啟動基線(本日驗收)→ 用三個刻意的偏離測試基線,再誠實列出這套做法辦不到的事。
 
 ## 步驟
 
@@ -360,7 +360,7 @@ flowchart TB
 curtask->cgroups->dfl_cgrp->kn->parent->id
 ```
 
-#### 今天的主角腳本
+#### 今天的核心腳本
 
 `05-podtrace.bt` 三類事件全部**在核心裡**用 pod slice id 過濾,`$1` 是命令列傳進來的那個 id:
 
@@ -479,7 +479,7 @@ one   total=1036   EXEC=124  OPEN=652    CONN=260  distinct-comm=12
  20  tcp 127.0.0.1:8080      ← 打自己
 ```
 
-Day 1 那個「22 秒 24,350 行、只能臨場開不能整天開」的結論,在有了 pod 身分之後換了一個樣子:整天開著也只有一頁。
+Day 1 那個「22 秒 24,350 行、只能臨時開不能整天開」的結論,在有了 pod 身分之後換了一個樣子:整天開著也只有一頁。
 
 ### 步驟 6:nginx 的啟動行為基線(本日驗收)
 
@@ -653,18 +653,9 @@ bpftrace procs=0
 
 ### 地雷 1:MCR 的 Docker Hub mirror 是逐個映像凍結的,而 kubelet 只回 `not found` {#mine-1}
 
-**症狀**:`mcr.microsoft.com/mirror/docker/library/nginx:1.27` 拉不到,訊息是 `failed to resolve image: … not found`,跟 tag 打錯字一模一樣。
+**症狀**:`mcr.microsoft.com/mirror/docker/library/nginx:<tag>` 拉不到,訊息是 `failed to resolve image: … not found`,跟 tag 打錯字一模一樣。
 
-**根因**:課程從 Day 0 起就固定用 `mcr.microsoft.com/mirror/docker/library/*` 拉映像,為的是繞開 Docker Hub 的匿名拉取限制。但那個 mirror **不是整體同步的**,一問就知道:
-
-```console
-$ curl -s https://mcr.microsoft.com/v2/mirror/docker/library/nginx/tags/list
-{"tags":["1.20","1.20-alpine","1.21","1.21-alpine","1.22","1.23","1.24","1.25"]}
-$ curl -s https://mcr.microsoft.com/v2/mirror/docker/library/ubuntu/tags/list
-{"tags":[…,"jammy","noble","resolute"]}
-```
-
-`ubuntu` 有 2026 年的版本,`nginx` 最新只到 **1.25**(2023 年的線)。難查的地方在錯誤訊息:它與拼錯 tag、與沒有權限,三種情況長得一樣,於是你會去檢查字串和 registry 權限,唯獨不會懷疑「這個 tag 在上游存在,但 mirror 沒有」。
+**根因**:課程用 `mcr.microsoft.com/mirror/docker/library/*` 拉映像,繞開 Docker Hub 的匿名拉取限制。但那個 mirror **不是整體同步的**——`curl -s https://mcr.microsoft.com/v2/<repo>/tags/list` 一問就知道,有些 repo 停在好幾年前的 tag,上游有的新版本它沒有。難查的地方在錯誤訊息:它與拼錯 tag、與沒有權限三種情況長得一樣,於是你會去檢查字串和 registry 權限,唯獨不會懷疑「這個 tag 在上游存在,但 mirror 沒有」。
 
 **修法**:部署前先查 `curl -s https://mcr.microsoft.com/v2/<repo>/tags/list`,不要等 CI 失敗才發現。
 

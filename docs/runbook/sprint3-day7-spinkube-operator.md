@@ -267,7 +267,7 @@ handler: spin
 
 想往下深挖,從這幾份開始:
 
-- **[spin-operator](https://github.com/spinframework/spin-operator)** —— 今天的主角。README 寫明它「watches SpinApp Custom Resources and realizes the desired state」;release 頁附的四個資產裡,`spin-operator.runtime-class.yaml` 就是地雷 2 的另一半。
+- **[spin-operator](https://github.com/spinframework/spin-operator)** —— 今天的重點。README 寫明它「watches SpinApp Custom Resources and realizes the desired state」;release 頁附的四個資產裡,`spin-operator.runtime-class.yaml` 就是地雷 2 的另一半。
 - **[runtime-class-manager 的 job_controller.go](https://github.com/spinframework/runtime-class-manager)** —— 地雷 1 的出處。`getNode()` 與 `updateNodeLabels()` 兩個函式加起來不到三十行,值得當成「錯誤被靜默轉換」的案例讀。
 - **[Kubernetes RuntimeClass 文件](https://kubernetes.io/docs/concepts/containers/runtime-class/)** —— 回頭再讀一次「scheduling」一節:admission 把 `nodeSelector` 併進 pod 的行為就寫在裡面,Day 1 當初漏看的正是這一段。
 

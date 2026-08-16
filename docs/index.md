@@ -1,6 +1,6 @@
 # 雲原生實作課程
 
-把雲原生 landscape 上真正在動的專案,一個一個放上真實叢集實測,寫成可照抄的 runbook——這是一系列動手課,一個 sprint 一個主題,依序推進。每一章遵守同一套紀律:
+把雲原生生態裡真正在動的專案,一個一個放上真實叢集實測,寫成可照抄的 runbook——這是一系列動手課,一個 sprint 一個主題,依序推進。每一章遵守同一套紀律:
 
 - **真實驗證**:所有指令與輸出都來自實際跑過的驗證紀錄,沒有想像的示意。
 - **具名地雷**:官方文件查不到或會誤導的問題,收錄成可跨章引用的地雷索引(目前累計 **158 顆**)。
@@ -47,17 +47,17 @@
 
     途中有兩個量測結果跟宣傳方向相反,其中一條實測結論:**能用的 SpinKube,一定拆不乾淨。**
 
--   **Sprint 4 · 資料、OS 與多叢集** — 📅 規劃中
+-   **Sprint 4 · [服務網格與機密運算](sprints/sprint4.md)** — 🚧 進行中
 
     ---
 
-    KubeFleet、Drasi、Confidential Containers——跨叢集治理與機密運算。
+    Envoy Gateway 取代 Ingress、Istio ambient 與 Cilium 兩條 east-west mesh 照軸選型,再到 Kata 與 Confidential Containers 的機密運算。Part A(服務網格)Day 0–4 已完成:eBPF 贏在 L4,Istio 贏在 L7 與身分。Part B(機密運算)規劃中。
 
 -   **Sprint 5 · 遊戲伺服器平台** — 📅 規劃中
 
     ---
 
-    Agones、Quilkin、Nakama——K8s 上的 dedicated game server 全套。
+    Agones、Quilkin、Nakama——K8s 上 dedicated game server 的完整工具鏈。
 
 </div>
 

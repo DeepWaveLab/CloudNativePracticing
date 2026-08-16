@@ -1,4 +1,4 @@
-# Day 8: KAI、HAMi、DRA 分工決策表——場景選型與落地建議
+# Day 8: KAI、HAMi、DRA 分工決策表——場景選型與導入建議
 
 ![Kubernetes 官方標誌](../assets/logos/kubernetes-icon-color.svg){ align=right width="95" }
 
@@ -213,13 +213,13 @@ capacity:
 
 缺口也要一起看,而且都不小:
 
-- **稽核與容量要整套重寫。** 節點物件上看不到裝置,所有讀 `node.status.allocatable` 的儀表板、autoscaler、配額工具都會一致地失明;一次性工作跑完之後 claim 已經被刪,事後查不到它當時拿了哪一顆裝置——想留下這筆帳,得在 pod 還活著時抓,或者把裝置身分印進容器 log。
+- **稽核與容量要整套重寫。** 節點物件上看不到裝置,所有讀 `node.status.allocatable` 的儀表板、autoscaler、配額工具都會一致地看不見裝置;一次性工作跑完之後 claim 已經被刪,事後查不到它當時拿了哪一顆裝置——想留下這筆帳,得在 pod 還活著時抓,或者把裝置身分印進容器 log。
 - **除錯還很陽春。** `cannot allocate all claims` 這句話在模擬 driver 與真 driver 上逐字相同,所以那是排程外掛本身的行為,不是哪個 driver 太簡單。
 - **生態有版本落差。** 核心 API 已經穩定,但廠商 driver 還在 v0.4.x,而 chart 幾乎都預設你已經跑著 GPU Operator 或 NFD。
 
-## 帶回自家叢集:落地建議清單
+## 帶回自家叢集:導入建議清單
 
-**以下只是建議,不是可以直接照貼的變更。** 底下每一條都是「課程環境量到什麼、據此建議做什麼」,沒有任何一條在生產環境驗證過;真要落地,每一條都得走自己的變更流程、在維護窗口內做,並且先在測試環境重驗。
+**以下只是建議,不是可以直接照貼的變更。** 底下每一條都是「課程環境量到什麼、據此建議做什麼」,沒有任何一條在生產環境驗證過;真要導入,每一條都得走自己的變更流程、在維護窗口內做,並且先在測試環境重驗。
 
 建議適不適用,取決於環境的形狀。以下以一個常見情境為例:一座自管的 Kubernetes 叢集,版本還停在 **1.26** 沒升;節點上混著不同世代的消費級顯示卡(因此沒有 MIG 可用);KAI Scheduler 之前裝過但沒真的用起來,版本不明;工作負載是線上推論服務加上離線批次任務,兩者搶同一批卡。如果你的環境不是這樣,對照著調整每一條建議的前提。
 
@@ -344,11 +344,11 @@ HAMi 的 VRAM 餘額只存在 extender 記憶體與 pod annotation 裡,節點帳
 
 ### spot 家族:便宜的代價都寫在回收那一刻
 
-spot 的三種痛法在課裡都撞到了。
+spot 的三種風險在課裡都撞到了。
 
 一台被回收之後,pool 的 `count` 從 2 變 1 而狀態是 `Succeeded`,叢集就這樣少了一半 GPU,沒有任何告警——沒開 cluster autoscaler 就沒有人負責補([Day 2 地雷 4](sprint1-day2-gang-scheduling-preemption.md#mine-4))。兩個操作者對同一個 node pool 各下各的期望值時,後寫入者靜默勝出,而 activity log 有數分鐘的傳播延遲,「查了 log 沒看到別人」在事發後幾分鐘內根本不成立([Day 2 地雷 5](sprint1-day2-gang-scheduling-preemption.md#mine-5))。
 
-第三種痛法沒有編號。Day 5 的 WebUI 上線一個半小時後,兩台 GPU 節點被 Azure 平台真的收走,趨勢圖上留下一段完整的缺口,而畫面本身沒有任何異常標記——[Day 5 那一段](sprint1-day5-hami-webui.md)把 Day 2 用模擬做出來的結論,用一次自然發生的事件重演了一遍。
+第三種風險沒有編號。Day 5 的 WebUI 上線一個半小時後,兩台 GPU 節點被 Azure 平台真的收走,趨勢圖上留下一段完整的缺口,而畫面本身沒有任何異常標記——[Day 5 那一段](sprint1-day5-hami-webui.md)把 Day 2 用模擬做出來的結論,用一次自然發生的事件重演了一遍。
 
 三者合起來的結論很直接:spot 上跑 gang 是風險相乘而不是相加,而 spot 上跑觀測介面,要先知道畫面歸零可能只是節點不見了。
 
@@ -367,7 +367,7 @@ spot 的三種痛法在課裡都撞到了。
 
 - **[Dynamic Resource Allocation | Kubernetes](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)** —— DeviceClass、ResourceClaim、ResourceSlice 的官方定義,以及 CEL 篩選與裝置共享這兩項能力的說明,決策表「表達力」那一列的出處。
 - **[HAMi 官方的 KAI Scheduler 整合指南](https://project-hami.io/docs/next/userguide/kai-scheduler/how-to-use-kai-scheduler)** ——(HAMi 文件站僅 next 版本收錄此頁,對應版本路徑不存在,截至 2026-08)官方對這個整合的劃界(用的是 HAMi-core 函式庫而不是 HAMi 平台)、`gpu-memory` annotation 的寫法,以及比例換算的警告,對應決策表「與其他機制的相容」那一列。
-- **[DRA Driver for NVIDIA GPUs 的前置條件](https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu/blob/v0.4.1/docs/prerequisites.md)** —— Kubernetes 版本下限、driver 版本、CDI、NFD 與各平台的 driver root 路徑差異,落地建議裡「指令不能直接搬」那一段的依據。
+- **[DRA Driver for NVIDIA GPUs 的前置條件](https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu/blob/v0.4.1/docs/prerequisites.md)** —— Kubernetes 版本下限、driver 版本、CDI、NFD 與各平台的 driver root 路徑差異,導入建議裡「指令不能直接搬」那一段的依據。
 - **[KAI Scheduler 的 CNCF 專案頁](https://www.cncf.io/projects/kai-scheduler/)** —— 進 sandbox 的日期與社群活躍度資料,決策表「成熟度」那一列的來源。
 - **[HAMi 成為 CNCF incubating 專案](https://www.cncf.io/blog/2026/07/15/hami-becomes-a-cncf-incubating-project/)** —— TOC 通過的公告與專案定位說明,與上一條並讀就看得出兩個專案的成熟度差在哪裡。
 

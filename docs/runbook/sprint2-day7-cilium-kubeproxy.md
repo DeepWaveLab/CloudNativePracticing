@@ -5,7 +5,7 @@
 > 前六天都在觀察行程與檔案:誰執行了什麼、誰開了哪個檔。今天換一個角度,把 eBPF 放進網路路徑本身——不是加一層監控,是**把 Kubernetes 的 Service 實作整個換掉**。而今天最值得記住的發現,是動手之前就先問清楚「現在到底是誰在做這件事」得到的:**那個要被換掉的元件,有一大半工作早就不是它在做了。**
 
 !!! abstract "你在課程的哪裡"
-    - **Day 0–6**:eBPF 的載入路徑與 verifier、bpftrace 的臨場追蹤、Falco 的規則引擎、Tetragon 的核心層攔截。四套工具都掛在 syscall 與 LSM 那一層。
+    - **Day 0–6**:eBPF 的載入路徑與 verifier、bpftrace 的即時追蹤、Falco 的規則引擎、Tetragon 的核心層攔截。四套工具都掛在 syscall 與 LSM 那一層。
     - **今天**:建一座沒有 CNI 的叢集、自管 Cilium、開啟 kube-proxy replacement。驗收有兩半:連通性測試通過,而且叢集裡不再有 kube-proxy 但 Service 仍然可達。
     - **Day 8–9**:有了自己的資料平面,才能寫 L3 到 L7 的網路政策,以及用 Hubble 看流量。
 
@@ -434,7 +434,7 @@ cilium image (stable):  v1.20.0
 
 **修法**:用 Helm 並寫死版本,或者 `cilium install --version` 明確指定。
 
-### 地雷 4:Cilium 出廠的 pod 網段把 AKS 的 Service 網段整個吃掉 {#mine-4}
+### 地雷 4:Cilium 預設的 pod 網段把 AKS 的 Service 網段整個吃掉 {#mine-4}
 
 **症狀**:照官方 AKS BYOCNI 快速上手裝完,節點 Ready,然後 metrics-server 進 `CrashLoopBackOff`:
 
@@ -445,7 +445,7 @@ E0807 06:19:07 … dial tcp: lookup <api-fqdn> on 10.0.0.10:53:
 
 **根因**:pod 拿到的 IP 是 `10.0.0.x`,而這座叢集的 service CIDR 是 `10.0.0.0/16`、kube-dns 的 ClusterIP 是 `10.0.0.10`。**pod 正在從 Service 的網段裡拿位址。** 封包送到 `10.0.0.10` 時,Cilium 認為那是本節點的一顆 pod 而不是一個 Service,於是 `connection refused`。
 
-來源是 Cilium `cluster-pool` IPAM 的出廠 `clusterPoolIPv4PodCIDRList` 為 **`10.0.0.0/8`**,而 AKS 的預設 service CIDR `10.0.0.0/16` 完全包含在裡面。`aksbyocni` 這個 preset **不會**幫你處理。
+來源是 Cilium `cluster-pool` IPAM 的預設 `clusterPoolIPv4PodCIDRList` 為 **`10.0.0.0/8`**,而 AKS 的預設 service CIDR `10.0.0.0/16` 完全包含在裡面。`aksbyocni` 這個 preset **不會**幫你處理。
 
 **最諷刺的是正確答案就寫在叢集自己身上**:
 
@@ -454,7 +454,7 @@ $ kubectl -n kube-system get ds kube-proxy -o jsonpath='{…containers[0].comman
 ["kube-proxy", …, "--cluster-cidr=10.244.0.0/16", …]
 ```
 
-AKS 出廠的 kube-proxy 一直在說「pod 在 `10.244.0.0/16`」。`az aks show` 的 `networkProfile.podCidr` 是 `null`(因為 BYOCNI 不由 AKS 配發),**但 kube-proxy 的參數不是 null**。
+AKS 預設的 kube-proxy 一直在說「pod 在 `10.244.0.0/16`」。`az aks show` 的 `networkProfile.podCidr` 是 `null`(因為 BYOCNI 不由 AKS 配發),**但 kube-proxy 的參數不是 null**。
 
 **教訓**:BYOCNI 的意思是「pod 網段由你負責」,**不是「叢集其他元件對 pod 網段沒有假設」**。
 

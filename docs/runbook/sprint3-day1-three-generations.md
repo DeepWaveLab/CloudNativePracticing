@@ -15,7 +15,7 @@
 |---|---|---|
 | 1 | 對已退役的 WASI node pool 下指令 | 舊教學不會下架,**今天的錯誤訊息是網路上查不到的** |
 | 2 | 確認 Krustlet 的現況 | 它的官網還活著,而 repo 已經五年沒動 |
-| 3 | 出廠節點上有什麼 | **這份基準 Day 8 要拿來驗「拆得乾淨嗎」** |
+| 3 | 原始節點上有什麼 | **這份基準 Day 8 要拿來驗「拆得乾淨嗎」** |
 | 4 | 建 RuntimeClass,追完七層 | 驗收 |
 
 ## 步驟 1: 對已退役的 WASI node pool 下指令,看它今天回什麼
@@ -136,7 +136,7 @@ $ curl -s -o /dev/null -w "%{http_code}\n" https://docs.krustlet.dev/intro
 
 **Krustlet 的使用者被指引搬去 WASI node pool,而 WASI node pool 已經關門。** 兩條退場的路,一條指向另一條。
 
-## 步驟 3: 出廠節點上有什麼
+## 步驟 3: 原始節點上有什麼
 
 要看節點,需要一顆特權 pod 再跳進節點的命名空間——這個做法 [Sprint 2 Day 0](sprint2-day0-ebpf-concepts.md) 建立過,這裡直接沿用。
 
@@ -171,12 +171,12 @@ containerd github.com/containerd/containerd/v2 2.3.3-2
 
 $ kubectl -n wasmlab exec node-shell -- nsenter -t 1 -m -- ls /etc/containerd/
 config.toml
-kubenet_template.conf          ← 沒有 conf.d/,出廠是單一檔案
+kubenet_template.conf          ← 沒有 conf.d/,預設是單一檔案
 ```
 
 那個 **2.3.3** 立刻推翻了 Day 0 引用的設定路徑,見[地雷 1](#mine-1)。
 
-### 出廠設定全文,22 行
+### 預設設定全文,22 行
 
 ```toml
 version = 2
@@ -229,7 +229,7 @@ $ ls -la /usr/bin/containerd-shim* /usr/bin/runc
 
 **兩個 handler、一個 shim 二進位檔。** handler 是設定裡的名字,shim 是磁碟上的東西——Day 6 要做的正是「放一個新的二進位檔進去,再加一段設定指向它」,而這兩件事今天各自看得清楚。
 
-叢集那一側也有東西是出廠就在的,而且其中一個是壞的,見[地雷 2](#mine-2)。
+叢集那一側也有東西是預設就在的,而且其中一個是壞的,見[地雷 2](#mine-2)。
 
 ## 步驟 4: 驗收——RuntimeClass 的兩半 {#step-4}
 
@@ -260,7 +260,7 @@ EOF
 kubectl apply -f runtimeclass-runc.yaml -f pod-runc.yaml
 ```
 
-刻意不用叢集出廠的那個 `runc` RuntimeClass——**要證明的是這個物件自己建得出來**,而 Day 6 的 wasm 版本除了 handler 名字以外長得一模一樣。
+刻意不用叢集預設的那個 `runc` RuntimeClass——**要證明的是這個物件自己建得出來**,而 Day 6 的 wasm 版本除了 handler 名字以外長得一模一樣。
 
 **但 Pod 跑起來不算證明**,因為不指定 `runtimeClassName` 它也會跑起來。要證明的是「它是經由 `runc` 這個 handler 被啟動的」,所以要問 CRI:
 
@@ -275,7 +275,7 @@ node-shell               SANDBOX_READY  runtimeHandler=''        ← 沒指定�
 
 ### 七層,完整串起來
 
-這就是 Day 0 只在紙上講、今天要指出來的那條線。前三層住在叢集(etcd),後四層住在節點的磁碟與行程裡——**這條分界後面幾天會反覆出現**:
+這就是 Day 0 只在紙上講、今天要指出來的那條線。前兩層住在叢集(etcd),第 ③ 層是 kubelet 把 handler 交給 CRI 時、在節點側查到的執行狀態,第 ④–⑦ 層則落在節點的設定、磁碟與行程裡——**「叢集宣告、節點執行」這條分界後面幾天會反覆出現**:
 
 ```mermaid
 flowchart TB
@@ -305,7 +305,7 @@ flowchart TB
 | ⑥ 區塊裡的 `options.BinaryName` | 同一個區塊 | `/usr/bin/runc` |
 | ⑦ 實際啟動的 shim 行程 | 節點上 `ps` | `/usr/bin/containerd-shim-runc-v2` |
 
-**Day 6 要換掉的只有節點側那四層(④–⑦);叢集側的前三層,形狀一模一樣。**
+**Day 6 要換掉的只有節點側那四層(④–⑦);叢集宣告的前兩層(①②)形狀一模一樣,而第 ③ 層作為節點回報的執行狀態,也只是跟著改變。**
 
 節點上第二個 handler 也驗了一次:建一個 `handler: untrusted` 的 RuntimeClass,pod 一樣 Running,CRI 回報 `runtimeHandler='untrusted'`。**它不是理論上存在,是真的能用。**
 
@@ -380,7 +380,7 @@ Failed to create pod sandbox: rpc error: code = Unknown desc =
 
 而這座叢集的節點跑的是 **containerd 2.3.3**。
 
-更容易誤導的是,AKS 出廠的設定檔是一份**混血**:第一行寫 `version = 2`,內容卻用 2.x 的 plugin 名,於是每次 `containerd config dump` 都會印一行:
+更容易誤導的是,AKS 預設的設定檔是一份**混血**:第一行寫 `version = 2`,內容卻用 2.x 的 plugin 名,於是每次 `containerd config dump` 都會印一行:
 
 ```console
 level=warning msg="Configuration migrated from version 2, use `containerd config migrate` to avoid migration"
@@ -390,7 +390,7 @@ level=warning msg="Configuration migrated from version 2, use `containerd config
 
 **修法與追查順序**:動手改節點之前先問 `containerd --version`,**而不是先去檢查 shim 有沒有複製到位**。containerd 自己的 CRI 設定文件有「Runtime classes」一節,用的就是 2.x 的路徑。
 
-### 地雷 2:叢集出廠就有一個指向不存在 handler 的 RuntimeClass {#mine-2}
+### 地雷 2:叢集預設就有一個指向不存在 handler 的 RuntimeClass {#mine-2}
 
 ```console
 $ kubectl get runtimeclass          # 全新叢集,什麼都還沒做
@@ -407,7 +407,7 @@ runc                runc      4m33s
 
 **教訓**:`kubectl get runtimeclass` 列得出來,**不代表叢集跑得動它**。
 
-順帶兩個對後面有用的欄位,都在那個出廠物件上:
+順帶兩個對後面有用的欄位,都在那個預設物件上:
 
 ```yaml
 overhead:
@@ -418,7 +418,7 @@ scheduling:
     kubernetes.azure.com/kata-vm-isolation: "true"
 ```
 
-`overhead.podFixed` 是**把執行體自身開銷回饋給排程器的正式管道**(kata 要開一台輕量 VM,所以是 600Mi)。Day 5 量完 wasm 的記憶體足跡之後,這個欄位該填什麼才有答案。`scheduling` 則是[地雷 3](#mine-3) 的主角。
+`overhead.podFixed` 是**把執行體自身開銷回饋給排程器的正式管道**(kata 要開一台輕量 VM,所以是 600Mi)。Day 5 量完 wasm 的記憶體足跡之後,這個欄位該填什麼才有答案。`scheduling` 則是[地雷 3](#mine-3) 的重點。
 
 ### 地雷 3:同一個「handler 不存在」,寫不寫 `scheduling` 給你兩種完全不同的失敗 {#mine-3}
 
@@ -434,7 +434,7 @@ Pod **被成功排上節點**,scheduler 沒有意見。失敗發生在 kubelet �
 
 **它不會進 `CrashLoopBackOff`,也不會變成 `Error`——只監控那幾個狀態的告警規則抓不到它。**
 
-**寫了 `scheduling.nodeSelector`**(出廠那個 kata):
+**寫了 `scheduling.nodeSelector`**(預設那個 kata):
 
 ```console
 $ kubectl describe pod pod-kata-shipped | tail -2

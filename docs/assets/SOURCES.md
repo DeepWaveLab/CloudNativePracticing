@@ -18,8 +18,12 @@
 | logos/wasmcloud-icon-color.svg | https://github.com/cncf/artwork/blob/main/projects/wasmcloud/icon/color/wasmcloud.icon_green.svg | 2026-08-10 | CNCF artwork(Linux Foundation);單色 #00bc8e,W 由負空間構成,淺深兩底目檢皆可讀,不需深色版;Day 2–3 使用 |
 | logos/wasmedge-icon-color.svg | https://github.com/cncf/artwork/blob/main/projects/wasm-edge-runtime/icon/color/wasm-edge-runtime-icon-color.svg | 2026-08-10 | CNCF artwork(Linux Foundation);CNCF 目錄名為 wasm-edge-runtime;方形徽章,頂端缺口吃背景色,淺深兩底目檢皆可讀;Day 4 使用 |
 | logos/spinkube-icon-color.svg | https://github.com/cncf/artwork/blob/main/projects/spinkube/icon/color/spinkube-icon-color.svg | 2026-08-11 | CNCF artwork(Linux Foundation);七邊形漸層徽章,內部標記為負空間,淺深兩底目檢皆可讀;Day 6–7 使用 |
+| logos/istio-icon-color.svg | https://github.com/cncf/artwork/blob/main/projects/istio/icon/color/istio-icon-color.svg | 2026-08-14 | CNCF artwork(Linux Foundation);藍色帆船徽章,淺深兩底目檢皆可讀;Sprint 4 Day 2 使用 |
+| logos/envoy-icon-color.svg | https://github.com/cncf/artwork/blob/main/projects/envoy/icon/color/envoy-icon-color.svg | 2026-08-14 | CNCF artwork(Linux Foundation);Envoy 專案洋紅六角圖示,用於 Envoy Gateway 章節(Envoy Gateway 以 Envoy 為資料面);淺深兩底目檢皆可讀;Sprint 4 Day 1 使用 |
 | screenshots/day5/*.png | 本課程實測擷圖(HAMi-WebUI chart 1.2.0,英文介面) | 2026-08-05 | 課程自製 |
 | screenshots/sprint2-day9/*.png | 本課程實測擷圖(Hubble UI,Cilium chart 1.20.0,英文介面;headless Chrome 151 經 CDP 擷取) | 2026-08-07 | 課程自製 |
 | screenshots/sprint2-day9/05–07-*.png | 本課程實測擷圖(Hubble UI,Cilium 1.20.0);headless Chrome 151 經 CDP、1600×1000 @2x | 2026-08-07 | 課程自製;05 服務圖(L7 虛線／L4 實線)、06 L7 拒絕顯示 Unknown drop reason、07 L4 拒絕顯示 Policy denied |
+
+| screenshots/sprint4-day1/h3-browser-devtools.png | 本課程實測擷圖(Chrome + DevTools,`--origin-to-force-quic-on`,mkcert 憑證信任)。在真實視窗開 https://demo.mesh.lab/、於主控台執行 `performance.getEntriesByType('navigation')[0].nextHopProtocol` 讀出實際載入協定為 `h3`;已裁掉 Chrome 命令列旗標警告帶(含 LB IP) | 2026-08-14 | 課程自製 |
 
 所有 SVG 入庫前皆以 rsvg-convert 渲染於 `#ffffff` 與 `#1e1e1e` 兩種底色目檢;僅單色可讀者一律備齊深淺兩版,頁面以 Material 的 `#only-light` / `#only-dark` 成對掛載。

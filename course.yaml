@@ -4,6 +4,9 @@ course:
   repo: DeepWaveLab/CloudNativePracticing
   site: https://deepwavelab.github.io/CloudNativePracticing/
 style_approved: true
+current:
+  sprint: 4
+  day: 4
 mines:
 - id: d0-m1
   day: 0
@@ -139,7 +142,7 @@ mines:
   anchor: sprint1-day6-dra-simulated-devices.md#mine-2
 - id: d6-m3
   day: 6
-  title: DRA 的裝置不是擴充資源,所有算節點餘量的工具都會失明
+  title: DRA 的裝置不是擴充資源,所有算節點餘量的工具都看不見它
   anchor: sprint1-day6-dra-simulated-devices.md#mine-3
 - id: d6-m4
   day: 6
@@ -171,7 +174,7 @@ mines:
   anchor: sprint1-day7-dra-aks-real-gpu.md#mine-6
 - id: s2d0-m1
   day: 0
-  title: 節點內建一支 2019 年的 bpftrace,基本功能正常卻少掉六萬個掛載點
+  title: 節點內建的 bpftrace 可能很舊,基本功能正常卻少掉一整類掛載點
   anchor: sprint2-day0-ebpf-concepts.md#mine-1
 - id: s2d0-m2
   day: 0
@@ -539,7 +542,7 @@ mines:
   anchor: sprint3-day3-wasmcloud-distributed.md#mine-7
 - id: s3d4-m1
   day: 4
-  title: WasmWasi node pool 已退役,但 az CLI 與 feature flag 兩層都還說可以
+  title: AKS 預覽功能不能靠 --help 或 az feature list 判斷存不存在
   anchor: sprint3-day4-wasmedge.md#mine-1
 - id: s3d4-m2
   day: 4
@@ -591,7 +594,7 @@ mines:
   anchor: sprint3-day6-spinkube-shim.md#mine-4
 - id: s3d6-m5
   day: 6
-  title: rcm 把 shim 裝在 /opt/rcm/bin/,掃 /usr/bin 式檢查會誤判成「沒裝」
+  title: rcm 把 shim 裝在 /opt/rcm/bin/,靠掃某幾個目錄的檢查會誤判成「沒裝」
   anchor: sprint3-day6-spinkube-shim.md#mine-5
 - id: s3d7-m1
   day: 7
@@ -621,22 +624,14 @@ mines:
   day: 8
   title: 手改過 domain 之後,解除安裝回報成功、重啟 containerd、設定原封不動
   anchor: sprint3-day8-reversibility.md#mine-4
-- id: s3d6-m6
-  day: 6
-  title: AKS 官方文件教你安裝一個已封存退休的專案
-  anchor: sprint3-day6-spinkube-shim.md#mine-6
-- id: s3d6-m7
-  day: 6
-  title: 「支援 containerd 2.x」判斷的是設定檔語法版本,不是 containerd 版本
-  anchor: sprint3-day6-spinkube-shim.md#mine-7
-- id: s3d0-m1
-  day: 0
-  title: pushed_at 把 dependabot 分支算成活性
-  anchor: sprint3-day0-wasm-concepts.md#mine-1
 - id: s3d8-m5
   day: 8
   title: 能同時緩解兩顆雷的開關存在、預設關著、沒有任何文件提
   anchor: sprint3-day8-reversibility.md#mine-5
+- id: s4d2-m1
+  day: 2
+  title: az aks start 後叢集連不上,其實是本機 DNS 的負快取
+  anchor: sprint4-day2-istio-ambient.md#mine-1
 health_checks:
 - subject: 健康度量測方法(Day 9 定版,適用以下所有條目)
   verdict: method
@@ -786,7 +781,76 @@ health_checks:
   - CNCF Graduated(2023-10-11 畢業,2021-10 進 incubating)
   - GitHub releases:1.20.0(2026-07-29)、1.19.6(2026-07-16)、1.21.0-pre.0(2026-08-03)
   - 下游採用:AKS 原生支援 --network-dataplane cilium(az aks create --help 實測)
+  - Sprint 4 複查(2026-08-13):mesh / Gateway API / BYOCNI 上游安裝皆為同一 repo 功能,liveness 沿用上方;定位是 CNI(L3/L4)+ mesh(WireGuard/IPsec 透明加密 + beta mutual auth + per-node Envoy L7)+ Gateway API 一套。Sprint 4 Part A east-west 路線之一,與 Istio 橫向對比;疊 Istio ambient 需共存設定(cni.exclusive=false 等)
+- subject: KubeFleet
+  verdict: active
+  checked: '2026-08-12'
+  evidence:
+  - CNCF Sandbox(2025-01-21 接受);landscape 登記 repo 為 kubefleet-dev/kubefleet
+  - GitHub releases:v0.3.1(2026-04-17,距查證日近 4 個月);近 52 週 332 commits,近 13 週 47,無連續零
+  - default branch 最後一筆非相依性更新 commit:2026-08-06(FEP-0001 Placement Policy API 定義),API 層正在大改
+  - 最近 100 筆 commit bot 佔 30%(全 dependabot),30 個 open PR 只有 4 個是 dependabot——人類 PR 正常流動
+  - 依賴穩定 K8s API:go.mod 釘 k8s.io/api v0.34.1,不碰節點層;停更風險低
+  - 上下游關係(一手):Azure/fleet 是 Fleet Manager 服務跑的程式碼,自述 follows CNCF sandbox project KubeFleet
+  - 節奏落差:Azure/fleet 每 1-2 週發版(v0.18.12),CNCF 上游停在 v0.3.1;quickstart 用 kind、hub+member 各一座,零 Azure 依賴
+- subject: Confidential Containers
+  verdict: active
+  checked: '2026-08-12'
+  evidence:
+  - CNCF Incubating:2022-03-08 接受,2026-07-08 升級
+  - GitHub releases:v0.22.0(2026-07-28),meta/charts/CAA 同版號;近期發版間隔穩定 4-8 週
+  - 活性看子 repo 不看 meta repo:meta repo 近 52 週僅 48 commits(治理用),程式碼在 trustee/guest-components/cloud-api-adaptor/charts
+  - bus factor 疑慮:charts 是唯一官方安裝路徑,最近 98 筆 commit 6 位作者,一人佔 68
+  - 依賴 Kata(另一基金會)+ TEE 硬體(SEV-SNP/TDX)+ containerd RuntimeClass;charts v0.22.0 依賴 kata-deploy 4.0.0
+  - 下游:AKS 有 Confidential Containers(preview)但為微軟自有實作(kata-cc/MAA/SKR),不是上游 CoCo(Trustee/KBS),不可互相代入
+- subject: CoCo Operator(confidential-containers/operator)
+  verdict: dead
+  checked: '2026-08-12'
+  evidence:
+  - repo archived=true;最後 commit 2026-01-12「deprecate operator in favor of Helm chart」;近 26 週零 commit
+  - 取代者為 confidential-containers/charts(2025-10-21 建立),QUICKSTART 明寫 operator is deprecated
+  - 上游文件已同步改用 Helm;地雷在網路上 2024-2025 年第三方教學仍普遍教 operator
+- subject: Kata Containers
+  verdict: active
+  checked: '2026-08-12'
+  evidence:
+  - 非 CNCF 專案:OpenInfra Foundation 治理,CoCo(CNCF Incubating)的執行底座在另一個基金會
+  - GitHub releases:4.0.0(2026-07-20);近 52 週 3360 commits(仍加速),近 13 週 39-93,零連續零
+  - 最近 100 筆 commit bot 佔 0%,15 位作者,最高 36%——本輪體質最好
+  - 4.0.0 為 major:runtime 由 Go 改寫為 Rust,runtime-rs 成預設;引用 3.x 教學步驟一律要重驗
+  - 下游一手:AKS Pod Sandboxing 已 GA,RuntimeClass 為 kata-vm-isolation
+- subject: Drasi(drasi-platform,Kubernetes 形態)
+  verdict: life-support
+  checked: '2026-08-12'
+  evidence:
+  - CNCF Sandbox(2025-01-21 接受);landscape 登記 repo 為 drasi-project/drasi-platform
+  - GitHub releases:0.10.0(2025-11-21,近 9 個月無新版),且全部 release 皆標 prerelease
+  - default branch 最後 commit 2026-07-06(toolchain 升級);近 13 週逐週多為 0;28 個 open PR 零 dependabot
+  - 專案本體仍活但能量離開 K8s:drasi-core/drasi-server 2026-08 仍活躍;官網 Get Started 已改指 drasi-server,而 drasi-server 無 K8s 安裝路徑
+  - 文件與程式碼脫節:install-on-aks 文件寫 Dapr 1.10.0,CLI 原始碼實為 1.14.5
+  - 課程處置:不排動手課,當 Day 9「landscape 登記 repo 未必是程式碼所在 repo」的評估反例
+- subject: Istio
+  verdict: active
+  checked: '2026-08-13'
+  evidence:
+  - CNCF Graduated(2023-07 畢業);ambient(無 sidecar)模式自 1.24(2024-11)GA,2026 已是官方推薦部署模型
+  - 最新 ~1.29(2026-04);roadmap 往 ambient 多叢集(beta)、Gateway API Inference Extension、agentgateway 擴:https://istio.io/latest/blog/2025/roadmap/
+  - CNCF 2026-03-25 公告 ambient 多叢集/AI 方向:https://www.cncf.io/announcements/2026/03/25/istio-brings-future-ready-service-mesh-to-the-ai-era-with-new-ambient-multicluster-gateway-api-inference-extension-and-more/
+  - 架構:ztunnel(per-node L4 mTLS,Rust)+ waypoint(per-service-account L7,Envoy);mTLS 為 SPIFFE 同步 inline enforcement(對照 Cilium beta mutual-auth)
+  - 課程處置:Sprint 4 Part A east-west mesh 路線之一(Day 2 ambient),與 Cilium 橫向對比(Day 4);疊 Cilium CNI 需共存設定,見計畫 spike A3
+- subject: Envoy Gateway
+  verdict: active
+  checked: '2026-08-13'
+  evidence:
+  - CNCF(Envoy 旗下,Envoy 為 CNCF Graduated);通過 Kubernetes Gateway API 一致性
+  - GitHub releases:v1.8.3(2026-07-22),月更節奏,v1.9.0-rc.1(2026-08-09):https://github.com/envoyproxy/gateway/releases
+  - 定位 north-south(Gateway API 實作,取代 Ingress);HTTP/3 經 ClientTrafficPolicy http3:{}:https://gateway.envoyproxy.io/docs/tasks/traffic/http3/
+  - 已知 issue:HTTP/3 listener 不可與 downstream client cert 驗證同開(QUIC 上不支援 TLS client auth)
+  - 課程處置:Sprint 4 Part A north-south 主軸(Day 1),替代 Ingress Nginx;AKS 上 HTTP/3 的 UDP 443 需 TCP+UDP 兩個 LB 共用 IP,見計畫 spike A5
 scan_overrides:
+  banned_terms_extra:
+  - 出廠: 軟體語境用「預設/內建」,別用家電的「出廠」
+  - 用完就走: 擬人化 AI 腔;用「隨用隨開/非常駐」
   secrets_allowlist:
   # Public DNS resolvers used as teaching destinations for outbound-connection labs.
   - 1.1.1.1

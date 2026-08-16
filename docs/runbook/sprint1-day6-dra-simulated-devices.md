@@ -576,9 +576,9 @@ helm install retro-gpu <chart> -n dra-example-driver \
 
 **修法**:只能自己拆。把多條 selector 拆成單條逐一測,確認是哪一條把候選集清空;或直接 `kubectl get resourceslices -o yaml` 把裝置屬性攤開,跟表達式逐字對。屬性存在與否比表達式對錯更常是元兇,先確認網域名(driver 名)有沒有寫對。
 
-**教訓**:這是 DRA 現階段最痛的可觀測性缺口。設計 claim 的時候就要預留除錯路徑——把複雜條件拆成幾條獨立的 selector,失敗時能二分;全部塞進一條長表達式,出事只能重寫。
+**教訓**:這是 DRA 現階段最大的可觀測性缺口。設計 claim 的時候就要預留除錯路徑——把複雜條件拆成幾條獨立的 selector,失敗時能二分;全部塞進一條長表達式,出事只能重寫。
 
-### 地雷 3:DRA 的裝置不是擴充資源,所有算節點餘量的工具都會失明 {#mine-3}
+### 地雷 3:DRA 的裝置不是擴充資源,所有算節點餘量的工具都看不見它 {#mine-3}
 
 **症狀**:節點上 11 顆裝置、8 顆已配置,`kubectl describe node` 的 `Capacity` 與 `Allocatable` 一個字都沒有,八顆正在用裝置的 pod 在 `Non-terminated Pods` 區塊全部顯示 `0 (0%)`。
 

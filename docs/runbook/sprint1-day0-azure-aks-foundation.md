@@ -159,7 +159,7 @@ $ kubectl -n nvidia-device-plugin get pods
 No resources found in nvidia-device-plugin namespace.
 ```
 
-DaemonSet 的 desired 是 0:一個 pod 都不打算跑,而「0 個裡面 0 個就緒」在 rollout status 眼中是圓滿達成。真正的原因藏在 chart 預設的 nodeAffinity 裡,完整的診斷過程與修法見[地雷 1](#mine-1)。結論是給 node pool 補一個 NFD 風格的標籤——注意要在 **pool 層級**補,節點重建時才會自動帶回來:
+DaemonSet 的 desired 是 0:一個 pod 都不打算跑,而「0 個裡面 0 個就緒」對 rollout status 來說就是成功。真正的原因藏在 chart 預設的 nodeAffinity 裡,完整的診斷過程與修法見[地雷 1](#mine-1)。結論是給 node pool 補一個 NFD 風格的標籤——注意要在 **pool 層級**補,節點重建時才會自動帶回來:
 
 ```console
 $ az aks nodepool update -g <resource-group> --cluster-name <cluster> -n gpuspot \
@@ -308,7 +308,7 @@ chart 預設帶了一組 nodeAffinity,要求節點有 NFD(Node Feature Discovery
 
 ## 下一步
 
-地基有了:一個 1.35 的叢集、兩張隨叫隨到的 T4、一套收工不燒錢的循環。Day 1 把第一位主角請上台——KAI Scheduler,NVIDIA 開源的批次排程器。先讓它以 secondary scheduler 的身分與預設排程器共存,跑通第一個 GPU 任務,然後建立兩個 Queue,看排程公平性怎麼在「線上推論」與「離線批次」之間分 GPU。
+地基有了:一個 1.35 的叢集、兩張要用才開的 T4、一套收工不燒錢的循環。Day 1 進入第一套機制——KAI Scheduler,NVIDIA 開源的批次排程器。先讓它以 secondary scheduler 的身分與預設排程器共存,跑通第一個 GPU 任務,然後建立兩個 Queue,看排程公平性怎麼在「線上推論」與「離線批次」之間分 GPU。
 
 ---
 

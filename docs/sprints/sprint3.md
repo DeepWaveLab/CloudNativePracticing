@@ -12,7 +12,7 @@
 &nbsp;&nbsp;&nbsp;&nbsp;
 [![SpinKube](../assets/logos/spinkube-icon-color.svg){ width="80" }](https://www.spinkube.dev/)
 
-*三條路線:wasmCloud(完全不碰節點)、WasmEdge(手動裝 shim)、SpinKube(operator 替你改節點)。*
+*三條路線:wasmCloud(完全不碰節點)、WasmEdge(手動裝 shim)、SpinKube(operator 自動改節點)。*
 
 </div>
 
@@ -78,7 +78,7 @@
 
     ---
 
-    operator 替你改節點——供應鏈、紀錄、範圍六件事都做得比手動好,唯一做壞的是它用猜的那一步。
+    operator 自動改節點——供應鏈、紀錄、範圍六件事都做得比手動好,唯一做壞的是它用猜的那一步。
 
 -   ![SpinKube](../assets/logos/spinkube-icon-color.svg){ width="44" }
 
@@ -108,7 +108,7 @@
 
 ## 這個 sprint 的量測紀律
 
-- **節點基準先存後比**:Day 1 存下出廠節點的四份快照,之後每一天的「有沒有動到節點」都拿它逐字 diff——Day 2 五份零行、Day 8 拆完歸零,證據都是 `exit=0`。
+- **節點基準先存後比**:Day 1 存下原始節點的四份快照,之後每一天的「有沒有動到節點」都拿它逐字 diff——Day 2 五份零行、Day 8 拆完歸零,證據都是 `exit=0`。
 - **量不出來就說量不出來**:冷啟動用 null control 加 bootstrap 信賴區間,兩批判定不一致就不排名。
 - **驗收表達不出來就改寫,不硬湊**:Day 3、Day 4 各改寫一次,原本要驗什麼、為什麼不行、改驗什麼,三段寫清楚。
 

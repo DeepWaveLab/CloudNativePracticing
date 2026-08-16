@@ -24,7 +24,7 @@
 | 7 | 跑起來——先撞牆,再修一個字串 | 兩行置換 |
 
 !!! danger "先講一件事:不要照 AKS 官方文件裝"
-    `learn.microsoft.com/…/deploy-spinkube`(`updated_at: 2026-07-03`,查證 2026-08-11)教的安裝路徑是從明文 `http://kwasm.sh/` 裝 kwasm-operator——**那個專案已於 2026-05-15 封存退休**,README 自己指向本章要用的 runtime-class-manager,網域只保證解析到 2027-01-20。詳見[地雷 6](#mine-6)。本章走的是上游現行的那條路。
+    `learn.microsoft.com/…/deploy-spinkube`(`updated_at: 2026-07-03`,查證 2026-08-11)教的安裝路徑是從明文 `http://kwasm.sh/` 裝 kwasm-operator——**那個專案已於 2026-05-15 封存退休**,README 自己指向本章要用的 runtime-class-manager,網域只保證解析到 2027-01-20。本章走的是上游現行的那條路。
 
 ## 步驟 1: 版本現況——先修正自己的 health check
 
@@ -324,31 +324,17 @@ Sprint3 Day6 SpinKube probe
 
 **為什麼要記**:只有在「不用 operator、自己寫 Pod」時會遇到——**而教學上那正是最該做一次的事,因為它把 operator 到底替你做了什麼攤開來。**
 
-### 地雷 5:rcm 把 shim 裝在 `/opt/rcm/bin/`,Day 4 式的 `ls /usr/bin` 檢查會誤判成「沒裝」 {#mine-5}
+### 地雷 5:rcm 把 shim 裝在 `/opt/rcm/bin/`,靠「掃某幾個目錄」的檢查會誤判成「沒裝」 {#mine-5}
 
-**症狀**:Job `Complete`、log 印 `shim installed`,但沿用 Day 4 的取樣器(錨定 `/usr/bin` 與 `/usr/local/bin`)比對,結果 IDENTICAL——看起來什麼都沒裝。
+**症狀**:Job `Complete`、log 印 `shim installed`,但用「掃 `/usr/bin`、`/usr/local/bin` 看有沒有」這種存在性檢查,會判成什麼都沒裝。
 
-**根因**:rcm 用自己的目錄,並在 `runtime_type` 直接寫絕對路徑,所以不需要進 `PATH`。官方文件沒寫落點。
+**根因**:rcm 用自己的目錄(`/opt/rcm/bin/`),並在 `runtime_type` 直接寫絕對路徑,所以 shim 不需要進 `PATH`。官方文件沒寫落點。
 
 **判斷準則**:換一條佈建路線就要重新確認落點。可靠來源優先序:`containerd config dump` 的 `runtime_type` → `rcm-lock.json` → install Job 的 log。**不要用「掃某幾個目錄」當存在性檢查,那是在賭別人跟你放同一個地方。**
 
-### 地雷 6:AKS 官方文件教你安裝一個已封存退休的專案 {#mine-6}
-
-**現象**:`deploy-spinkube` 文件(`updated_at: 2026-07-03`,無任何橫幅)的安裝步驟是 `helm repo add kwasm http://kwasm.sh/kwasm-operator/` 加節點 annotation 觸發。
-
-**事實**(查證 2026-08-11):KWasm 已於 2026-05-15 封存退休。另外三處落差:helm repo 是明文 `http://`;annotation 觸發撐不過 AKS 節點輪替(上游 issue #222 自己記載,Day 5 實測到的節點層揮發是同一件事);釘的版本全面落後(operator v0.5.0、cert-manager v1.14.3)。
-
-**判斷準則**:雲廠商文件引用第三方 helm repo 時,先查那個 repo 的 `archived` 欄位與 README 首段。文件的 `updated_at` 只代表檔案被碰過,不代表第三方連結被複查過。(那條路沒有實測跑過,判定靠封存狀態,不是失敗現場。)
-
-### 地雷 7:上游說的「支援 containerd 2.x」,支援的是設定檔語法版本 {#mine-7}
-
-[地雷 1](#mine-1) 的續集。上游 issue #371「support containerd 2.0」已 completed 關閉——從 issue 列表看,這件事解決了;而修它的 PR 內文自述「or, more accurately, containerd config **syntax** version 3」,那個 syntax 沒有出現在任何使用者文件裡,且該 PR 的 AKS 測試格未勾選。`main` 與 v0.2.0 的判斷程式碼逐字相同(查證 2026-08-11),**沒有修復在路上**。
-
-**判斷準則**:「支援 X 2.x」要追問**用什麼判斷**。這也決定了回報要怎麼寫:不是「請支援 containerd 2.x」,是「請不要用設定檔語法版本推論 containerd 版本」。
-
 ## 帶得走的東西
 
-- **自動化會把人的判斷換成一個啟發式,而啟發式錯的時候不會舉手。** Day 4 手動路線之所以沒踩這顆雷,是因為動手前先離線 parse 過;rcm 用一個字串比對代替了那次驗證。**評估一個 operator,要看的不是它做了多少事,是它在哪些地方用猜的。**
+- **自動化會把人的判斷換成一個啟發式,而啟發式錯的時候不會報錯。** Day 4 手動路線之所以沒踩這顆雷,是因為動手前先離線 parse 過;rcm 用一個字串比對代替了那次驗證。**評估一個 operator,要看的不是它做了多少事,是它在哪些地方用猜的。**
 - **「所有指標都綠」的環境可以是壞的。** Shim READY、節點 provisioned、Job Complete、log 無 warning——四個綠燈,pod 起不來。**每一層的「成功」只代表那一層自己的動作做完了,沒有一層驗過下一層真的收到。**
 - **叢集層的名字是全域資源。** RuntimeClass 沒有 namespace,`wasmtime-spin-v2` 這種通用名字誰都可能先佔住,而 controller 對同名物件的處理方式(對帳/跳過/覆蓋)決定了殘留會不會變成陷阱。
 - **供應鏈與紀錄是自動化真正的價值所在。** sha256 校驗、lock 檔、宣告式範圍——這三格 rcm 都比手動做得好,而它們恰好是手動流程最常省略的。
@@ -358,7 +344,7 @@ Sprint3 Day6 SpinKube probe
 
 想往下深挖,從這幾份開始:
 
-- **[runtime-class-manager](https://github.com/spinframework/runtime-class-manager)** —— 今天的主角。README 寫明它管「RuntimeClass 與 containerd shim 二進位檔的建立與安裝」;`internal/containerd/configure.go` 就是地雷 1 那段 `strings.Contains` 的出處,值得整檔讀完。
+- **[runtime-class-manager](https://github.com/spinframework/runtime-class-manager)** —— 今天的重點。README 寫明它管「RuntimeClass 與 containerd shim 二進位檔的建立與安裝」;`internal/containerd/configure.go` 就是地雷 1 那段 `strings.Contains` 的出處,值得整檔讀完。
 - **[containerd-shim-spin](https://github.com/spinframework/containerd-shim-spin)** —— shim 本體。release 附的 Shim CR 是今天逐字使用的那份,注意它註解裡自己說明了為什麼 RuntimeClass 叫 `wasmtime-spin-v2`。
 - **[Day 4 的地雷 2](sprint3-day4-wasmedge.md#mine-2)** —— 站內連結。1.x plugin 路徑被靜默丟棄的完整機制與離線驗證法,今天 rcm 踩的就是它。
 

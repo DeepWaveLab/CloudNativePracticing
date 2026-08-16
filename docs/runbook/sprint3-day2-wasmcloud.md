@@ -153,7 +153,7 @@ WorkloadDeployment(CRD) ──▶ runtime-operator ──NATS──▶ host pod(
                                               把 .wasm bytecode 載進來執行
 ```
 
-**wasm 元件從來沒有變成一顆 Pod。** containerd 在整條路徑上只參與一次:把 `ghcr.io/wasmcloud/wash:2.6.1` 這個**普通容器映像**拉下來跑成 host pod——而那件事用出廠的 `runc` handler 就做完了。
+**wasm 元件從來沒有變成一顆 Pod。** containerd 在整條路徑上只參與一次:把 `ghcr.io/wasmcloud/wash:2.6.1` 這個**普通容器映像**拉下來跑成 host pod——而那件事用預設的 `runc` handler 就做完了。
 
 三段證據:
 
@@ -201,7 +201,7 @@ taints                             : None
 
 | | **Day 1 / Day 6:RuntimeClass + containerd shim** | **Day 2:wasmCloud host** |
 |---|---|---|
-| wasm 元件在 K8s 眼中是什麼 | **一顆 Pod**(有 IP、QoS、probe、`kubectl logs`) | **一個 CRD 物件**,K8s 不知道它在跑什麼 |
+| wasm 元件對 K8s 來說是什麼 | **一顆 Pod**(有 IP、QoS、probe、`kubectl logs`) | **一個 CRD 物件**,K8s 不知道它在跑什麼 |
 | 誰決定它跑在哪 | kube-scheduler | wasmCloud operator 經 NATS,**scheduler 沒有參與** |
 | 誰真的執行它 | containerd → shim → Wasmtime | host pod 行程裡的 Wasmtime |
 | 節點要不要改 | **要**:shim 二進位檔 + `config.toml` + 通常還要標籤 | **不要**(五份 diff 為證) |
@@ -479,7 +479,7 @@ WARN handle_http_request{http.host=hello-world.wasmcloud.svc.cluster.local}:
 
 兩個方向都驗過是一對一比對:加 `-H "Host: localhost"` → 200;把 `config.host` 改成 Service FQDN → 200,而**原本會通的 `Host: localhost` 反過來 404**。
 
-**追查心法:wasmCloud 的 404 先看 host pod log 的 `no workload bound to host`,不要從 Service / EndpointSlice 查起。**
+**判斷準則:wasmCloud 的 404 先看 host pod log 的 `no workload bound to host`,不要從 Service / EndpointSlice 查起。**
 
 有一個對照組幫忙分辨兩種症狀——**元件被刪掉時,同一個 Service 給的不是 404 而是連不上**,因為 operator 把 EndpointSlice 清空了:
 

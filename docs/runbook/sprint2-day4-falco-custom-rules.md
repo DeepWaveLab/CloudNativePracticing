@@ -2,12 +2,12 @@
 
 ![Falco 官方標誌](../assets/logos/falco-icon-color.svg){ align=right width="95" }
 
-> Day 3 找到出廠規則的兩個空白:它不管「這個容器沒連過的位址」,也抓不到「容器裡已經在跑的東西再開一個 shell」。今天用 `list`、`macro`、`rule` 三層結構把這兩個洞補起來——但寫出會報的規則只是前半場。後半場是誤報,以及調校誤報必須付出的偵測力。
+> Day 3 找到預設規則的兩個空白:它不管「這個容器沒連過的位址」,也抓不到「容器裡已經在跑的東西再開一個 shell」。今天用 `list`、`macro`、`rule` 三層結構把這兩個洞補起來——但寫出會報的規則只是前半場。後半場是誤報,以及調校誤報必須付出的偵測力。
 
 !!! abstract "你在課程的哪裡"
-    - **Day 3**:Falco 裝好了,讀得懂一條規則怎麼從 `condition` 收斂到 syscall 欄位,也知道出廠 25 條規則的邊界在哪裡。
+    - **Day 3**:Falco 裝好了,讀得懂一條規則怎麼從 `condition` 收斂到 syscall 欄位,也知道預設 25 條規則的邊界在哪裡。
     - **今天**:寫兩條規則補上那兩個邊界、刻意製造一次誤報並用 `exceptions` 調校、把告警經 Falcosidekick 送出節點。驗收是自訂規則命中、接收端用自己的日誌證明收到,以及調校前後的數字與代價都量得出來。
-    - **Day 5**:換 Tetragon 上場。Falco 這邊的基準就是「25 條出廠加 2 條自訂」。
+    - **Day 5**:換 Tetragon 上場。Falco 這邊的基準就是「25 條預設加 2 條自訂」。
 
 ## 寫規則不難,難的是知道它會吵多大聲
 
@@ -40,7 +40,7 @@ helm upgrade falco falcosecurity/falco --version 9.1.0 -n falco \
 
 好處很直接:**規則檔是一份獨立、可以單獨 lint、可以單獨 diff 的檔案**,不是 YAML 字串裡的縮排。檔名裡的點要跳脫(`custom-rules\.yaml`),否則 Helm 會把它當成兩層 key。
 
-落地之後長這樣:
+套用之後長這樣:
 
 ```console
 $ kubectl -n falco exec <falco-pod> -c falco -- ls -la /etc/falco/rules.d/
@@ -63,7 +63,7 @@ rules_files:
 
 | 位置 | 誰放的 | 用途 |
 |---|---|---|
-| `falco_rules.yaml` | init 容器從 OCI registry 拉的 | 出廠 25 條,**不要手改**,下次拉新版就被蓋掉 |
+| `falco_rules.yaml` | init 容器從 OCI registry 拉的 | 預設 25 條,**不要手改**,下次拉新版就被蓋掉 |
 | `falco_rules.local.yaml` | 傳統上給人手動編輯的本機覆寫檔 | **這個映像裡根本沒有這個檔案**。Falco 對 `rules_files` 裡不存在的項目是靜靜跳過,不報錯 |
 | `rules.d/` | chart 的 `customRules` | 今天的規則在這裡,**最後被解析,所以贏** |
 
@@ -75,7 +75,7 @@ rules_files:
 | 只加條件或例外值 | `- rule: <同名>` 搭配 `override` 語法 | 條件用 `and` 串接,`exceptions` 的 `values` 併入既有的 |
 | 關掉一條 | `- rule: <同名>` 搭配 `enabled: false` | 保留定義但不比對 |
 
-今天兩條規則都是**新名字**,所以純粹是加法,出廠 25 條一條都沒動。這是刻意的:Day 5 要拿 Tetragon 跟 Falco 對比,改動出廠規則會讓對比失去基準。
+今天兩條規則都是**新名字**,所以純粹是加法,預設 25 條一條都沒動。這是刻意的:Day 5 要拿 Tetragon 跟 Falco 對比,改動預設規則會讓對比失去基準。
 
 ### 確認規則真的載進去了
 
@@ -93,7 +93,7 @@ The chosen syscall buffer dimension is: 8388608 bytes (8 MBs)
 
 ## 步驟 2: 規則 A——補上「沒連過的對外連線」
 
-[Day 3 的地雷 4](sprint2-day3-falco-basics.md#mine-4):出廠 25 條裡跟網路有關的三條全在描述具體手法,沒有一條在管「這個容器以前沒連過這裡」,所以從容器連 8.8.8.8:53 是零告警,而 Day 2 的手工基線抓得到。
+[Day 3 的地雷 4](sprint2-day3-falco-basics.md#mine-4):預設 25 條裡跟網路有關的三條全在描述具體手法,沒有一條在管「這個容器以前沒連過這裡」,所以從容器連 8.8.8.8:53 是零告警,而 Day 2 的手工基線抓得到。
 
 今天把「基線」這個概念,用 Day 3 學到的三層結構寫出來:
 
@@ -138,7 +138,7 @@ EOF
 - **`macro` 讓 `condition` 讀起來像一句話。** `ebpf_lab_workload and container and connection_to_unlisted_peer` 這一行是**意圖**;`evt.rawres >= 0 or evt.res = EINPROGRESS` 這種東西是**實作**,該藏在 macro 裡。
 - **`rule` 只剩下三件事**:什麼情況、報什麼、多嚴重。
 
-寫這條規則時最自然的念頭是直接複用出廠的 `outbound` macro。**不要**,原因是[地雷 3](#mine-3)。
+寫這條規則時最自然的念頭是直接複用預設的 `outbound` macro。**不要**,原因是[地雷 3](#mine-3)。
 
 ### 命中
 
@@ -203,7 +203,7 @@ EOF
 
 兩個設計決定要講清楚:
 
-- **`condition` 裡沒有 `proc.tty != 0`。** 出廠規則有這一項,而它正是 [Day 3 地雷 3](sprint2-day3-falco-basics.md#mine-3) 的成因。web shell **沒有終端機**,加了 tty 條件就等於把要抓的目標排除掉。代價是這條規則也會抓到沒有終端機的自動化行為。
+- **`condition` 裡沒有 `proc.tty != 0`。** 預設規則有這一項,而它正是 [Day 3 地雷 3](sprint2-day3-falco-basics.md#mine-3) 的成因。web shell **沒有終端機**,加了 tty 條件就等於把要抓的目標排除掉。代價是這條規則也會抓到沒有終端機的自動化行為。
 - **`proc.pname exists` 不能省。** `container_entrypoint` 的第一項就是 `not proc.pname exists`(父行程可能已經先退出);如果不要求父行程存在,那些父行程為空的事件會落進 `not container_runtime_parent` 而被誤判成非執行期。
 
 ### 驗證要用 `&` fork,不是巢狀 `bash -c`
@@ -221,10 +221,10 @@ done
 
 | 規則 | `proc.name` | `proc.pname` | `proc.tty` |
 |---|---|---|---|
-| `Terminal shell in container`(出廠) | bash | **containerd-shim** | 34816 |
+| `Terminal shell in container`(預設) | bash | **containerd-shim** | 34816 |
 | `Shell spawned by non-runtime parent in container`(自訂) | bash | **bash** | 34816 |
 
-出廠規則抓到第一層,自訂規則抓到被 fork 出來的第二層。Day 3 那個「2 次 `execve`、1 筆告警」的缺口補起來了。
+預設規則抓到第一層,自訂規則抓到被 fork 出來的第二層。Day 3 那個「2 次 `execve`、1 筆告警」的缺口補起來了。
 
 ### 更接近真實的版本:沒有終端機的 web shell
 
@@ -237,10 +237,10 @@ done
 
 $ ./falco-alerts.sh --since 15s
 Shell spawned by non-runtime parent in container   proc=bash pname=bash tty=0   cmd=bash -c echo webshell-no-tty
---- 出廠規則: 0 筆 ---
+--- 預設規則: 0 筆 ---
 ```
 
-**出廠規則這次連第一層都沒報**——沒有 tty,`proc.tty != 0` 不成立(Day 3 地雷 3);第二層又卡在 `container_entrypoint`(Day 3 地雷 6)。**兩顆地雷疊在一起,就是 Falco 對「腳本化的入侵」完全靜音。** 自訂規則報了,而且 `tty=0` 這個值本身就是它跟真人 `kubectl exec -it` 的區分訊號。
+**預設規則這次連第一層都沒報**——沒有 tty,`proc.tty != 0` 不成立(Day 3 地雷 3);第二層又卡在 `container_entrypoint`(Day 3 地雷 6)。**兩顆地雷疊在一起,就是 Falco 對「腳本化的入侵」完全靜音。** 自訂規則報了,而且 `tty=0` 這個值本身就是它跟真人 `kubectl exec -it` 的區分訊號。
 
 這一段也順手回答了「規則 B 該不該加 tty 條件」:**加了就等於重新造一次 Day 3 的地雷 3。**
 
@@ -538,9 +538,9 @@ $ kubectl -n falco logs deploy/webhook-receiver | grep -c RECEIVED
 |---|---|---|
 | 自訂規則載入 | 啟動日誌出現 `/etc/falco/rules.d/custom-rules.yaml \| schema validation: ok`,且**沒有 warning 區塊** | 修掉 `evt.dir` 之後成立 |
 | 規則 A 命中 | Day 3 零告警的那個動作(連 8.8.8.8:53)產生具名告警 | 命中,帶 `fd.sip`／`fd.sport` 與 pod 身分 |
-| 規則 B 命中 | `&` fork 出來的第二層 shell 產生告警,而出廠規則對它靜默 | 兩者並排成立;無 tty 版本出廠規則 0 筆、自訂規則 1 筆 |
+| 規則 B 命中 | `&` fork 出來的第二層 shell 產生告警,而預設規則對它靜默 | 兩者並排成立;無 tty 版本預設規則 0 筆、自訂規則 1 筆 |
 | **誤報調校前後** | 同一份流量,調校前後的 alerts/min 都量得出來 | **180.0 → 0.0**,同窗口長度 120 秒 |
-| 調校後不失能 | 真偏離仍然命中 | 規則 A、規則 B、出廠 shell 規則三條全部照樣命中 |
+| 調校後不失能 | 真偏離仍然命中 | 規則 A、規則 B、預設 shell 規則三條全部照樣命中 |
 | 調校的代價 | 說得出被豁免之後具體多了哪些不會被抓的動作,而且實測 | 兩個 exfil 形狀的動作,規則 A **兩次都是 0 筆** |
 | **送達** | 接收端自己的日誌裡有 payload | `RECEIVED` 964 次,含 sidekick 加上的 `uuid` |
 
@@ -617,9 +617,9 @@ The chosen syscall buffer dimension is: …          ← 直接接下一行,沒�
 
 **「沒有 warning 區塊」本身就是驗收條件**,而不是「helm 成功」。
 
-### 地雷 3:出廠的 `outbound` macro 把私有網段排除掉了 {#mine-3}
+### 地雷 3:預設的 `outbound` macro 把私有網段排除掉了 {#mine-3}
 
-**症狀**:複用出廠 macro 寫的網路規則,在 Kubernetes 上安靜得不合理。
+**症狀**:複用預設 macro 寫的網路規則,在 Kubernetes 上安靜得不合理。
 
 **根因**:把它倒出來看:
 
@@ -640,7 +640,7 @@ $ kubectl -n falco exec <falco-pod> -c falco -- grep -A9 '^- macro: outbound$' /
 
 **修法**:今天的 `lab_outbound_connect` 是自己拼的,刻意**不含**那一行。
 
-**教訓**:**出廠 macro 是為出廠規則的威脅模型寫的,不是為你的威脅模型寫的。** 複用之前要把它展開讀完。這也是本章最像陷阱的一顆——因為它是**看起來免費的調校**。
+**教訓**:**預設 macro 是為預設規則的威脅模型寫的,不是為你的威脅模型寫的。** 複用之前要把它展開讀完。這也是本章最像陷阱的一顆——因為它是**看起來免費的調校**。
 
 ### 地雷 4:誤報的量跟應用程式的請求量不成比例 {#mine-4}
 
@@ -695,9 +695,9 @@ Warning  Read sensitive file untrusted                            proc=head  fil
 Notice   Redirect STDOUT/STDIN to Network Connection in Container  proc=bash  fd.sip=10.0.47.134
 ```
 
-出廠規則接住了**這一次**——因為剛好讀了 `/etc/shadow`,又剛好把 fd 重導到 socket。換一個場景:一支本來就有資料庫連線的應用被植入邏輯,把查到的資料經由被豁免的對端送出去——**沒有敏感檔案被開、沒有 fd 重導、規則 A 被豁免**,三條線全部安靜。
+預設規則接住了**這一次**——因為剛好讀了 `/etc/shadow`,又剛好把 fd 重導到 socket。換一個場景:一支本來就有資料庫連線的應用被植入邏輯,把查到的資料經由被豁免的對端送出去——**沒有敏感檔案被開、沒有 fd 重導、規則 A 被豁免**,三條線全部安靜。
 
-**教訓**:這就是為什麼「調校起來不痛,就代表規則本來沒用」。一條真正在防守的規則,調校時一定要在某個地方付出偵測力;**你的工作不是把代價變成零,是把代價講清楚、寫進例外的名字裡、然後定期回來問它還需不需要。**
+**教訓**:這就是為什麼「調校沒付出代價,就代表規則本來沒用」。一條真正在防守的規則,調校時一定要在某個地方付出偵測力;**你的工作不是把代價變成零,是把代價講清楚、寫進例外的名字裡、然後定期回來問它還需不需要。**
 
 ### 地雷 6:sidekick 預設兩份副本、不給 resources,而且會擠在同一顆節點上 {#mine-6}
 
@@ -741,9 +741,9 @@ priority 一樣是 0,跟 [Day 3 地雷 1](sprint2-day3-falco-basics.md#mine-1) �
 
 ## 帶得走的東西
 
-- **調校起來不痛,就代表規則本來沒在守什麼。** 一條真正在防守的規則,把誤報壓下去時一定要在某個地方交出偵測力。工作不是把代價變成零,是把代價量出來、寫進例外的名字裡、定期回來問它還需不需要。
+- **調校沒付出代價,就代表規則本來沒在守什麼。** 一條真正在防守的規則,把誤報壓下去時一定要在某個地方交出偵測力。工作不是把代價變成零,是把代價量出來、寫進例外的名字裡、定期回來問它還需不需要。
 - **在 Kubernetes 上估事件率,要先把 DNS 放大算進去。** `ndots:5` 加三個 search domain,讓一次 HTTP 請求變成六次 `connect()`。這個倍數是叢集設定決定的,換個 namespace 就變——用「應用每秒幾個請求」去推規則會吵多大聲,一定低估。
-- **複用出廠 macro 之前要把它展開讀完。** 出廠的 `outbound` 排除了整個私有網段,拿來用可以讓誤報一夕歸零,代價是叢集內的橫向移動整類行為從此看不見。看起來免費的調校最危險。
+- **複用預設 macro 之前要把它展開讀完。** 預設的 `outbound` 排除了整個私有網段,拿來用可以讓誤報一夕歸零,代價是叢集內的橫向移動整類行為從此看不見。看起來免費的調校最危險。
 - **`helm` 說成功,不等於規則生效。** 唯一可信的是 Falco pod 自己的啟動日誌:規則檔那一行要在、而且後面不能跟著 warning 區塊。淘汰的欄位會讓一條規則永遠不報,而所有健康指標全綠。
 - **告警管線多一段,就多一個「偵測正常但沒人知道」的位置。** Falco 是 DaemonSet,掛一顆只影響一顆節點;sidekick 是 Deployment,是整條鏈上唯一的集中點,而它預設跑在 BestEffort、沒有反親和性、priority 0。
 
@@ -759,9 +759,9 @@ priority 一樣是 0,跟 [Day 3 地雷 1](sprint2-day3-falco-basics.md#mine-1) �
 
 ## 下一步
 
-Falco 到這裡告一段落:出廠規則讀過了、兩個洞補起來了、誤報的帳算過了、告警也送得出節點。它的形狀很清楚——**在使用者空間比對規則,報給人看**。
+Falco 到這裡告一段落:預設規則讀過了、兩個洞補起來了、誤報的帳算過了、告警也送得出節點。它的形狀很清楚——**在使用者空間比對規則,報給人看**。
 
-[Day 5](sprint2-day5-tetragon-basics.md) 換 Tetragon 上場,它的形狀不一樣:規則寫成 Kubernetes 的自訂資源,而且**過濾可以留在核心裡**——這讓它多出一件 Falco 做不到的事。今天寫的兩條規則會留在叢集上當基準,Day 5 之後的對照都以「25 條出廠加 2 條自訂」為準。
+[Day 5](sprint2-day5-tetragon-basics.md) 換 Tetragon 上場,它的形狀不一樣:規則寫成 Kubernetes 的自訂資源,而且**過濾可以留在核心裡**——這讓它多出一件 Falco 做不到的事。今天寫的兩條規則會留在叢集上當基準,Day 5 之後的對照都以「25 條預設加 2 條自訂」為準。
 
 ---
 

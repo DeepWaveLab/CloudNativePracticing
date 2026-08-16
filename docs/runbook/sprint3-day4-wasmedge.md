@@ -403,13 +403,11 @@ $ kubectl -n wasmcloud get workload runwasi-core-module-… -o jsonpath='{.statu
 
 ## 地雷記錄
 
-### 地雷 1:WasmWasi node pool 已退役,但 az CLI 與 feature flag 兩層都還說可以 {#mine-1}
+### 地雷 1:AKS 預覽功能不能靠 `--help` 或 `az feature list` 判斷存不存在 {#mine-1}
 
-**症狀**:`--help` 把 `WasmWasi` 列在 `Allowed values` 裡;`az feature register` 立刻回 `Registered`。真正下指令才拿到 `InvalidWorkloadRuntimeSettingError`。
+**症狀**:`--help` 把某個 workload runtime 列在 `Allowed values`、`az feature register` 也回 `Registered`,真正下指令卻是 `InvalidWorkloadRuntimeSettingError`——功能已退役,但退役只做在 RP 的驗證層,CLI 參數列舉與 `Microsoft.Features` 旗標定義沒跟著下架。
 
-**根因**:退役只做在 RP 的驗證層。az CLI 的參數列舉與 `Microsoft.Features` 的旗標定義都沒有一起下架。
-
-**判斷準則**:**AKS 的預覽功能不能靠 `--help` 或 `az feature list` 判斷存不存在,只能實際送一次請求。** 好消息是這種請求失敗得很快(8 秒)而且不產生資源,**成本是零——「試一下」在這裡是合理的偵察手段,不是浪費。**
+**判斷準則**:**AKS 預覽功能只能實際送一次請求才知道在不在。** 好消息是這種請求失敗得很快(8 秒)又不產生資源,**成本是零——「試一下」在這裡是合理的偵察,不是浪費。**
 
 ### 地雷 2:1.x 的 plugin 路徑被靜默丟棄,而那個鍵還活著所以 grep 得到 {#mine-2}
 
