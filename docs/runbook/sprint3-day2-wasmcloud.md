@@ -1,4 +1,4 @@
-# Day 2: wasmCloud——一條不碰節點的路線,以及它把代價換到了哪裡
+# Day 2: wasmCloud——不改節點的執行模型與它的代價
 
 ![wasmCloud 官方標誌](../assets/logos/wasmcloud-icon-color.svg){ align=right width="88" }
 
@@ -404,7 +404,7 @@ $ kubectl top pods -n wasmcloud          # 元件還沒部署,純 idle
 
 **根因不是 chart 亂寫。** `runtime.resources` 的 250m 是給「host 上真的跑滿元件」的密度準備的,values.yaml 註解也明說要按預期密度調整。**問題出在那份 overlay:`replicas: 3` 是為了在本機 kind 叢集上展示跨 host 排程**,而 README 把它當成通用的 recommended overlay 推薦給所有人。
 
-**失敗形狀比 Day 1 友善**(`Pending` + `Insufficient cpu`,訊息直指原因),但**它會在你下一次多裝一個東西時才炸,不是在裝 wasmCloud 的時候**。這次沒有觸發,只是因為還剩 23m。
+**失敗模式比 Day 1 友善**(`Pending` + `Insufficient cpu`,訊息直指原因),但**它會在你下一次多裝一個東西時才炸,不是在裝 wasmCloud 的時候**。這次沒有觸發,只是因為還剩 23m。
 
 **修法是明確覆寫,不是把 request 拿掉**:`--set runtime.hostGroups[0].replicas=1`(單節點)或加節點。照抄 README 那行指令就必須同時交代節點要幾顆 vCPU。
 
@@ -518,7 +518,7 @@ runtime-operator           ← 只有這一筆
 
 **文件站推薦的 chart 已經不在原始碼樹裡了,而 registry 上的舊 artifact 還在。**
 
-**失敗形狀是最糟的那一種:不會失敗。** `helm install` 會成功、pod 會起來、你會得到一套能用的 wasmCloud——只是它是 v1 世代,CRD 不一樣,而後面幾天要用的 `WorkloadDeployment` 在上面不存在。
+**失敗模式是最糟的那一種:不會失敗。** `helm install` 會成功、pod 會起來、你會得到一套能用的 wasmCloud——只是它是 v1 世代,CRD 不一樣,而後面幾天要用的 `WorkloadDeployment` 在上面不存在。
 
 **判定方法**:裝完先 `kubectl get crd | grep wasmcloud`。看到 `runtime.wasmcloud.dev/v1alpha1` 的 `WorkloadDeployment` 才是 v2;看到 `wadm` 相關的就是 v1。
 

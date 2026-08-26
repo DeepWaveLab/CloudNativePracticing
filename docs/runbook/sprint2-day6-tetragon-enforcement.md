@@ -1,4 +1,4 @@
-# Day 6: 從偵測到攔截——SIGKILL 擋得住什麼,擋不住什麼
+# Day 6: 從偵測到攔截——SIGKILL、Override 與擋得住的邊界
 
 ![Tetragon 官方標誌](../assets/logos/tetragon-icon-color.svg){ align=right width="95" }
 
@@ -612,7 +612,7 @@ $ kubectl -n tetragon exec <tetragon-pod> -c tetragon -- timeout 22 tetra geteve
 
 ### 地雷 8:BestEffort 的 agent,現在身上掛著會殺行程的策略 {#mine-8}
 
-[Day 5 地雷 8](sprint2-day5-tetragon-basics.md#mine-8) 說過 chart 的 agent 容器是 `resources: {}`、沒有 `priorityClassName`,所以是 BestEffort、priority 0。當時描述的最糟失效形狀是「BPF 程式 pinned 在核心裡照跑、沒有人讀 ring buffer,錢照付、事件全丟、健康檢查不會叫」。
+[Day 5 地雷 8](sprint2-day5-tetragon-basics.md#mine-8) 說過 chart 的 agent 容器是 `resources: {}`、沒有 `priorityClassName`,所以是 BestEffort、priority 0。當時描述的最糟失效模式是「BPF 程式 pinned 在核心裡照跑、沒有人讀 ring buffer,錢照付、事件全丟、健康檢查不會叫」。
 
 **攔截情境下同一個失效變成:核心裡的程式繼續殺行程,而沒有人在讀事件。** 誤殺照樣發生,紀錄一筆都沒有。
 

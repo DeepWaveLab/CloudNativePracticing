@@ -1,4 +1,4 @@
-# Day 2: Istio ambient——服務之間自動 mTLS,再對一個服務設斷路
+# Day 2: Istio ambient——服務間 mTLS 與斷路
 
 ![Istio 官方標誌](../assets/logos/istio-icon-color.svg){ align=right width="72" }
 

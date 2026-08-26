@@ -1,4 +1,4 @@
-# Day 4: WasmEdge——第 5 步才動到節點,而「同一支程式」不存在
+# Day 4: WasmEdge 與 runwasi——shim 安裝、containerd 設定與 wasm 格式
 
 ![WasmEdge 官方標誌](../assets/logos/wasmedge-icon-color.svg){ align=right width="82" }
 
@@ -469,7 +469,7 @@ containerd-shim-wasmtime/src/tests.rs:333:     config.wasm_component_model(true)
 
 **為什麼要記**:**「WasmEdge 支援 component model」跟「runwasi 的 wasmedge shim 支援 component model」是兩回事。** 前者是執行期的能力,後者是 shim 有沒有把它打開。**要 component + Kubernetes,今天可用的組合是 wasmtime 的 shim。**
 
-這跟 [Day 3 地雷 1](sprint3-day3-wasmcloud-distributed.md#mine-1) 是同一種形狀:**功能在原始碼裡,但沒有編進你實際跑的那個二進位檔。**
+這跟 [Day 3 地雷 1](sprint3-day3-wasmcloud-distributed.md#mine-1) 是同一種情況:**功能在原始碼裡,但沒有編進你實際跑的那個二進位檔。**
 
 ### 地雷 6:wasmCloud 收到不是 component 的映像時完全靜默,只會無限重試 {#mine-6}
 
@@ -487,7 +487,7 @@ containerd-shim-wasmtime/src/tests.rs:333:     config.wasm_component_model(true)
 - **containerd 重啟比想像中溫和,但要自己量。** 21 個 pod 的 `RESTARTS` 逐行 diff 相同、節點沒掉出 `Ready`——因為 shim 是獨立行程、unit 檔是 `KillMode=process`。**這是可以量的,不要用猜的。**
 - **改節點之前先在副本上 `config dump`。** 零風險、不用重啟,而且會當場告訴你那段設定會不會被靜默丟掉。這條路線上這個習慣直接省下一次「改完重啟才發現沒生效」。
 - **失敗訊息會分層,而第一層通常在說謊。** `no command specified` 聽起來像參數沒給對,補上之後才看得到真正的 `Bytecode offset: 0x00000004`。**把失敗往前推一層,比在第一層猜原因有效。**
-- **「這個專案支援 X」跟「你正在跑的那個二進位檔支援 X」是兩回事。** 今天的 wasmedge shim 與 Day 3 的 wasmCloud provider 是同一種形狀:功能在原始碼裡,沒編進成品。**判斷一個能力能不能用,要看你手上那個檔案,不是看 repo。**
+- **「這個專案支援 X」跟「你正在跑的那個二進位檔支援 X」是兩回事。** 今天的 wasmedge shim 與 Day 3 的 wasmCloud provider 是同一種情況:功能在原始碼裡,沒編進成品。**判斷一個能力能不能用,要看你手上那個檔案,不是看 repo。**
 - **wasm 不是一種格式,是兩種。** core module 與 component 差在第 5 個位元組,而生態系目前是照這條線分裂的。**「把它編成 wasm」不是一個明確的指令**,要先問編給誰。
 
 ## 延伸閱讀

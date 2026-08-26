@@ -1,4 +1,4 @@
-# Day 4: Istio 與 Cilium 橫向對比——eBPF 贏在 L4,Istio 贏在 L7 與身分
+# Day 4: Istio 與 Cilium 橫向對比——加密、身分、L7 與資源
 
 ![Istio 官方標誌](../assets/logos/istio-icon-color.svg){ align=right width="64" }
 ![Cilium 官方標誌](../assets/logos/cilium-icon-color.svg){ align=right width="64" }
@@ -8,9 +8,9 @@
 !!! abstract "你在課程的哪裡"
     - **Day 0–3**:mesh 的三層地圖、Envoy Gateway 的 north-south 入口與 HTTP/3、Istio ambient 的 east-west mTLS 與斷路、Cilium mesh 的 WireGuard 加密與 L7 policy。
     - **今天**:不動手。把 Istio 與 Cilium 的加密/身分、L7、資源、延遲、節點侵入擺成一張決策表,每格標實測/查證/推論。為了兩邊都是實測,量 Istio 側時把 Day 3 拆掉的 ambient 暫時裝回、量完卸載還原。
-    - **接下來**:Part A(服務網格)到此收尾;Day 5 起 Part B 換一個威脅模型——當節點本身不可信,怎麼讓祕密只在硬體 TEE 裡解開。
+    - **接下來**:Part 1(服務網格)到此收尾;Day 5 起 Part 2 換一個威脅模型——當節點本身不可信,怎麼讓祕密只在硬體 TEE 裡解開。
 
-## 走過的路(Part A)
+## 走過的路(Part 1)
 
 ```mermaid
 flowchart TB
@@ -81,7 +81,7 @@ Cilium 當 CNI 是本課的固定前提(BYOCNI 上游 Cilium)。在這之上,eas
 
 ## 主題:兩軸不對稱,不是誰取代誰
 
-把整個 Part A 收成一句:**eBPF(Cilium)把 L3/L4 與傳輸加密做到又輕又快,但成熟的 L7 traffic policy 與 GA 的工作負載身分,Istio 仍領先。** 這兩件事落在不同層,量出來的數字互相印證——
+把整個 Part 1 收成一句:**eBPF(Cilium)把 L3/L4 與傳輸加密做到又輕又快,但成熟的 L7 traffic policy 與 GA 的工作負載身分,Istio 仍領先。** 這兩件事落在不同層,量出來的數字互相印證——
 
 - L4 那一軸:Cilium 延遲低 0.8ms、加密在核心、是 CNI 本身不用另外疊。**這一軸 eBPF 贏。**
 - L7 與身分那一軸:Istio 的斷路是成熟的 `DestinationRule`([Day 2](sprint4-day2-istio-ambient.md) 實測到 50 並發壓出斷路)、身分是 GA;Cilium 的斷路等價物是低階 `CiliumEnvoyConfig`、身分還在 beta([Day 3](sprint4-day3-cilium-mesh.md) 的 SPIRE 起不來)。**這一軸 Istio 贏。**
@@ -111,7 +111,7 @@ Cilium 當 CNI 是本課的固定前提(BYOCNI 上游 Cilium)。在這之上,eas
 
 ## 下一步
 
-Part A 到這裡收尾:north-south 走 Envoy Gateway、east-west 在 Istio 與 Cilium 之間照軸選型——基礎設施接管了傳輸加密與 L7 安全。但這一整套有一個沒被質疑的前提:**節點本身是可信的**。所有加密都在節點的資料面上做、金鑰在節點的記憶體裡、root 進得了節點就看得到明文。Day 5 起的 Part B 換掉這個前提:當節點與雲平台都不該被信任時,怎麼讓祕密只在硬體 TEE 裡解開——這是機密運算要回答的問題。
+Part 1 到這裡收尾:north-south 走 Envoy Gateway、east-west 在 Istio 與 Cilium 之間照軸選型——基礎設施接管了傳輸加密與 L7 安全。但這一整套有一個沒被質疑的前提:**節點本身是可信的**。所有加密都在節點的資料面上做、金鑰在節點的記憶體裡、root 進得了節點就看得到明文。[Day 5](sprint4-day5-confidential-concepts.md) 起的 Part 2 換掉這個前提:當節點與雲平台都不該被信任時,怎麼讓祕密只在硬體 TEE 裡解開——這是機密運算要回答的問題。
 
 ---
 

@@ -1,4 +1,4 @@
-# Day 7: 換掉資料平面——BYOCNI 叢集、Cilium,與一個裝了但沒在用的 kube-proxy
+# Day 7: 換掉資料平面——BYOCNI、Cilium 與 kube-proxy replacement
 
 ![Cilium 官方標誌](../assets/logos/cilium-icon-color.svg){ align=right width="95" }
 

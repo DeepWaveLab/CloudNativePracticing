@@ -1,4 +1,4 @@
-# Day 9: 綜合——三條路線的決策表,每一格帶著它是哪天量到的
+# Day 9: Sprint 3 總結——三條 wasm 路線的決策表
 
 ![WebAssembly 官方標誌](../assets/logos/webassembly-icon-color.svg){ align=right width="95" }
 

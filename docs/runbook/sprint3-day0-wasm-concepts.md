@@ -1,4 +1,4 @@
-# Day 0: wasm 是什麼,以及為什麼它會出現在 Kubernetes 上
+# Day 0: wasm 是什麼——編譯目標、能力沙箱與在 Kubernetes 的執行路徑
 
 ![WebAssembly 官方標誌](../assets/logos/webassembly-icon-color.svg){ align=right width="95" }
 

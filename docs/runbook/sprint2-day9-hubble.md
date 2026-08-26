@@ -1,4 +1,4 @@
-# Day 9: Hubble——它看得見什麼,以及它看不見的那三件事
+# Day 9: Hubble——流量觀測與它的三個盲點
 
 ![Cilium 官方標誌](../assets/logos/cilium-icon-color.svg){ align=right width="95" }
 

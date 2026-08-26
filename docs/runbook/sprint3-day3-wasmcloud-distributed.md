@@ -1,4 +1,4 @@
-# Day 3: 原訂驗收在這個版本上表達不出來,以及改驗什麼
+# Day 3: wasmCloud 分散式模型——能力設定、跨節點排程與 spot 節點
 
 ![wasmCloud 官方標誌](../assets/logos/wasmcloud-icon-color.svg){ align=right width="88" }
 
@@ -449,7 +449,7 @@ $ curl http://blobby.wasmcloud.svc.cluster.local/gateb.txt
 
 **追查順序**:host pod log 找 `err=ErrorCode::InternalError(Some("unauthorized"))` → 把字串 grep 原始碼 → 找到出自哪一個 plugin(**順帶確認實際被載入的是哪一個實作**)→ 讀該 plugin 的 `on_workload_bind` 拿到鍵名。
 
-**跟 Day 2 [地雷 4](sprint3-day2-wasmcloud.md#mine-4) 是同一種形狀:wasmCloud 的錯誤只出現在 host pod 的 log,`kubectl` 那一側永遠是綠的。** 差別是那一顆給 404(虛擬主機比對失敗),這一顆給 500(能力授權失敗)——**兩種代碼分得開,值得記成反射動作。**
+**跟 Day 2 [地雷 4](sprint3-day2-wasmcloud.md#mine-4) 是同一種情況:wasmCloud 的錯誤只出現在 host pod 的 log,`kubectl` 那一側永遠是綠的。** 差別是那一顆給 404(虛擬主機比對失敗),這一顆給 500(能力授權失敗)——**兩種代碼分得開,值得記成反射動作。**
 
 ### 地雷 4:`kubectl scale` 過的 Deployment 會讓下一次 `helm upgrade` 直接失敗 {#mine-4}
 

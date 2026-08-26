@@ -1,4 +1,4 @@
-# Day 8: 拆得掉嗎——能用的 SpinKube,一定拆不乾淨
+# Day 8: SpinKube 拆除——可逆性驗收與節點殘留
 
 ![SpinKube 官方標誌](../assets/logos/spinkube-icon-color.svg){ align=right width="88" }
 
@@ -100,7 +100,7 @@ return true, nil                                           // hardcoded
 
 **於是它把一份逐字相同的檔案寫回磁碟、重啟 containerd、回報成功。** 這是[地雷 4](#mine-4)。
 
-### 殘留的後果:第三種失敗形狀
+### 殘留的後果:第三種失敗模式
 
 二進位檔**被刪掉了**(檔案清除走 `rcm-lock.json` 的絕對路徑,跟設定內容無關——兩條路徑、兩種成敗判準),設定卻留著。**節點繼續宣告 `spin-v2` 這個 handler,而它指向的檔案已經不存在。** 丟一顆 pod:
 
@@ -110,7 +110,7 @@ Warning  FailedCreatePodSandBox  … failed to start shim: failed to resolve run
   invalid custom binary path: stat /opt/rcm/bin/containerd-shim-spin-v2: no such file or directory
 ```
 
-到這裡,三條路線一共收齊了**三種失敗形狀**:
+到這裡,三條路線一共收齊了**三種失敗模式**:
 
 | 形狀 | 條件 | 樣子 |
 |---|---|---|
@@ -218,7 +218,7 @@ day8-final 對 day8-s0(同一顆 VM、七份全比):
 
 **根因**:守衛與比對用的不是同一個字串——守衛 `Contains("spin-v2")` 通過,比對用 `generateConfig` 產出的整段(1.x domain)對不上磁碟(2.x domain),`ReplaceAll` 零置換;**回傳值寫死 `true`**,上層跳過 `nothing changed` 分支,重啟、回報成功。
 
-**後果**:節點宣告一個指向已刪檔案的 handler——第三種失敗形狀,三個查詢介面都說沒問題。
+**後果**:節點宣告一個指向已刪檔案的 handler——第三種失敗模式,三個查詢介面都說沒問題。
 
 **判斷準則**:**解除安裝之後不要相信 Job 的退出碼。量兩件事:`containerd config dump | grep -c <handler>` 必須是 0,`runtime_type` 指向的路徑必須不存在。** 只有前者是 3、後者不存在,就是這顆雷。
 

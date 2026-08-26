@@ -1,6 +1,6 @@
 # Sprint 4 · 服務網格與機密運算
 
-基礎設施接管應用層的兩件事:一是服務之間的傳輸與 L7 安全(服務網格),二是工作負載自己的記憶體機密性(機密運算)。這門課在 AKS 上把這兩塊各實測一輪,寫成可照抄的 runbook。**Part A(服務網格,Day 0–4)已完成**:Envoy Gateway 的 north-south 入口與 HTTP/3、Istio ambient 與 Cilium 兩條 east-west mesh 照軸選型。**Part B(機密運算,Day 5–9)規劃中**:Kata Pod Sandboxing 到 Confidential Containers,讓祕密只在硬體 TEE 裡解開。每一章的指令與輸出都來自真實跑過的驗證紀錄。
+基礎設施接管應用層的兩件事:一是服務之間的傳輸與 L7 安全(服務網格),二是工作負載自己的記憶體機密性(機密運算)。這門課在 AKS 上把這兩塊各實測一輪,寫成可照抄的 runbook。**Part 1(服務網格,Day 0–4)已完成**:Envoy Gateway 的 north-south 入口與 HTTP/3、Istio ambient 與 Cilium 兩條 east-west mesh 照軸選型。**Part 2(機密運算,Day 5–9)已完成**:Kata 沙箱、SEV-SNP 的 kata-cc、遠端證明讓祕密只在證明過的 pod 裡解開(改一個 env 就拿不到)。每一章的指令與輸出都來自真實跑過的驗證紀錄。
 
 <div style="text-align: center;" markdown>
 
@@ -10,13 +10,13 @@
 &nbsp;&nbsp;&nbsp;&nbsp;
 [![Cilium](../assets/logos/cilium-icon-color.svg){ width="76" }](https://cilium.io/)
 
-*Part A 的三套:Envoy Gateway(north-south 入口)、Istio ambient 與 Cilium(兩條 east-west mesh)。*
+*Part 1 的三套:Envoy Gateway(north-south 入口)、Istio ambient 與 Cilium(兩條 east-west mesh)。*
 
 </div>
 
-整季走同一座 AKS 叢集,BYOCNI 上游 Cilium 當 CNI。Part A 在一般節點池上跑、接續 Sprint 2 的 eBPF;Part B 換一個威脅模型——當節點與雲平台都不該被信任時,加密與金鑰不能再放在節點的記憶體裡。
+整季走同一座 AKS 叢集,BYOCNI 上游 Cilium 當 CNI。Part 1 在一般節點池上跑、接續 Sprint 2 的 eBPF;Part 2 換一個威脅模型——當節點與雲平台都不該被信任時,加密與金鑰不能再放在節點的記憶體裡。
 
-## Part A · 服務網格(Day 0–4,已完成)
+## Part 1 · 服務網格(Day 0–4,已完成)
 
 <div class="grid cards" markdown>
 
@@ -63,21 +63,55 @@
 
 </div>
 
-## Part B · 機密運算(Day 5–9,規劃中)
+## Part 2 · 機密運算(Day 5–9,已完成)
 
-Confidential Containers 需要特定的 TEE VM(DCasv5 / DCadsv5),另起環境。逐日主題:
+Confidential Containers 需要 SEV-SNP 的 `_cc_v5` 機密硬體,而東京沒賣、只能換區另建叢集——這個現實本身就是 Part 2 的第一課。
 
-| Day | 主題 |
-|---|---|
-| 5 | 機密運算防的是誰;Kata↔CoCo 的治理邊界 |
-| 6 | Kata Pod Sandboxing(GA):又是一次 RuntimeClass |
-| 7 | 從 Sandboxing 到 Confidential:kata-cc |
-| 8 | 硬體證明:讓祕密只在 TEE 裡解開 |
-| 9 | AKS kata-cc vs 上游 CoCo;可逆性、成本、生態評估 |
+<div class="grid cards" markdown>
+
+-   ![Kubernetes](../assets/logos/kubernetes-icon-color.svg){ width="44" }
+
+    **Day 5 · [機密運算防的是誰](../runbook/sprint4-day5-confidential-concepts.md)**
+
+    ---
+
+    機密運算保護 guest 不被主機看,跟一般 Kata 沙箱「保護主機不被 guest 害」方向相反;而它跟 eBPF「從主機看清楚工作負載」的立場也正好相反。
+
+-   ![Kubernetes](../assets/logos/kubernetes-icon-color.svg){ width="44" }
+
+    **Day 6 · [Kata Pod Sandboxing](../runbook/sprint4-day6-kata-sandboxing.md)**
+
+    ---
+
+    pod 跑進獨立 kernel 的輕量 VM(`.mshv`),又是那條 RuntimeClass → handler → shim 鏈;自管 Cilium 接住 AzureLinux Kata 節點。
+
+-   ![Kubernetes](../assets/logos/kubernetes-icon-color.svg){ width="44" }
+
+    **Day 7 · [kata-cc:SEV-SNP 機密硬體](../runbook/sprint4-day7-katacc.md)**
+
+    ---
+
+    pod 跑在真 SEV-SNP 硬體上,而它挑區域、挑池角色、要安全政策——五顆地雷,外加各家雲的機密硬體對照。
+
+-   ![Kubernetes](../assets/logos/kubernetes-icon-color.svg){ width="44" }
+
+    **Day 8 · [遠端證明:讓祕密只在 TEE 裡解開](../runbook/sprint4-day8-attestation.md)**
+
+    ---
+
+    符合政策的 pod 拿得到金鑰、改一個 env → measurement 變 → 被拒。機密運算真正重要的:證明先行,拿祕密在後。
+
+-   ![Kubernetes](../assets/logos/kubernetes-icon-color.svg){ width="44" }
+
+    **Day 9 · [總結與決策表](../runbook/sprint4-day9-decision-matrix.md)**
+
+    ---
+
+    可逆性、成本、AKS kata-cc vs 上游 CoCo 決策表;收束兩個 Part 對「主機該不該看得到工作負載」的相反立場。
 
 ## 這個 sprint 的貫穿問題
 
-Part A 的每一套加密,金鑰都在節點的記憶體裡、root 進得了節點就看得到明文。Part B 換掉這個前提:當節點本身不可信,加密要往硬體挪。兩個 Part 合起來回答一件事——基礎設施能替應用扛下多少安全責任,以及扛不下的那部分長什麼樣。
+Part 1 的每一套加密,金鑰都在節點的記憶體裡、root 進得了節點就看得到明文。Part 2 換掉這個前提:當節點本身不可信,加密要往硬體挪。兩個 Part 合起來回答一件事——基礎設施能替應用扛下多少安全責任,以及扛不下的那部分長什麼樣。
 
 從 [Day 0](../runbook/sprint4-day0-mesh-concepts.md) 開始。
 

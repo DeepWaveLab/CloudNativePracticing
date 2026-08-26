@@ -1,4 +1,4 @@
-# Day 1: bpftrace 三支經典工具與第一支自寫的 `.bt` 腳本——語法結構、各工具的限制,與追出目錄的寫入者
+# Day 1: bpftrace——三支經典工具、`.bt` 語法結構與各工具的限制
 
 ![bpftrace 官方標誌](../assets/logos/bpftrace-logo.svg#only-light){ align=right width="150" }
 ![bpftrace 官方標誌](../assets/logos/bpftrace-logo-dark.svg#only-dark){ align=right width="150" }

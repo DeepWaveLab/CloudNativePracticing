@@ -1,4 +1,4 @@
-# Day 6: SpinKube(上)——operator 把節點改好了,只是改在一個 containerd 不看的地方
+# Day 6: SpinKube(上)——runtime-class-manager 佈建 shim 與節點側設定
 
 ![SpinKube 官方標誌](../assets/logos/spinkube-icon-color.svg){ align=right width="88" }
 

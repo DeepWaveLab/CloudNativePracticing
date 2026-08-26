@@ -1,4 +1,4 @@
-# Day 3: 用 Cilium 做 east-west mesh——傳輸加密與 L7 落在 eBPF,身分綁定還在 beta
+# Day 3: Cilium mesh——WireGuard 傳輸加密、L7 政策與 mutual auth
 
 ![Cilium 官方標誌](../assets/logos/cilium-icon-color.svg){ align=right width="76" }
 

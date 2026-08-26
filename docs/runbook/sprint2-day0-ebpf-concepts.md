@@ -1,4 +1,4 @@
-# Day 0: eBPF 是什麼——程式進入核心的路徑、掛載點種類,以及核心如何把關
+# Day 0: eBPF 是什麼——載入路徑、掛載點種類與 verifier 把關
 
 ![eBPF 官方標誌](../assets/logos/ebpf-logo.svg#only-light){ align=right width="130" }
 ![eBPF 官方標誌](../assets/logos/ebpf-logo-dark.svg#only-dark){ align=right width="130" }

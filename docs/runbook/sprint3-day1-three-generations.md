@@ -1,4 +1,4 @@
-# Day 1: RuntimeClass 的七層實測,以及兩條已經退場的路
+# Day 1: RuntimeClass 七層追蹤鏈——Krustlet 與 WASI node pool 的退場
 
 ![Kubernetes 官方標誌](../assets/logos/kubernetes-icon-color.svg){ align=right width="88" }
 

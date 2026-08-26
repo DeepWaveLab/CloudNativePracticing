@@ -47,11 +47,11 @@
 
     途中有兩個量測結果跟宣傳方向相反,其中一條實測結論:**能用的 SpinKube,一定拆不乾淨。**
 
--   **Sprint 4 · [服務網格與機密運算](sprints/sprint4.md)** — 🚧 進行中
+-   **Sprint 4 · [服務網格與機密運算](sprints/sprint4.md)** — ✅ 已完結(10 章 · 11 顆地雷)
 
     ---
 
-    Envoy Gateway 取代 Ingress、Istio ambient 與 Cilium 兩條 east-west mesh 照軸選型,再到 Kata 與 Confidential Containers 的機密運算。Part A(服務網格)Day 0–4 已完成:eBPF 贏在 L4,Istio 贏在 L7 與身分。Part B(機密運算)規劃中。
+    Envoy Gateway 取代 Ingress、Istio ambient 與 Cilium 兩條 east-west mesh 照軸選型(eBPF 贏在 L4,Istio 贏在 L7 與身分);Part 2 把記憶體邊界交給硬體——Kata 沙箱、SEV-SNP 的 kata-cc、遠端證明讓祕密只在證明過的 pod 裡解開(改一個 env 就拿不到)。兩個 Part 立場正相反:**eBPF 讓主機看清楚工作負載,CoCo 讓主機讀不到記憶體。**
 
 -   **Sprint 5 · 遊戲伺服器平台** — 📅 規劃中
 

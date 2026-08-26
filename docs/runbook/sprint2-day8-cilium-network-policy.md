@@ -1,4 +1,4 @@
-# Day 8: CiliumNetworkPolicy——從命名空間隔離寫到 HTTP 方法
+# Day 8: CiliumNetworkPolicy——命名空間隔離、L3/L4 埠限制與 L7 方法
 
 ![Cilium 官方標誌](../assets/logos/cilium-icon-color.svg){ align=right width="95" }
 
@@ -172,7 +172,7 @@ xx drop (Policy denied) flow … to endpoint 680, file bpf_lxc.c:2410,
         - ports: [{port: "8080", protocol: TCP}]   # the endpoint's port, not the Service's
 ```
 
-**在寬規則還沒移掉之前,這條窄規則一點作用都沒有**——那是[地雷 5](#mine-5),而且是網路政策的頭號事故形狀。移掉之後:
+**在寬規則還沒移掉之前,這條窄規則一點作用都沒有**——那是[地雷 5](#mine-5),而且是網路政策的頭號事故來源。移掉之後:
 
 ```console
 client → :80(8080)        PORT-8080          ✅ 放行的埠通
@@ -245,7 +245,7 @@ Endpoint  Source  FQDN                TTL   IPs
 2272      lookup  www.google.com.     30    <addr-d>,…
 ```
 
-**Cilium 不是去解析 `example.com` 存成靜態 IP,它是站在查詢路徑上等答案。** 所以沒有那條 `rules.dns` 就沒有 proxy、沒有 proxy 就沒人看見解析、`toFQDNs` 永遠是空清單——而失敗形狀是「政策看起來對,流量全被擋」。
+**Cilium 不是去解析 `example.com` 存成靜態 IP,它是站在查詢路徑上等答案。** 所以沒有那條 `rules.dns` 就沒有 proxy、沒有 proxy 就沒人看見解析、`toFQDNs` 永遠是空清單——而失敗模式是「政策看起來對,流量全被擋」。
 
 那份快取裡有兩個**連線被擋掉**的域名,見[地雷 6](#mine-6)。
 
@@ -507,7 +507,7 @@ FQDN 快取裡有 `ifconfig.me` 和 `www.google.com`——**這兩個目標的�
 
 **後果分兩面:**
 
-- **正面**:失敗形狀是「解析成功、連線逾時」,比「解析失敗」好追查。
+- **正面**:失敗模式是「解析成功、連線逾時」,比「解析失敗」好追查。
 - **負面**:**DNS 這條外洩通道沒有被關上。** 一顆被 FQDN 政策鎖住的 pod 仍然可以把資料編碼進域名查出去,而 Cilium 的 DNS proxy 會忠實轉發**並且寫進快取**。
 
 要關掉這條路得把 `matchPattern` 收成明確清單,**而那正好跟「FQDN 政策是為了不用手工維護清單」的初衷打架**。這跟 [Day 4 地雷 5](sprint2-day4-falco-custom-rules.md#mine-5) 的取捨同型:**把誤報調到 0 的那一步,同時把外洩路徑讓了出去。**

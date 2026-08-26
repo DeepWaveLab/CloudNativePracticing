@@ -1,4 +1,4 @@
-# Day 4: 自己寫規則,然後為誤報付帳
+# Day 4: Falco 自訂規則與誤報調校
 
 ![Falco 官方標誌](../assets/logos/falco-icon-color.svg){ align=right width="95" }
 
@@ -761,7 +761,7 @@ priority 一樣是 0,跟 [Day 3 地雷 1](sprint2-day3-falco-basics.md#mine-1) �
 
 Falco 到這裡告一段落:預設規則讀過了、兩個洞補起來了、誤報的帳算過了、告警也送得出節點。它的形狀很清楚——**在使用者空間比對規則,報給人看**。
 
-[Day 5](sprint2-day5-tetragon-basics.md) 換 Tetragon 上場,它的形狀不一樣:規則寫成 Kubernetes 的自訂資源,而且**過濾可以留在核心裡**——這讓它多出一件 Falco 做不到的事。今天寫的兩條規則會留在叢集上當基準,Day 5 之後的對照都以「25 條預設加 2 條自訂」為準。
+[Day 5](sprint2-day5-tetragon-basics.md) 換 Tetragon 上場,它的做法不一樣:規則寫成 Kubernetes 的自訂資源,而且**過濾可以留在核心裡**——這讓它多出一件 Falco 做不到的事。今天寫的兩條規則會留在叢集上當基準,Day 5 之後的對照都以「25 條預設加 2 條自訂」為準。
 
 ---
 

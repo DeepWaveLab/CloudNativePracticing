@@ -100,7 +100,7 @@ kubernetes_feature_enabled{name="DRASchedulerFilterTimeout",stage="BETA"} 1
 
 規則一目瞭然:beta 的一律 1、alpha 的一律 0。這張表直接決定今天能示範什麼——`gpuPartitions` 要 `DRAPartitionableDevices`、裝置分食容量要 `DRAConsumableCapacity`、用 `resources.limits` 要裝置要 `DRAExtendedResource`,三個都是 0,全部用不上;留下能用的是 `DRAResourceClaimDeviceStatus`(把裝置實況寫回 claim status)、`DRAPrioritizedList` 與 `DRAAdminAccess`。
 
-**這一步的順序不能顛倒。**先裝好 driver 再回頭想示範怎麼配,會發現想做的多半做不了,而失敗的形狀是「設定寫了但什麼都沒發生」,查起來很費工([地雷 1](#mine-1))。
+**這一步的順序不能顛倒。**先裝好 driver 再回頭想示範怎麼配,會發現想做的多半做不了,而失敗的樣子是「設定寫了但什麼都沒發生」,查起來很費工([地雷 1](#mine-1))。
 
 ### 步驟 3:裝 driver,讀出第一份 ResourceSlice
 
@@ -200,7 +200,7 @@ spec:
 "driverVersion": { VersionValue: ptr.To("1.0.0") },              // constant
 ```
 
-把 chart 的旋鈕逐項對上步驟 2 那張 gate 表,能用與不能用切得很乾淨。可用的是 `numDevices`(每節點幾顆)、`deviceProfile`(裝置形狀,但 `net`／`cpu` 依賴 consumable capacity)、`driverName`(換 driver 名等於換屬性網域與 DeviceClass 名)、`gpuDeviceStatus`(把裝置實況寫回 claim status);不可用的三個各卡在一個 alpha gate 上:
+把 chart 的旋鈕逐項對上步驟 2 那張 gate 表,能用與不能用切得很乾淨。可用的是 `numDevices`(每節點幾顆)、`deviceProfile`(裝置屬性,但 `net`／`cpu` 依賴 consumable capacity)、`driverName`(換 driver 名等於換屬性網域與 DeviceClass 名)、`gpuDeviceStatus`(把裝置實況寫回 claim status);不可用的三個各卡在一個 alpha gate 上:
 
 | 旋鈕 | 效果 | 卡在哪個 gate |
 |---|---|---|

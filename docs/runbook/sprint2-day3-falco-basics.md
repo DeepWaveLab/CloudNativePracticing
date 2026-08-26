@@ -1,4 +1,4 @@
-# Day 3: 裝上 Falco,讀懂它預設帶的規則
+# Day 3: 安裝 Falco——預設規則與規則語言結構
 
 ![Falco 官方標誌](../assets/logos/falco-icon-color.svg){ align=right width="95" }
 
@@ -180,7 +180,7 @@ $ kubectl -n falco exec <falco-pod> -c falco -- ls -la /etc/falco/
 
 優先級分布是 CRITICAL 3、WARNING 11、NOTICE 7、INFO 1。
 
-25 這個數字為什麼重要,見[地雷 2](#mine-2)。更值得先看的是這 25 條的**取捨形狀**:全部都在描述**已知的攻擊手法**——載入核心模組、`release_agent` 容器逃逸、`memfd_create` 無檔案執行、翻找私鑰、清日誌。沒有一條在管「這個容器今天做了以前沒做過的事」。那正是 Day 2 手工基線在做的事,而 Falco 預設不做。步驟 5 會把這件事量出來。
+25 這個數字為什麼重要,見[地雷 2](#mine-2)。更值得先看的是這 25 條的**取捨**:全部都在描述**已知的攻擊手法**——載入核心模組、`release_agent` 容器逃逸、`memfd_create` 無檔案執行、翻找私鑰、清日誌。沒有一條在管「這個容器今天做了以前沒做過的事」。那正是 Day 2 手工基線在做的事,而 Falco 預設不做。步驟 5 會把這件事量出來。
 
 ### 完整解剖一條規則
 
@@ -542,7 +542,7 @@ csi-azuredisk-node-hvn8c    system-node-critical   2000001000
 
 priority 0 比每一個系統元件都低,在滿載的節點上它是搶佔演算法第一個挑中的犧牲者。
 
-**這次的破洞是 55 秒**(搶佔它的那顆 pod 跑完就走)。但要看清楚這個失敗的形狀:**破洞剛好開在整座叢集最忙、最該被監控的那顆節點上**,而 `kubectl get ds falco` 在事發當下顯示 `DESIRED 3 CURRENT 3 READY 3`——DaemonSet 的健康指標不會告訴你有一顆節點斷了監控。
+**這次的破洞是 55 秒**(搶佔它的那顆 pod 跑完就走)。但要看清楚這個失敗的樣子:**破洞剛好開在整座叢集最忙、最該被監控的那顆節點上**,而 `kubectl get ds falco` 在事發當下顯示 `DESIRED 3 CURRENT 3 READY 3`——DaemonSet 的健康指標不會告訴你有一顆節點斷了監控。
 
 **修法**沒有漂亮的:提高 priority 不會變出 CPU,只是換一個受害者——在這座叢集上把 Falco 設成 `system-node-critical`,代價是踢掉 KAI 或 HAMi 的元件。誠實的結論是**這顆節點的規格不夠跑 Falco**。「每個節點多 100m CPU、512Mi 記憶體」聽起來很少,但在 2 vCPU 的節點上那是全部容量的 5%,而且是保留量不是用量([地雷 7](#mine-7))。
 

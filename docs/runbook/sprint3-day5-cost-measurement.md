@@ -1,4 +1,4 @@
-# Day 5: 量成本——冷啟動的差異量不出來,而記憶體的差異方向跟宣傳相反
+# Day 5: 三條路線的成本量測——冷啟動、記憶體與映像大小
 
 ![WebAssembly 官方標誌](../assets/logos/webassembly-icon-color.svg){ align=right width="95" }
 

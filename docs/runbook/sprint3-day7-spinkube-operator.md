@@ -1,4 +1,4 @@
-# Day 7: SpinKube(下)——13 個月沒發版的 operator 裝得起來,而它其實不是執行機制
+# Day 7: SpinKube(下)——spin-operator、SpinApp 與不經 operator 的執行
 
 ![SpinKube 官方標誌](../assets/logos/spinkube-icon-color.svg){ align=right width="88" }
 
@@ -69,7 +69,7 @@ spinapp-pending-shape   0/1     Pending   20s
 Warning  FailedScheduling  0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector.
 ```
 
-**是 Pending,不是 ContainerCreating。** [Day 1 地雷 3](sprint3-day1-three-generations.md#mine-3) 預告的兩種失敗形狀,現在兩種都有實例了:
+**是 Pending,不是 ContainerCreating。** [Day 1 地雷 3](sprint3-day1-three-generations.md#mine-3) 預告的兩種失敗模式,現在兩種都有實例了:
 
 | | 沒寫 `scheduling` | 寫了 `scheduling.nodeSelector` |
 |---|---|---|

@@ -127,7 +127,7 @@ own-b-gpu-j5qrn   -       reservedFor=-
 
 三個都要補一點東西才會動:KAI 要清空 RuntimeClass 預設值、補上 VRAM 節點標籤([Day 4 地雷 1](sprint1-day4-hami-kai-integration.md#mine-1)、[地雷 2](sprint1-day4-hami-kai-integration.md#mine-2));HAMi 的節點標籤必須下在 pool 層級,而且裝之前要先驗映像 tag 存在(Day 3);DRA 要自己補 GPU 節點標籤([Day 7 地雷 2](sprint1-day7-dra-aks-real-gpu.md#mine-2))。差別在最後一列:前兩者補完就沒事,DRA 的限制是平台給的——alpha 開關全關,新舊寫法之間沒有並行的橋([Day 7 地雷 3](sprint1-day7-dra-aks-real-gpu.md#mine-3)),拓樸屬性在 Azure 也拿不到([地雷 4](sprint1-day7-dra-aks-real-gpu.md#mine-4)),補不了。
 
-### 本課驗到的共存形狀
+### 本課驗到的共存做法
 
 「能不能一起裝」的答案取決於範圍是節點還是叢集。下表只列實際跑過的組合:
 

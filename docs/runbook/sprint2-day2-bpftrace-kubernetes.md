@@ -1,4 +1,4 @@
-# Day 2: 把核心事件接回 Kubernetes——cgroup id 到 pod 名字的對應鏈,與只追一顆 pod 的過濾器
+# Day 2: 把核心事件接回 Kubernetes——cgroup id 對 pod 名字的對應鏈與 pod 過濾器
 
 ![Kubernetes 官方標誌](../assets/logos/kubernetes-icon-color.svg){ align=right width="95" }
 

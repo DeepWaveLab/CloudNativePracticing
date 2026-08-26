@@ -1,4 +1,4 @@
-# Day 1: Envoy Gateway 取代 Ingress Nginx——順便把 HTTP/3 開起來
+# Day 1: Envoy Gateway 取代 Ingress——Gateway API 與 HTTP/3
 
 ![Envoy 官方標誌](../assets/logos/envoy-icon-color.svg){ align=right width="76" }
 

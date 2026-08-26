@@ -1,4 +1,4 @@
-# Day 5: 換一個工具看同一批事件——Tetragon 與 TracingPolicy
+# Day 5: Tetragon 與 TracingPolicy——核心層過濾與事件紀錄
 
 ![Tetragon 官方標誌](../assets/logos/tetragon-icon-color.svg){ align=right width="95" }
 
@@ -9,7 +9,7 @@
     - **今天**:裝 Tetragon、拆解一條 TracingPolicy、量出「核心裡過濾」跟「使用者空間比對」差在哪,然後四個偏離動作兩套工具同時看。驗收是 TracingPolicy 產出的事件能對回自己的操作。
     - **Day 6**:今天所有跟攔截有關的開關都刻意關著。下一章才把它從「看」切到「殺」。
 
-## 兩套工具的形狀不一樣,不是好壞
+## Falco 與 Tetragon 是兩種不同的做法,不是誰好誰壞
 
 Falco 交付的是**判斷**:一筆告警帶規則名、嚴重度、MITRE 分類,人看到就知道發生了什麼。代價是沒寫規則的事一律看不見([Day 3 地雷 4](sprint2-day3-falco-basics.md#mine-4))。
 
@@ -24,7 +24,7 @@ Tetragon 交付的是**紀錄**:行程執行了什麼、參數是什麼、父行
 | 3 | `tetra` CLI 與 pod 身分 | 事件從哪來、身分怎麼查出來,決定了步驟 5 的結果 |
 | 4 | 第一條 TracingPolicy | 驗收,以及核心層過濾的實證 |
 | 5 | 四個偏離,兩套工具同時看 | **今天的重點** |
-| 6 | 成本 | 資源、事件量、失效形狀 |
+| 6 | 成本 | 資源、事件量、失效模式 |
 
 ## 步驟 1: 安裝,以及 Helm 沒有告訴你的那兩個 CRD
 
@@ -92,7 +92,7 @@ msg="Available sensors" sensors=__base__
 
 CRD 的部分有一個坑,見[地雷 1](#mine-1)。
 
-## 步驟 2: 預設狀態到底吵不吵——一邊是 0,一邊是每分鐘 1915 筆 {#step-2}
+## 步驟 2: 量預設狀態的事件率 {#step-2}
 
 ### 答案一:匯出的事件流
 
@@ -540,7 +540,7 @@ level=warn msg="adding tracing policy failed"
 
 而 CRD schema 裡**正確答案就寫在那個欄位的說明文字上**,偏偏該欄位是 `'type': 'string'` 而**沒有 `enum`**——API server 只檢查型別,所以任何字串都收。
 
-這是 [Day 4 地雷 2](sprint2-day4-falco-custom-rules.md#mine-2)(`evt.dir` 淘汰而 helm 全綠)的同一個形狀,**而且更難察覺**:Falco 至少把警告印在 pod 自己的日誌裡,這裡是「Kubernetes 原生、看起來就該有 status 的 CRD」什麼都不說。GitOps 面板會是綠的,`kubectl wait` 沒有東西可以等。
+這是 [Day 4 地雷 2](sprint2-day4-falco-custom-rules.md#mine-2)(`evt.dir` 淘汰而 helm 全綠)的同一種情況,**而且更難察覺**:Falco 至少把警告印在 pod 自己的日誌裡,這裡是「Kubernetes 原生、看起來就該有 status 的 CRD」什麼都不說。GitOps 面板會是綠的,`kubectl wait` 沒有東西可以等。
 
 **驗收條件只有一個:`tetra tracingpolicy list` 的 `STATE` 是 `enabled`。**
 
@@ -637,7 +637,7 @@ Falco 的 chart 至少給了 requests(超額 4–7 倍,[Day 3 地雷 7](sprint2-
 
 而 `tolerations: [{operator: Exists}]` 表示**它容忍一切**。好處是不用像 Day 3 那樣替 Falco 補 toleration;壞處是它會排到任何一顆節點,包括你不想付這份監控成本的節點。
 
-**Tetragon 的失效形狀跟 Falco 又不一樣**:Falco 被踢是「少看到事件」;Tetragon 的 agent 被踢,**BPF 程式還 pinned 在核心裡**,只是沒有人在讀 ring buffer——**核心的成本照付、事件全丟、健康檢查不會叫**。這是三種失效裡最糟的一種。
+**Tetragon 的失效模式跟 Falco 又不一樣**:Falco 被踢是「少看到事件」;Tetragon 的 agent 被踢,**BPF 程式還 pinned 在核心裡**,只是沒有人在讀 ring buffer——**核心的成本照付、事件全丟、健康檢查不會叫**。這是三種失效裡最糟的一種。
 
 還有一個排程上的後果:兩套工具實測共吃 18–38m CPU、107–210Mi,而**宣告給排程器的 requests 只有 Falco 那一份**。Tetragon 對排程器是隱形的。
 
