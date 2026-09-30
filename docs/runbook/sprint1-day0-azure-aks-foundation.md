@@ -2,7 +2,7 @@
 
 ![Kubernetes 官方標誌](../assets/logos/kubernetes-icon-color.svg){ align=right width="95" }
 
-> Sprint 1 要在 AKS 上把 KAI Scheduler、HAMi、DRA 三套 GPU 排程機制各學一輪。但在碰到任何排程器之前,得先蓋出一個「有 GPU、夠便宜、隨時能收工」的叢集。本章從 quota 盤點開始,一路走到第一個 CUDA pod 跑出 `nvidia-smi`,並且把「收工歸零、開工復原」的循環驗證到可以放心執行。本章有一顆雷特別值得記住:**device plugin 裝好了、rollout status 回報成功,實際上卻一個 pod 都沒起**;還有一顆會讓你以為 quota 夠了,其實有三個維度在各自卡人。
+> Sprint 1 要在 AKS 上把 KAI Scheduler、HAMi、DRA 三套 GPU 排程機制各學一輪。但在碰到任何排程器之前,得先蓋出一個「有 GPU、隨時能收工」的叢集。本章從 quota 盤點開始,一路走到第一個 CUDA pod 跑出 `nvidia-smi`,並且把「收工歸零、開工復原」的循環驗證到可以放心執行。本章有一顆雷特別值得記住:**device plugin 裝好了、rollout status 回報成功,實際上卻一個 pod 都沒起**;還有一顆會讓你以為 quota 夠了,其實有三個維度在各自卡人。
 
 !!! abstract "你在課程的哪裡"
     - **起點**:只需要一個 Azure 訂閱,和一台裝了 az、kubectl、helm 的機器。
@@ -12,11 +12,11 @@
 !!! note "指令裡的佔位符"
     本課程的指令用 `<cluster>` 代表叢集名稱、`<resource-group>` 代表資源群組、`<subscription-id>` 代表訂閱 ID——照做時換成自己的值。
 
-## 環境需求:一座 1.34 以上的叢集,和兩張便宜的卡
+## 環境需求:一座 1.34 以上的叢集,和兩張 T4 卡
 
-課程三個主題對環境的要求其實只有兩條。第一,DRA 的正式版 API 要 Kubernetes **1.34 以上**才有,所以叢集版本不能舊(本章步驟 4 會實測驗證這件事);第二,GPU 要能「隨開隨關」,學習型工作負載沒道理讓卡整天掛著計費。本課用 AKS 滿足這兩條——照著做時換成任何版本夠新的托管叢集都行,指令細節自行對應。
+課程三個主題對環境的要求其實只有兩條。第一,DRA 的正式版 API 要 Kubernetes **1.34 以上**才有,所以叢集版本不能舊(本章步驟 4 會實測驗證這件事);第二,GPU 要能「隨開隨關」,學習型工作負載沒必要讓卡整天掛著。本課用 AKS 滿足這兩條——照著做時換成任何版本夠新的托管叢集都行,指令細節自行對應。
 
-選 T4 的理由也單純:`Standard_NC4as_T4_v3` 是 Azure 上最便宜的完整 GPU VM,spot 價約 US$0.21/小時。HAMi 的 VRAM 切分不需要 MIG(Multi-Instance GPU,A100/H100 這類資料中心卡才有的硬體級分卡功能,把一張實體卡切成數張獨立的小卡),T4 完全夠用;KAI 的排程語意跟卡的型號無關;DRA 的最小驗證一張卡就能做。
+選 T4 的理由也單純:`Standard_NC4as_T4_v3` 是 Azure 上規格最小的完整 GPU VM。HAMi 的 VRAM 切分不需要 MIG(Multi-Instance GPU,A100/H100 這類資料中心卡才有的硬體級分卡功能,把一張實體卡切成數張獨立的小卡),T4 完全夠用;KAI 的排程語意跟卡的型號無關;DRA 的最小驗證一張卡就能做。
 
 ## 原理與架構
 
@@ -34,9 +34,9 @@ flowchart TD
 
 **GPU driver 誰管?**AKS 對 GPU node pool 提供幾種管理模式:全託管(driver + device plugin 都是 AKS 的)、只管 driver、或全部自理。本課程選「**AKS 管 driver、device plugin 自己用 Helm 管**」——因為 Day 3 的 HAMi 要用自己的 device plugin 接管 `nvidia.com/gpu`,Day 6 的 DRA driver 更是與傳統 device plugin 互斥。如果讓 AKS 託管 device plugin,到時候會跟自己裝的元件打架。這個決定牽動三個階段,必須在 Day 0 定案,不能到 Day 3 才發現要重建 node pool。
 
-**Spot 的交易條件。**spot 節點約為隨需價的三折,代價是 Azure 隨時可以回收。對批次或實驗性工作這划算,但有兩件事要先知道:spot pool 會自動帶上 `kubernetes.azure.com/scalesetpriority=spot:NoSchedule` 的 taint,所有要排上去的 pod 都得聲明對應的 toleration;而 `--spot-max-price` 建立後不能改。另外 GPU pool 刻意**不開 cluster autoscaler**——Day 2 的 gang scheduling 示範需要「資源刻意不足」的情境,autoscaler 若自動擴節點,示範情境就不成立。
+**Spot 的交易條件。**spot 節點的代價是 Azure 隨時可以回收。對批次或實驗性工作可以接受,但有兩件事要先知道:spot pool 會自動帶上 `kubernetes.azure.com/scalesetpriority=spot:NoSchedule` 的 taint,所有要排上去的 pod 都得聲明對應的 toleration;而 `--spot-max-price` 建立後不能改。另外 GPU pool 刻意**不開 cluster autoscaler**——Day 2 的 gang scheduling 示範需要「資源刻意不足」的情境,autoscaler 若自動擴節點,示範情境就不成立。
 
-**成本紀律是架構的一部分。**free tier 的 control plane 不收費,常駐成本只有 system pool 一台 D2as_v5(約 NT$3.5/小時);GPU pool 用「開工 scale 到 2、收工 scale 到 0」的循環操作,兩張 T4 spot 開著時約 NT$13/小時。本章最後一步就是把這個循環實測一遍,確認 scale 歸零再拉回來之後,driver、標籤、device plugin 都會自己回來。
+**GPU pool 用「開工 scale 到 2、收工 scale 到 0」的循環操作。**常駐的只有 system pool 一台 D2as_v5。本章最後一步就是把這個循環實測一遍,確認 scale 歸零再拉回來之後,driver、標籤、device plugin 都會自己回來。
 
 今天要走的路,八步:盤點 quota → 送申請 → 建 RG 與 AKS → 上叢集驗 DRA API → 開 GPU spot pool → 裝 device plugin → 第一顆 CUDA pod → 收工循環實測。前兩步是行政流程(而且可能要等幾個工作天),後六步是技術操作——等待期能先做什麼,步驟 2 的結尾會講。
 
@@ -218,7 +218,7 @@ Tesla T4、16 GB VRAM 、driver 580 系列。地基完工。
 
 ### 步驟 8:收工循環——scale 歸零,再拉回來驗一次
 
-每次下課的標準動作是把 GPU pool 縮到 0(spot 節點刪掉就不計費)。但「縮得回去」只值一半,「拉回來一切如常」才算數——尤其我們在步驟 6 補的標籤,是不是真的會跟著新節點回來?實測一輪:
+每次下課的標準動作是把 GPU pool 縮到 0。但「縮得回去」只值一半,「拉回來一切如常」才算數——尤其我們在步驟 6 補的標籤,是不是真的會跟著新節點回來?實測一輪:
 
 ```console
 $ kubectl delete pod gpu-smoke

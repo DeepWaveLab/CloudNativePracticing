@@ -164,7 +164,7 @@ Error from server (NotFound): namespaces "workload-demo" not found
 
 **gate:通過。** 三種選法各自的散佈時間都在 **6–13 秒**之間——CRP 的反應很快。
 
-## 收工:整台 VM 刪除,兩天成本一次算清
+## 收工:整台 VM 刪除
 
 Day 1 與 Day 2 共用同一台 `cnp-fleet-vm`,做完後整台刪除:
 
@@ -177,13 +177,7 @@ Day 1 與 Day 2 共用同一台 `cnp-fleet-vm`,做完後整台刪除:
 === delete leftover VNet ===   rc=0
 ```
 
-| 項目 | 數字 |
-|---|---|
-| VM 規格 / 單價 | `Standard_D4as_v5`,japaneast 隨用隨付 **US$0.224/hr**(≈ NT$7.2/hr) |
-| VM 存活時長 | 約 **28 分鐘** |
-| 兩天合計成本 | **約 NT$4** |
-
-前半的 KubeFleet 課程,**一台 VM 裝下三座叢集、兩天連跑、做完整台清除,零殘留**。這是「本機零安裝」路線的完整樣貌:所有東西都在一台可拋棄的雲 VM 裡進出。
+前半的 KubeFleet 課程,**一台 VM 裝下三座叢集、連跑兩天、做完整台清除,零殘留**。這是「本機零安裝」路線的完整樣貌:所有東西都在一台可拋棄的雲 VM 裡進出。
 
 ## 誠實的差距
 

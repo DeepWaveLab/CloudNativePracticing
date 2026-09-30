@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nakama
+  namespace: nakama
+  labels:
+    app.kubernetes.io/name: nakama
+    app.kubernetes.io/part-of: sprint5-day5
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nakama
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nakama
+        app.kubernetes.io/part-of: sprint5-day5
+      annotations:
+        sprint5-day6/module-revision: "3"
+    spec:
+      serviceAccountName: nakama
+      automountServiceAccountToken: true
+      initContainers:
+        - name: migrate
+          image: heroiclabs/nakama:3.40.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -ec
+          args:
+            - |
+              DB_ADDR="postgres:${POSTGRES_PASSWORD}@postgres.nakama.svc.cluster.local:5432/nakama"
+              /nakama/nakama migrate up --database.address "$DB_ADDR"
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nakama-db
+                  key: postgres-password
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      containers:
+        - name: nakama
+          image: heroiclabs/nakama:3.40.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -ec
+          args:
+            - |
+              DB_ADDR="postgres:${POSTGRES_PASSWORD}@postgres.nakama.svc.cluster.local:5432/nakama"
+              K8S_TOKEN="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+              exec /nakama/nakama --name nakama-0 --database.address "$DB_ADDR" --logger.level INFO --session.token_expiry_sec 7200 --runtime.path /nakama/data/modules --runtime.env "K8S_TOKEN=${K8S_TOKEN}"
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nakama-db
+                  key: postgres-password
+          ports:
+            - name: grpc
+              containerPort: 7349
+              protocol: TCP
+            - name: http
+              containerPort: 7350
+              protocol: TCP
+            - name: console
+              containerPort: 7351
+              protocol: TCP
+          volumeMounts:
+            - name: runtime-modules
+              mountPath: /nakama/data/modules/main.lua
+              subPath: main.lua
+              readOnly: true
+          readinessProbe:
+            exec:
+              command:
+                - /nakama/nakama
+                - healthcheck
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            exec:
+              command:
+                - /nakama/nakama
+                - healthcheck
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: runtime-modules
+          configMap:
+            name: nakama-agones-matchmaker

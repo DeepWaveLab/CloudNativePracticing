@@ -7,7 +7,7 @@
 !!! abstract "你在課程的哪裡"
     - **[Day 7](sprint4-day7-katacc.md)**:kata-cc pod 跑在 SEV-SNP 硬體上,取得平台層證據。
     - **今天**:接上 MAA(遠端證明)+ SKR sidecar + Key Vault Premium,做兩次部署對照——符合政策的 pod 拿得到金鑰、篡改過的 pod 被拒絕。
-    - **接下來**:[Day 9](sprint4-day9-decision-matrix.md) 收尾——可逆性、成本、AKS kata-cc vs 上游 CoCo 的決策表。
+    - **接下來**:[Day 9](sprint4-day9-decision-matrix.md) 收尾——可逆性、AKS kata-cc vs 上游 CoCo 的決策表。
 
 ## 證明先行,拿祕密在後
 
@@ -157,7 +157,7 @@ $ curl http://<tampered-service>/         →  DENIED
 
 ## 下一步
 
-Part 2 的動手到今天為止:概念(Day 5)、Kata(Day 6)、kata-cc(Day 7)、遠端證明(Day 8)。[Day 9](sprint4-day9-decision-matrix.md) 不動手,把這幾天收成一張決策表——AKS kata-cc 與上游 CoCo 的差別、拆除的可逆性、成本真帳,以及回頭把「主機該不該看得到工作負載」這個對比講完。
+Part 2 的動手到今天為止:概念(Day 5)、Kata(Day 6)、kata-cc(Day 7)、遠端證明(Day 8)。[Day 9](sprint4-day9-decision-matrix.md) 不動手,把這幾天收成一張決策表——AKS kata-cc 與上游 CoCo 的差別、拆除的可逆性,以及回頭把「主機該不該看得到工作負載」這個對比講完。
 
 ---
 

@@ -348,7 +348,6 @@ Failed to create pod sandbox: rpc error: code = Unknown desc =
 - **「註冊 feature flag 也沒用」是推論。** 依據是錯誤碼的性質(值被判定為淘汰,而非權限未開),不是實測。要實測得動訂閱層級的設定。
 - **單節點。** 今天所有節點層的觀察都來自一顆節點。跨節點的 handler 不一致(有些節點裝了 shim、有些沒有)是 Day 6 之後才會出現的情況。
 - **`untrusted` 這個 handler 只驗到「能起 pod」。** 它跟 `runc` 指向同一個執行體,所以沒有再往下追行為差異。
-- **Standard Load Balancer 的費用沒有實測。** 成本那一段只確認了公用 IP 是按小時計費的([地雷 4](#mine-4));LB 的規則費與資料處理費沒有量,所以不宣稱。
 
 ## 驗收 checkpoint
 
@@ -450,21 +449,19 @@ Pod 停在 `Pending`,而訊息**一個字都沒提到 RuntimeClass**。線索藏
 
 **Day 6 的 shim 安裝器會替裝好的節點打標籤,所以那天建的 RuntimeClass 應該要帶 `scheduling`。**
 
-### 地雷 4:停機的 AKS 不是零成本 {#mine-4}
+### 地雷 4:`az aks stop` 不會刪掉節點資源群組裡的資源 {#mine-4}
 
-`az aks stop` 之後,節點資源群組裡還留著六樣資源,其中 **Standard 公用 IP 是按小時計費的**:
+`az aks stop` 之後,節點資源群組裡還留著六樣資源:
 
-| 資源 | 停機後是否計費 |
+| 資源 | 停機後是否保留 |
 |---|---|
-| VMSS(capacity 歸零) | 否 |
+| VMSS(capacity 歸零) | 保留定義,執行個體歸零 |
 | OS 磁碟(隨執行個體消失) | 否 |
-| VNet / NSG / 受管身分 | 否 |
-| **Standard 公用 IP(Static)** | **是,約 US$0.005/hr** |
+| VNet / NSG / 受管身分 | 保留 |
+| **Standard 公用 IP(Static)** | **保留** |
 | Standard Load Balancer | **未實測,不宣稱** |
 
-約 **NT$0.16/hr**,一天 NT$3.8、一個月約 NT$115,**不論有沒有流量、不論叢集開著還是停著**。
-
-金額很小,但**「停機後零成本」是一個假的宣稱,而假的零成本會讓人以為停機的叢集可以無限期放著不管**。正確的說法是:收工後閒置成本約 NT$0.16/hr,**要真的歸零只能整座刪除**。
+**停機保留網路資源與公用 IP,不論叢集開著還是停著都在**。要完全清除這些資源,只能刪除整座叢集。
 
 ## 帶得走的東西
 

@@ -1,0 +1,114 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nakama-agones-matchmaker
+  namespace: nakama
+  labels:
+    app.kubernetes.io/name: nakama
+    app.kubernetes.io/part-of: sprint5-day6
+data:
+  main.lua: |
+    local nk = require("nakama")
+
+    local function allocate_gameserver(context)
+      local token = context.env and context.env["K8S_TOKEN"] or nil
+      if token == nil or token == "" then
+        error("K8S_TOKEN runtime env is missing")
+      end
+
+      local allocation_body = nk.json_encode({
+        apiVersion = "allocation.agones.dev/v1",
+        kind = "GameServerAllocation",
+        spec = {
+          selectors = {
+            {
+              matchLabels = {
+                ["agones.dev/fleet"] = "simple-game-server",
+              },
+            },
+          },
+        },
+      })
+
+      local headers = {
+        ["Authorization"] = "Bearer " .. token,
+        ["Content-Type"] = "application/json",
+        ["Accept"] = "application/json",
+      }
+
+      local code, _, body = nk.http_request(
+        "https://kubernetes.default.svc/apis/allocation.agones.dev/v1/namespaces/default/gameserverallocations",
+        "POST",
+        headers,
+        allocation_body,
+        5000,
+        true
+      )
+
+      if code < 200 or code >= 300 then
+        error(string.format("GameServerAllocation failed: status=%s body=%s", tostring(code), tostring(body)))
+      end
+
+      local allocation = nk.json_decode(body)
+      if allocation.status == nil or allocation.status.state ~= "Allocated" then
+        error("GameServerAllocation did not return status.state=Allocated")
+      end
+
+      local port = nil
+      if allocation.status.ports ~= nil and allocation.status.ports[1] ~= nil then
+        port = allocation.status.ports[1].port
+      end
+      if allocation.status.address == nil or port == nil then
+        error("GameServerAllocation response missing address or port")
+      end
+
+      nk.logger_info("sprint5-day6 allocation response " .. nk.json_encode({
+        state = allocation.status.state,
+        gameserver = allocation.status.gameServerName,
+        address = allocation.status.address,
+        port = port,
+      }))
+
+      return {
+        address = allocation.status.address,
+        port = port,
+        gameserver = allocation.status.gameServerName,
+        state = allocation.status.state,
+      }
+    end
+
+    local function matchmaker_matched(context, matched_users)
+      nk.logger_info(string.format("sprint5-day6 matchmaker_matched users=%d", #matched_users))
+
+      local allocation = allocate_gameserver(context)
+      local content = {
+        address = allocation.address,
+        port = allocation.port,
+        gameserver = allocation.gameserver,
+        endpoint = string.format("%s:%s", allocation.address, tostring(allocation.port)),
+      }
+
+      for _, entry in ipairs(matched_users) do
+        nk.notification_send(
+          entry.presence.user_id,
+          "sprint5-day6-allocation",
+          content,
+          6006,
+          "",
+          true
+        )
+      end
+
+      nk.logger_info(string.format(
+        "sprint5-day6 allocated gameserver=%s endpoint=%s:%s users=%d",
+        allocation.gameserver,
+        allocation.address,
+        tostring(allocation.port),
+        #matched_users
+      ))
+
+      return ""
+    end
+
+    nk.register_matchmaker_matched(matchmaker_matched)
+    nk.logger_info("sprint5-day6 Agones matchmaker module loaded")

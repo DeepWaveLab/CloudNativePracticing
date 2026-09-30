@@ -719,7 +719,7 @@ Config CR:  admission.gpuSharing                  = False
 
 `gpuFractionRuntimeClassName` 回到 `nvidia`,代表[地雷 1](#mine-1) 是 chart 的常駐預設值,而不是一次性的意外;下次在這座叢集開 KAI 的 GPU sharing 會再撞一次。KAI 的七個元件裡有五個跨 Day 1–4 都沒重啟過(`RESTARTS 0`,AGE 21h),只有 admission 與 binder 因為本次 upgrade 重建。
 
-最後 GPU pool 縮回 0 並回查(12:55:20 下達,12:56:32 回查得到 `{"count": 0, "state": "Succeeded"}`)。本日 GPU 計費約 35 分鐘,是四天裡最長的一次(Day 1 約 16 分、Day 2 約 28 分、Day 3 約 17 分),超出的部分幾乎全在步驟 3 那 8 分鐘。
+最後 GPU pool 縮回 0 並回查(12:55:20 下達,12:56:32 回查得到 `{"count": 0, "state": "Succeeded"}`)。
 
 ## 驗收 checkpoint
 

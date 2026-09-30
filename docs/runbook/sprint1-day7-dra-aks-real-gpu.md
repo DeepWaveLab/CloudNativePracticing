@@ -714,8 +714,6 @@ No resources found
 16:49:37 $ kubectl get nodes  →  只剩 aks-system-35459509-vmss000000
 ```
 
-帳算起來:節點從下達 add 到確認消失存活 23 分 47 秒(0.396 小時),`NC4as_T4_v3` 的 spot 現價是 US$0.2059/hr(向 Azure Retail Prices API 現查,不是估的),本日 GPU 節點成本 **US$0.082,約 NT$2.6**。同規格隨選價 US$0.71/hr,spot 是它的 29%。今天沒有做 classic 與 DRA 的併排比較,`gpuspot` 全程 0 台,那部分成本是 0。
-
 ## 驗收 checkpoint
 
 | 檢查項 | 指令 | 期待結果 |

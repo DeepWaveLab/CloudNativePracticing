@@ -358,7 +358,7 @@ $ kubectl exec client -- curl -k https://10.0.0.1:443/healthz    → 401
 
 ## 步驟 6: 停機重啟的存活驗證——BYOCNI 只剩一條收尾路
 
-直覺的收尾方式是「兩個節點池都縮到 0」,而它被 API 退件([地雷 11](#mine-11))。**BYOCNI 叢集要停止計費,只剩 `az aks stop` 一條路——而那正好是一件沒人驗證過的事**:停機再開機之後,CNI 會不會自己回來?
+直覺的收尾方式是「兩個節點池都縮到 0」,而它被 API 退件([地雷 11](#mine-11))。**BYOCNI 叢集要讓節點全部停下,只剩 `az aks stop` 一條路——而那正好是一件沒人驗證過的事**:停機再開機之後,CNI 會不會自己回來?
 
 既然它是唯一的路,就當場驗證:
 
@@ -407,7 +407,7 @@ ERROR: unrecognized arguments: --priority Spot --eviction-policy Delete --spot-m
 
 **根因**:不是「參數值不合法」,是**這個子命令沒有這組參數**。AKS 的第一個節點池一定是 system pool,而 system pool 不能是 spot——這條限制不是在執行期擋你,是直接不出現在 CLI 介面上(`az aks nodepool add` 才有 `--priority`)。
 
-**後果**:「一座 2 台 spot 的叢集」在 AKS 上不存在。最省的形狀是 **1 台隨需 system 加 N 台 spot user pool**,而那台隨需節點就是成本估算裡最容易漏掉的一項——本課的實際每小時成本因此比計畫估的高出約一倍。
+**後果**:「一座 2 台 spot 的叢集」在 AKS 上不存在。可行的形狀是 **1 台隨需 system 加 N 台 spot user pool**,規劃節點數時別漏掉那台隨需節點。
 
 ### 地雷 2:決定能不能排到 `NotReady` 節點的是 taint 容忍,不是 hostNetwork {#mine-2}
 
@@ -533,7 +533,7 @@ Error from server: admission webhook "aks-node-validating-webhook.azmk8s.io" den
 
 **ARM 那一條是靜默無效(回 `Succeeded` 而什麼都沒改),kubectl 那一條是明確拒絕。** 兩者對照很有價值:**如果只試了第一種,你會以為指令生效了,然後去找別的原因。**
 
-**實務結論**:在 AKS 上用 spot 省錢,代價是每一個要跑在那顆節點上的東西都必須自己帶容忍——**你自己的工作負載可以加,但第三方 chart 與工具不一定給得了**。做成本規劃時這是一項隱藏的相容性成本,不只是「便宜 81.5%」。
+**實務結論**:在 AKS 上用 spot,代價是每一個要跑在那顆節點上的東西都必須自己帶容忍——**你自己的工作負載可以加,但第三方 chart 與工具不一定給得了**。這是一項隱藏的相容性成本。
 
 ### 地雷 8:`kubeProxyReplacement: false` 不代表 kube-proxy 在做事 {#mine-8}
 
@@ -616,7 +616,7 @@ ERROR: (InvalidParameter) agentPoolProfile.count was 0. It must be greater or eq
        minCount:1 … 3) The node is a system pool.
 ```
 
-**system pool 最少一台。** 而那一台是隨需的([地雷 1](#mine-1)),留著過夜的成本會把整個 sprint 的節點預算燒穿。
+**system pool 最少一台。** 而那一台是隨需的([地雷 1](#mine-1)),收工時它是唯一停不掉的節點,要整座停下只能 `az aks stop`。
 
 **後果**:「縮容到零」這個收尾方式在這座叢集上不存在,只剩 `az aks stop`。而那正好是一件沒驗證過的事(BYOCNI 叢集停機再開,CNI 會不會自己回來),於是**這個未驗證項目成了必經之路**。
 

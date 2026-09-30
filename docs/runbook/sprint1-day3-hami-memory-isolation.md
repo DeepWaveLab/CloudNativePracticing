@@ -468,7 +468,7 @@ hami-scheduler-6cb48464bb-g8swb   2/2   Running   0   12m       ← 在 system p
 hami-device-plugin (DaemonSet)    DESIRED 0  CURRENT 0          ← 沒有 gpu=on 的節點,自然歸零
 ```
 
-DaemonSet 的 `DESIRED` 直接歸零(nodeSelector `gpu=on` 找不到節點),scheduler 因為釘在 system pool 而完好,這正是安裝值把控制面與資料面分開放的用意。Day 4 開機後 DaemonSet 會自己長回來,不需要重裝;`gpu=on` 寫在 pool 層級,新節點一出生就帶著。本日 GPU 計費約 17 分鐘,和 Day 1 的 16 分鐘相近,遠低於 Day 2 的 28 分鐘。
+DaemonSet 的 `DESIRED` 直接歸零(nodeSelector `gpu=on` 找不到節點),scheduler 因為釘在 system pool 而完好,這正是安裝值把控制面與資料面分開放的用意。Day 4 開機後 DaemonSet 會自己長回來,不需要重裝;`gpu=on` 寫在 pool 層級,新節點一出生就帶著。
 
 ## 驗收 checkpoint
 

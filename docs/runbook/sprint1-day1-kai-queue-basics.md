@@ -100,7 +100,7 @@ KAI 裝完就自帶那四個 PriorityClass。分水嶺在 **100**:值 ≥100 的
 
 ### 步驟 1:先把 GPU pool 拉起來,等待時間拿去裝 KAI
 
-GPU pool 平時依 [Day 0 的成本紀律](sprint1-day0-azure-aks-foundation.md)縮到 0,使用前先拉回 2 台:
+GPU pool 平時依 [Day 0 的收工循環](sprint1-day0-azure-aks-foundation.md)縮到 0,使用前先拉回 2 台:
 
 ```console
 $ az aks nodepool scale \
@@ -720,7 +720,7 @@ podgroup-controller-8854fdc49-6grwf      1/1     Running   0          12m
 queue-controller-746cb94d99-tnsz5        1/1     Running   0          12m
 ```
 
-三個測試佇列刪得乾淨、預設階層不受影響,七個元件全程 `RESTARTS 0`——包含兩次驅逐在內,沒有任何元件掛掉。PodGroup 隨 namespace 一起消失,不用另外清。剩下的就是 `az aks nodepool scale ... --node-count 0`,把兩張 T4 還回去停止計費。本次實驗從 GPU pool 拉起到清理完成,兩張 T4 spot 總共開了約 16 分鐘。
+三個測試佇列刪得乾淨、預設階層不受影響,七個元件全程 `RESTARTS 0`——包含兩次驅逐在內,沒有任何元件掛掉。PodGroup 隨 namespace 一起消失,不用另外清。剩下的就是 `az aks nodepool scale ... --node-count 0`,把兩張 T4 還回去。
 
 ## 驗收 checkpoint
 

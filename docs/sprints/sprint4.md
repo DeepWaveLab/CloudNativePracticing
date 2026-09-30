@@ -107,7 +107,7 @@ Confidential Containers 需要 SEV-SNP 的 `_cc_v5` 機密硬體,而東京沒賣
 
     ---
 
-    可逆性、成本、AKS kata-cc vs 上游 CoCo 決策表;收束兩個 Part 對「主機該不該看得到工作負載」的相反立場。
+    可逆性、AKS kata-cc vs 上游 CoCo 決策表;收束兩個 Part 對「主機該不該看得到工作負載」的相反立場。
 
 ## 這個 sprint 的貫穿問題
 

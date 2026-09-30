@@ -18,7 +18,7 @@
 
 <div class="grid cards" markdown>
 
--   **Day 0 · [環境建置與成本紀律](../runbook/sprint1-day0-azure-aks-foundation.md)**
+-   **Day 0 · [環境建置](../runbook/sprint1-day0-azure-aks-foundation.md)**
 
     ---
 

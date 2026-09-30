@@ -26,7 +26,7 @@ flowchart TB
 
 | Day | 主題 | 這一天最該記住的 |
 |---|---|---|
-| [0](sprint1-day0-azure-aks-foundation.md) | 環境奠基與成本紀律 | quota 有三個維度;`rollout status` 成功不代表 DaemonSet 有 pod |
+| [0](sprint1-day0-azure-aks-foundation.md) | 環境奠基 | quota 有三個維度;`rollout status` 成功不代表 DaemonSet 有 pod |
 | [1](sprint1-day1-kai-queue-basics.md) | KAI 安裝與佇列基礎 | quota 是保證下限;要更多卡就調 quota,不是調 priority |
 | [2](sprint1-day2-gang-scheduling-preemption.md) | Gang scheduling 與搶占 | 湊不齊就整組不上、零 GPU 佔用;搶占的受害單位是整組 |
 | [3](sprint1-day3-hami-memory-isolation.md) | HAMi VRAM 切分與硬隔離 | 容器撞的是自己的配額,不是卡的剩餘量 |
@@ -285,7 +285,7 @@ kubectl get configs.kai.scheduler -A -o yaml     # operator 實際套用的設�
 
 MicroK8s 1.26 連 `resource.k8s.io` 這組 API 都沒有,而真卡 driver 的官方前置條件是 Kubernetes v1.34.2 以上。升級是一個獨立專案,在那之前 DRA 對這類叢集只有規劃意義。
 
-真要先練手,現成的場地是手邊任何一座版本夠新的測試叢集,或是本課這種按需開關的節點池——Day 6 用一台 CPU spot 節點把整套物件模型走完,機器成本不到 NT$0.2;Day 7 的真卡驗證用一台 T4 spot、二十三分鐘,約 NT$2.6。
+真要先練手,現成的場地是手邊任何一座版本夠新的測試叢集,或是本課這種按需開關的節點池——Day 6 用一台 CPU spot 節點把整套物件模型走完;Day 7 的真卡驗證用一台 T4 spot。
 
 要先知道的是:**指令不能直接搬**。Day 7 卡住的每一件事都不是硬體問題,而是 chart 假設你已經有 GPU Operator 或 NFD 幫忙認出 GPU 節點;driver root 路徑各平台也不同,AKS 是預設的 `/`,GKE 要改成 `/home/kubernetes/bin/nvidia`,由 GPU Operator 管理的環境則是 `/run/nvidia/driver`。這三個路徑的差別,足以讓同一份 values 檔在另一個平台上完全裝不起來。
 

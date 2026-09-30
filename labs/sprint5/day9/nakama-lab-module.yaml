@@ -1,0 +1,102 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nakama-lab-module
+  namespace: nakama-lab
+  labels:
+    app.kubernetes.io/part-of: sprint5-day9
+data:
+  main.lua: |
+    local nk = require("nakama")
+
+    local TOKEN_ALPHABET = "abcdefghijkmnpqrstuvwxyz23456789"
+
+    local function new_routing_token()
+      local hex = string.gsub(nk.uuid_v4(), "-", "")
+      local out = {}
+      for i = 1, 3 do
+        local n = tonumber(string.sub(hex, i * 2 - 1, i * 2), 16) % #TOKEN_ALPHABET + 1
+        out[i] = string.sub(TOKEN_ALPHABET, n, n)
+      end
+      return table.concat(out)
+    end
+
+    local function allocate_gameserver(context, routing_token)
+      local k8s_token = context.env and context.env["K8S_TOKEN"] or nil
+      if k8s_token == nil or k8s_token == "" then
+        error("K8S_TOKEN runtime env is missing")
+      end
+
+      local body = nk.json_encode({
+        apiVersion = "allocation.agones.dev/v1",
+        kind = "GameServerAllocation",
+        spec = {
+          selectors = { { matchLabels = { ["agones.dev/fleet"] = context.env["FLEET_NAME"] } } },
+          metadata = { annotations = { ["quilkin.dev/tokens"] = nk.base64_encode(routing_token) } },
+        },
+      })
+      local headers = {
+        ["Authorization"] = "Bearer " .. k8s_token,
+        ["Content-Type"] = "application/json",
+        ["Accept"] = "application/json",
+      }
+      local code, _, resp = nk.http_request(
+        "https://kubernetes.default.svc/apis/allocation.agones.dev/v1/namespaces/default/gameserverallocations",
+        "POST", headers, body, 5000, true)
+      if code < 200 or code >= 300 then
+        error(string.format("GameServerAllocation failed: status=%s body=%s", tostring(code), tostring(resp)))
+      end
+
+      local allocation = nk.json_decode(resp)
+      if allocation.status == nil or allocation.status.state ~= "Allocated" then
+        error("GameServerAllocation did not return status.state=Allocated")
+      end
+      local port = allocation.status.ports and allocation.status.ports[1] and allocation.status.ports[1].port
+      if allocation.status.address == nil or port == nil then
+        error("GameServerAllocation response missing address or port")
+      end
+      return allocation.status.gameServerName, allocation.status.address, port
+    end
+
+    local function matchmaker_matched(context, matched_users)
+      local routing_token = new_routing_token()
+      local gameserver, address, port = allocate_gameserver(context, routing_token)
+      local assignment = {
+        gameserver = gameserver,
+        proxy = context.env["QUILKIN_ENDPOINT"],
+        routing_token = routing_token,
+        direct = string.format("%s:%s", address, tostring(port)),
+      }
+      nk.logger_info("sprint5-day9 assignment " .. nk.json_encode({ gameserver = gameserver, direct = assignment.direct, users = #matched_users }))
+
+      local writes = {}
+      for _, entry in ipairs(matched_users) do
+        table.insert(writes, {
+          collection = "assignment",
+          key = "current",
+          user_id = entry.presence.user_id,
+          value = assignment,
+          permission_read = 1,
+          permission_write = 0,
+        })
+      end
+      nk.storage_write(writes)
+
+      for _, entry in ipairs(matched_users) do
+        nk.notification_send(entry.presence.user_id, "sprint5-assignment", assignment, 6006, "", true)
+      end
+      return nil
+    end
+
+    local function get_assignment(context, payload)
+      local objects = nk.storage_read({ { collection = "assignment", key = "current", user_id = context.user_id } })
+      if #objects == 0 then
+        return nk.json_encode({ found = false })
+      end
+      local value = objects[1].value
+      value.found = true
+      return nk.json_encode(value)
+    end
+
+    nk.register_matchmaker_matched(matchmaker_matched)
+    nk.register_rpc(get_assignment, "get_assignment")

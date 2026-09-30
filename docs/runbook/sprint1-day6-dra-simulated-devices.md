@@ -42,7 +42,7 @@ DeviceClass 與 ResourceClaim 裡的選擇條件都寫成 CEL(Common Expression 
 
 換得動的理由在於這支 driver 的性質:它管的裝置是**模擬**出來的,不碰任何實體硬體,`numDevices: 8` 就憑空 advertise 八顆。而 DRA 從 ResourceSlice 發佈、CEL 過濾、排程器配置、到 kubelet 呼叫 driver 準備裝置,整條路徑對真卡與模擬裝置完全相同,差別只在最後一步注入容器的內容——真卡注入 `/dev/nvidia*` 與函式庫掛載,模擬裝置注入幾個環境變數。今天要學的是前面那整條路。
 
-代價是一台 `Standard_D2as_v5`(2 vCPU／8 GB)spot 節點,japaneast 實際單價 US$0.020698／hr(約 NT$0.66／hr),`gpuspot` 全程 0 台。時間也省:CPU spot 節點 1 分 52 秒 Ready,而 Day 1 到 Day 5 每次把 GPU pool 拉起來都要五分鐘上下,差在 GPU 節點開機要跑 driver 安裝與裝置初始化。
+代價是一台 `Standard_D2as_v5`(2 vCPU／8 GB)spot 節點,`gpuspot` 全程 0 台。時間也省:CPU spot 節點 1 分 52 秒 Ready,而 Day 1 到 Day 5 每次把 GPU pool 拉起來都要五分鐘上下,差在 GPU 節點開機要跑 driver 安裝與裝置初始化。
 
 ### 今天要走的路
 
@@ -525,16 +525,6 @@ system   1.35.6              Standard_D2as_v5       1       Succeeded           
 gpuspot  1.35.6              Standard_NC4as_T4_v3   0       Succeeded           User
 ```
 
-| 成本項目 | 數字 |
-|---|---|
-| 實際 spot 單價 | US$0.020698／hr(Azure Retail Prices API 現查)≈ NT$0.66／hr |
-| 存活時間 | 16:02:01 建立 → 16:18:19 刪除完成,16 分 18 秒(0.27 hr) |
-| 本日節點成本 | US$0.0056 ≈ NT$0.18 |
-| 對照:同規格隨選價 | US$0.112／hr(spot 是隨選的 18.5%) |
-| GPU pool 成本 | US$0(`gpuspot` 全程 0 台) |
-
-11 顆模擬裝置、2 個 driver DaemonSet、6 組示範、12 顆測試 pod,整套走完不到 NT$0.2 的機器錢。
-
 ## 驗收 checkpoint
 
 | 檢查項 | 指令 | 期待結果 |
@@ -610,7 +600,7 @@ kubectl get resourceclaims -A -o json | \
 - 共享與獨佔的差別,在 DRA 裡是 manifest 上一個欄位名。兩顆 pod 寫 `resourceClaimName` 指同一個具名 claim,就真的持有同一顆裝置、同一個 claim UID;各自寫 `resourceClaimTemplateName`,就各拿各的。同樣兩顆 pod,前者的裝置消耗量是後者的一半。
 - 託管叢集上任何 alpha 功能,能力邊界都由 apiserver 說了算。`kubectl get --raw /metrics | grep kubernetes_feature_enabled` 這一句問得出的答案,決定的是示範怎麼設計,而不是裝完之後拿來解釋失敗。查在前面省下的是重做,查在後面得到的只是理由。
 - DRA 的可觀測性目前往兩端集中:排程失敗只有一句 `cannot allocate all claims`,kubelet plugin 的 log 卻把 prepare 與 unprepare 的每一步連同 CDI device ID 都記下來。託管 K8s 拿不到 `kube-scheduler` 的 log,所以診斷路徑要反過來走,從 driver 的 DaemonSet 往回推。
-- 概念驗證不需要真硬體。模擬 driver 與真卡 driver 在 ResourceSlice、CEL、排程配置、CDI 注入這四段上走同一條路,差別只在最後注入容器的是環境變數還是裝置節點。今天整套走完花掉 NT$0.18,同樣的內容搬到 GPU 節點上做,光是等節點開機就多五分鐘。
+- 概念驗證不需要真硬體。模擬 driver 與真卡 driver 在 ResourceSlice、CEL、排程配置、CDI 注入這四段上走同一條路,差別只在最後注入容器的是環境變數還是裝置節點。同樣的內容搬到 GPU 節點上做,光是等節點開機就多五分鐘。
 
 ## 延伸閱讀
 

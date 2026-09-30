@@ -591,7 +591,7 @@ preemption: 0/3 nodes are available: 1 No preemption victims found for incoming 
 
 **根因**:裝完 HAMi、WebUI 與 Prometheus 之後,system 節點的 CPU requests 是 1779m / 1900m(93%)。Deployment 預設的 RollingUpdate 是 `maxSurge: 25%`,單副本時等於「先起新的、再殺舊的」,而 webui 一顆就要 250m。兩份同時存在放不下,新的排不進去,舊的不會被殺,於是互相卡住。裝的當下完全看不出來,要等第一次更新才發作。
 
-**修法**:兩選一。加開一台 system 節點(每台約 NT$3.5/hr),或把策略改成先殺後起:
+**修法**:兩選一。加開一台 system 節點,或把策略改成先殺後起:
 
 ```bash
 kubectl -n kube-system patch deploy hami-webui \

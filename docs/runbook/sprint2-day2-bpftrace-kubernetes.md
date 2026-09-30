@@ -633,7 +633,7 @@ bpftrace procs=0
 
 總數停在 53 而不是最初的 52,多出來那一支是隨容器生滅漂進來的 `cgroup_device`;`tracing=1` 是核心自帶的 `hid_tail_call`,Day 1 記過同一個 tag。**驗收條件寫成「自己掛的那幾類歸零」,不是「總數回到最初的基線值」。** 兩顆節點的最終狀態一致,節點 `/tmp` 也沒有留下東西。
 
-接著刪 `ebpf-lab` namespace(11 秒)、把 `ebpf` pool 縮回 0(1 分 10 秒)並用 `nodepool list`、`nodepool show`、`kubectl get nodes` 三重驗證,最後停掉整座叢集(2 分 04 秒),三個 pool 的定義都留給 Day 3。`ebpf` pool 從下達 scale 到確認歸零共存活 22 分 10 秒(0.369 hr),spot 單價 US$0.0207/hr/台,本日兩台合計 **US$0.0153**,約新台幣 0.49 元;同規格隨需價是 US$0.112/hr/台。
+接著刪 `ebpf-lab` namespace(11 秒)、把 `ebpf` pool 縮回 0(1 分 10 秒)並用 `nodepool list`、`nodepool show`、`kubectl get nodes` 三重驗證,最後停掉整座叢集(2 分 04 秒),三個 pool 的定義都留給 Day 3。
 
 ## 驗收 checkpoint
 

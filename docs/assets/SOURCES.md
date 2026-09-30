@@ -27,3 +27,7 @@
 | screenshots/sprint4-day1/h3-browser-devtools.png | 本課程實測擷圖(Chrome + DevTools,`--origin-to-force-quic-on`,mkcert 憑證信任)。在真實視窗開 https://demo.mesh.lab/、於主控台執行 `performance.getEntriesByType('navigation')[0].nextHopProtocol` 讀出實際載入協定為 `h3`;已裁掉 Chrome 命令列旗標警告帶(含 LB IP) | 2026-08-14 | 課程自製 |
 
 所有 SVG 入庫前皆以 rsvg-convert 渲染於 `#ffffff` 與 `#1e1e1e` 兩種底色目檢;僅單色可讀者一律備齊深淺兩版,頁面以 Material 的 `#only-light` / `#only-dark` 成對掛載。
+| logos/agones-icon-color.svg | https://github.com/cncf/artwork/blob/main/projects/agones/icon/color/agones-icon-color.svg | 2026-08-31 | CNCF artwork（Linux Foundation），社群教學用途；藍＋深藍互扣圖示，深色底深藍半塊對比略低但沿用色版一致；Sprint 5 Day 0–3 使用 |
+| logos/quilkin-mascot.png | https://github.com/EmbarkStudios/quilkin/blob/main/docs/logos/mascot.png | 2026-09-05 | Quilkin 官方 repo 的吉祥物(刺蝟);同目錄 logo-white.png 為白色版、淺色底會消失,目檢後改採彩色吉祥物,淺深兩底皆可讀;Sprint 5 Day 4 使用 |
+| logos/nakama-icon-color.png | https://github.com/heroiclabs/nakama/blob/master/.github/logo.png | 2026-09-05 | Nakama 官方 repo 標誌;完整字標的深藏青字在深色底過暗,目檢後裁出左側紫色六邊形圖示(80×90),淺深兩底皆可讀;Sprint 5 Day 5–6 使用 |
+| screenshots/sprint5-day9/*.png、*.gif | 本課程實測擷圖(Unity 6000.3.19f1 macOS player 內 `ScreenCapture.CaptureScreenshot` 輸出;GIF 為兩個 player 每 0.25 秒逐格畫面經 ffmpeg hstack 並排、64 色 palette) | 2026-09-29 | 課程自製;畫面僅含 GameServer 名稱、token、截短的 user/ticket id,無 IP |

@@ -624,7 +624,7 @@ $ az aks nodepool scale -g <resource-group> --cluster-name <cluster> \
 11:47:21   完成(1 分 09 秒)
 ```
 
-節點池定義保留、節點數歸零,Day 1 直接接手。本日兩台 spot 節點總共存活 24 分 19 秒,實際單價 US$0.0207／hr／台,機器錢是 **US$0.0168(約 NT$0.54)**。
+節點池定義保留、節點數歸零,Day 1 直接接手。
 
 ## 誠實的差距
 

@@ -97,7 +97,7 @@ tracepoint:syscalls:sys_exit_openat
 
 ### 步驟 1:確認 bpftrace 的版本與來源
 
-若叢集曾停機(成本紀律的常態),重新啟動後 `az` 會一路順暢,但 `kubectl` 可能連不上,而且錯誤訊息會把你指向完全錯的方向——診斷與正解見[地雷 1](#mine-1)。`ebpf` pool 兩台 spot 就緒後,三顆節點都在:
+若叢集曾停機(本課收工會停機),重新啟動後 `az` 會一路順暢,但 `kubectl` 可能連不上,而且錯誤訊息會把你指向完全錯的方向——診斷與正解見[地雷 1](#mine-1)。`ebpf` pool 兩台 spot 就緒後,三顆節點都在:
 
 ```console
 $ kubectl get nodes -o custom-columns='NODE:…,KERNEL:…,IMAGE:…'
@@ -560,8 +560,6 @@ $ kubectl -n ebpf-lab exec ebpf-lab-przdr -- \
 
 接著刪 namespace(45 秒)、把 `ebpf` pool 縮回 0(1 分 10 秒)並用 `nodepool list`、`nodepool show`、`kubectl get nodes` 三重驗證,最後停掉整座叢集(2 分 04 秒),三個 pool 的定義都保留給 Day 2。節點側的 hostPath 目錄不會跟著 pool 縮容消失,要自己 `rm -rf /var/log/day1-watch`。
 
-`ebpf` pool 從下達 scale 到確認歸零共存活 26 分 14 秒(0.437 hr),spot 單價 US$0.0207/hr/台,本日兩台合計 **US$0.0181**,約新台幣 0.58 元;同規格隨需價是 US$0.112/hr/台。
-
 ## 誠實的差距
 
 - **`path()` 為什麼被關掉,本課只到推測為止。** 章內對核心允許清單的解釋是合理的推論,**沒有直接量到**;能確定的只有「擋下來的是 bpftrace 自己的能力偵測,不是核心」。
@@ -598,7 +596,7 @@ kubectl --server "https://$IP:443" --tls-server-name <api-fqdn> get nodes
 
 `--tls-server-name` 讓 SNI 與憑證驗證仍然用 FQDN,只有連線目標換成 IP,安全性一點都沒放掉。
 
-**教訓**:這條跟 eBPF 無關,卻直接來自本課程的成本紀律——頻繁停開叢集,就會反覆種下這顆雷。
+**教訓**:這條跟 eBPF 無關,卻是頻繁停開叢集就會反覆種下的雷。
 
 ### 地雷 2:同名的 execsnoop,兩個實作對失敗的 exec 預設行為相反 {#mine-2}
 
