@@ -1,0 +1,3676 @@
+
+<!doctype html>
+<html lang="zh-TW" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="雲原生實作課程 —— GPU 排程 runbook、踩雷解法與反思">
+      
+      
+      
+        <link rel="canonical" href="https://deepwavelab.github.io/CloudNativePracticing/runbook/sprint5-day9-unity-client/">
+      
+      
+        <link rel="prev" href="../sprint5-day8-observability-resilience/">
+      
+      
+        <link rel="next" href="../sprint5-day10-decision-matrix/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Day 9 · Unity client 與 relay server - Cloud Native Lab Course</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/terminal.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#day-9-unity-clientnakama-unity-sdkcli-buildrelay-server" class="md-skip">
+          跳轉到
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="頁首">
+    <a href="../.." title="Cloud Native Lab Course" class="md-header__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Cloud Native Lab Course
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Day 9 · Unity client 與 relay server
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換深色模式"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="切換深色模式" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換淺色模式"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="切換淺色模式" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜尋" placeholder="搜尋" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="搜尋">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="分享" aria-label="分享" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="清除" aria-label="清除" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜尋引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="標籤" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  首頁
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint1-day0-azure-aks-foundation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 1 · GPU 排程三部曲
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint2-day0-ebpf-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 2 · eBPF 與執行期安全
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint3-day0-wasm-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 3 · WebAssembly
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint4-day0-mesh-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 4 · 服務網格與機密運算
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../sprint5-day0-game-server-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 5 · 遊戲伺服器平台
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="導覽列" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Cloud Native Lab Course" class="md-nav__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Cloud Native Lab Course
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首頁
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    首頁
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 3 · WebAssembly 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 4 · 服務網格與機密運算 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day0-azure-aks-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 環境建置與成本紀律
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day1-kai-queue-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · KAI 安裝與 Queue 基礎
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day2-gang-scheduling-preemption/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Gang Scheduling 與搶占
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day3-hami-memory-isolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · HAMi 安裝與 VRAM 硬隔離
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day4-hami-kai-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · HAMi 進階與 KAI 整合
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day5-hami-webui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · HAMi-WebUI 觀測介面
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day6-dra-simulated-devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · DRA 概念與模擬裝置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day7-dra-aks-real-gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · DRA 真卡實測
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day8-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 綜合:三者分工決策表
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day0-ebpf-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · eBPF 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day1-bpftrace-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · bpftrace 三支經典工具
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day2-bpftrace-kubernetes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · 把核心事件接回 Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day3-falco-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Falco 安裝與預設規則
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day4-falco-custom-rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · 自訂規則、誤報調校與告警路由
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day5-tetragon-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Tetragon 與 TracingPolicy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day6-tetragon-enforcement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · 從偵測到攔截
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day7-cilium-kubeproxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Cilium 與 kube-proxy replacement
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day8-cilium-network-policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · CiliumNetworkPolicy(L3/L4 → L7)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day9-hubble/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Hubble 可觀測性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 綜合:四套工具的分工
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 3 · WebAssembly
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 3 · WebAssembly
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day0-wasm-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · wasm 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day1-three-generations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · RuntimeClass 七層實測
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day2-wasmcloud/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · wasmCloud 與元件模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day3-wasmcloud-distributed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · wasmCloud 分散式模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day4-wasmedge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · WasmEdge 執行期
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day5-cost-measurement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · 成本實測
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day6-spinkube-shim/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · SpinKube(上):shim 佈建
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day7-spinkube-operator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · SpinKube(下):operator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day8-reversibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · SpinKube 拆除:可逆性驗收
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day9-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · 綜合:三條路線的決策表
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 4 · 服務網格與機密運算
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 4 · 服務網格與機密運算
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1" id="__nav_5_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part 1 · 服務網格(Day 0–4)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part 1 · 服務網格(Day 0–4)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day0-mesh-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 服務網格與入口閘道的三層地圖
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day1-envoy-gateway/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · Envoy Gateway + HTTP/3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day2-istio-ambient/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Istio ambient:服務間 mTLS 與斷路
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day3-cilium-mesh/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Cilium mesh:WireGuard 加密與 L7
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day4-istio-vs-cilium/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · Istio vs Cilium 橫向對比
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part 2 · 機密運算(Day 5–9)
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part 2 · 機密運算(Day 5–9)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day5-confidential-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · 機密運算的威脅模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day6-kata-sandboxing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · Kata Pod Sandboxing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day7-katacc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · kata-cc:SEV-SNP 機密硬體
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day8-attestation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 遠端證明:MAA、SKR 與金鑰釋放
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day9-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · 總結與決策表
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 5 · 遊戲伺服器平台
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 5 · 遊戲伺服器平台
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day0-game-server-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 遊戲伺服器平台概念
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day1-agones-first-gameserver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · Agones 第一顆 GameServer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day2-fleet-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Fleet 生命週期
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day3-allocation-autoscaler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Allocation 與 autoscaler
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day4-quilkin-udp-proxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · Quilkin UDP proxy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day5-nakama-postgres/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Nakama 與 PostgreSQL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day6-matchmaking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · Matchmaking 串接
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day7-python-client-e2e/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Python client 端到端
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day8-observability-resilience/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 觀測與韌性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Unity client 與 relay server
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Unity client 與 relay server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#unity-client-relay-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unity client 與 relay server 各自負責什麼
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        開始之前
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-1-nakama-unity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Part 1：用 nakama-unity 重做玩家流程
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Part 1：用 nakama-unity 重做玩家流程">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-nakama-unity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1:用命令列建專案並加入 nakama-unity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-client" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2:寫 client
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-executemethod-build-macos-player" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3:用 -executeMethod build macOS player
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-player" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4:跑兩個 player
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-2relay-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Part 2：relay server 與多人畫面同步
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Part 2：relay server 與多人畫面同步">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#5-go-relay-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5:用 Go 寫 relay server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6build-image-relay-fleet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6:build image 並部署 relay Fleet
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7client-relay" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 7:client 加上 relay 模式
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 8:兩個視窗互相看到
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 9:收尾
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        自我檢查
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷記錄
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="地雷記錄">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 1:執行期建立的方塊在 player build 裡變成洋紅色
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的東西
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        正式環境還要補的
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 遊戲伺服器平台總結
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#unity-client-relay-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unity client 與 relay server 各自負責什麼
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        開始之前
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-1-nakama-unity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Part 1：用 nakama-unity 重做玩家流程
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Part 1：用 nakama-unity 重做玩家流程">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-nakama-unity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1:用命令列建專案並加入 nakama-unity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-client" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2:寫 client
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-executemethod-build-macos-player" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3:用 -executeMethod build macOS player
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-player" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4:跑兩個 player
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-2relay-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Part 2：relay server 與多人畫面同步
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Part 2：relay server 與多人畫面同步">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#5-go-relay-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5:用 Go 寫 relay server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6build-image-relay-fleet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6:build image 並部署 relay Fleet
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7client-relay" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 7:client 加上 relay 模式
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 8:兩個視窗互相看到
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 9:收尾
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        自我檢查
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷記錄
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="地雷記錄">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        地雷 1:執行期建立的方塊在 player build 裡變成洋紅色
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶得走的東西
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        正式環境還要補的
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="day-9-unity-clientnakama-unity-sdkcli-buildrelay-server">Day 9: Unity client——nakama-unity SDK、CLI build、relay server 多人同步<a class="headerlink" href="#day-9-unity-clientnakama-unity-sdkcli-buildrelay-server" title="Permanent link">&para;</a></h1>
+<p><img align="right" alt="Nakama 官方標誌" src="../../assets/logos/nakama-icon-color.png" width="72" /></p>
+<blockquote>
+<p>Day 7 用 Python 證明了玩家端三段連線接得起來，但遊戲 client 實際上多半用遊戲引擎寫。今天分兩部分。Part 1 用 Unity 與 Nakama 官方的 nakama-unity SDK 重做 Day 7 的流程，整個專案從建立、加套件、build 到執行都用 Unity 的命令列完成。Part 2 讓畫面真的動起來：自己寫一個小型 relay server 放進 Agones，兩個 Unity 視窗互相看得到對方的角色在移動。</p>
+</blockquote>
+<div class="admonition abstract">
+<p class="admonition-title">你在課程的哪裡</p>
+<ul>
+<li><strong>Day 7</strong>：Python client 走完登入、配對、RPC，UDP 帶 token 經 Quilkin 收到 GameServer 的回應。</li>
+<li><strong>今天</strong>：Part 1 用 nakama-unity v3.22.0 做兩個 Unity player，驗收同 Day 7；Part 2 部署 Go 寫的 relay server，驗收：兩個 player 在 10 秒內各自收到對方一半以上的位置封包，兩人離開後 relay 自己呼叫 SDK <code>Shutdown()</code>。</li>
+<li><strong>Day 10</strong>：回顧這十天、談實務上怎麼取捨，並列出這門課沒教的主題。</li>
+</ul>
+</div>
+<h2 id="unity-client-relay-server">Unity client 與 relay server 各自負責什麼<a class="headerlink" href="#unity-client-relay-server" title="Permanent link">&para;</a></h2>
+<p>Part 1 的 Unity client 做的事跟 Day 7 的 Python client 完全一樣，只是改用 SDK：</p>
+<table>
+<thead>
+<tr>
+<th>步驟</th>
+<th>Day 7 Python（直接打 API）</th>
+<th>Day 9 Unity（nakama-unity SDK）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>登入</td>
+<td><code>POST /v2/account/authenticate/device</code></td>
+<td><code>client.AuthenticateDeviceAsync()</code></td>
+</tr>
+<tr>
+<td>開 realtime socket</td>
+<td>手寫 WebSocket 握手與 frame</td>
+<td><code>client.NewSocket()</code> + <code>ConnectAsync()</code></td>
+</tr>
+<tr>
+<td>排隊</td>
+<td>送 <code>matchmaker_add</code> JSON</td>
+<td><code>socket.AddMatchmakerAsync("*", 2, 2)</code></td>
+</tr>
+<tr>
+<td>收配對結果</td>
+<td>自己解析訊息類型</td>
+<td><code>ReceivedMatchmakerMatched</code>、<code>ReceivedNotification</code> 事件</td>
+</tr>
+<tr>
+<td>RPC</td>
+<td>body 要送 JSON 字串</td>
+<td><code>client.RpcAsync(session, "get_assignment", "{}")</code></td>
+</tr>
+<tr>
+<td>UDP 經 Quilkin</td>
+<td><code>socket</code></td>
+<td><code>System.Net.Sockets.UdpClient</code></td>
+</tr>
+</tbody>
+</table>
+<p>SDK 省掉的是 WebSocket 與訊息格式的細節；UDP 那一段 SDK 不管，因為遊戲封包本來就不經過 Nakama。</p>
+<p>到 Part 1 為止，Fleet 裡跑的仍是 <code>simple-game-server</code>。它收到什麼就原樣回給送的人，不會轉給同一場的另一個玩家，所以就算 Unity 畫了兩個角色，A 也看不到 B 在動。Part 2 換成一個會轉發的 relay server：每個玩家送來的位置，轉給同一顆 server 上的其他玩家。其他元件都不變，Nakama 照樣負責登入、配對與 allocation，Quilkin 照樣用 token 轉送。</p>
+<p>「relay」在 Nakama 的文件裡還有另一個意思，兩者要分清楚：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Nakama client relayed multiplayer</th>
+<th>本章的 relay server</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>遊戲封包走哪裡</td>
+<td>Nakama 的 realtime socket（WebSocket，TCP）</td>
+<td>UDP，經 Quilkin 到 Agones 上的 GameServer</td>
+</tr>
+<tr>
+<td>server 是誰</td>
+<td>Nakama 本身轉發</td>
+<td>一顆由 Agones 管理的 dedicated server</td>
+</tr>
+<tr>
+<td>生命週期</td>
+<td>跟著 Nakama 的 match</td>
+<td>跟著 GameServer：<code>Ready</code> → <code>Allocated</code> → <code>Shutdown</code></td>
+</tr>
+</tbody>
+</table>
+<p>本章用後者：relay 部署成 Agones 的 GameServer，分配與生命週期都由 Agones 管理，Day 8 看過的 shutdown、補位與節點失效行為也都適用。</p>
+<pre class="mermaid"><code>flowchart TB
+    UA["Unity player A"] --&gt;|"登入 / 配對 / RPC"| N["Nakama"]
+    UB["Unity player B"] --&gt;|"登入 / 配對 / RPC"| N
+    N --&gt;|"allocation + token"| AG["Agones&lt;br/&gt;lab-relay-server"]
+    UA --&gt;|"POS + token"| Q["Quilkin proxy"]
+    UB --&gt;|"POS + token"| Q
+    Q --&gt; R["relay GameServer"]</code></pre>
+<p>Unity 這一側全程用命令列操作，不開 Editor 的畫面，同樣的步驟可以放進 CI 或沒有螢幕的機器上重跑。Unity 的執行檔有兩種用法：Editor 加上 <code>-batchmode</code> 可以建專案、匯入套件、執行自訂的 build 方法；build 出來的 player 則可以用 <code>-logFile</code> 把 <code>Debug.Log</code> 寫到檔案，也可以加 <code>-batchmode -nographics</code> 在沒有畫面的情況下執行。player 的 log 記下每一步的結果，截圖用 <code>ScreenCapture.CaptureScreenshot()</code> 從 player 裡直接輸出。</p>
+<h2 id="_1">開始之前<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<p>Part 1 需要 Day 7 的演練環境：演練節點池、<code>nakama-lab</code>（含 <code>get_assignment</code> 的 module）與 <code>lab-game-server</code> Fleet。Day 8 結尾已經拆掉，照 <a href="../sprint5-day7-python-client-e2e/">Day 7 步驟 1–2</a> 重新建立。Part 2 再部署 relay Fleet，並把 allocation selector 切到 relay。</p>
+<p>本機需要 Unity 6000.3.19f1（batchmode 也需要已啟用的授權，Personal 即可）。nakama-unity 用 v3.22.0，2026-09-17 發布，截至 2026-09 是最新版。Part 2 另外需要一個叢集拉得到 image 的 container registry；image 在 ACR 上 build，本機不需要 Docker。完整檔案在 <a href="https://github.com/DeepWaveLab/CloudNativePracticing/tree/main/labs/sprint5/day9">labs/sprint5/day9/</a>。</p>
+<h2 id="part-1-nakama-unity">Part 1：用 nakama-unity 重做玩家流程<a class="headerlink" href="#part-1-nakama-unity" title="Permanent link">&para;</a></h2>
+<h3 id="1-nakama-unity">步驟 1:用命令列建專案並加入 nakama-unity<a class="headerlink" href="#1-nakama-unity" title="Permanent link">&para;</a></h3>
+<p><code>UNITY</code> 指向 Unity 執行檔（macOS 的 Hub 安裝路徑如下）。先建空專案：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">$ </span><span class="nv">UNITY</span><span class="o">=</span>/Applications/Unity/Hub/Editor/6000.3.19f1/Unity.app/Contents/MacOS/Unity
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="gp">$ </span><span class="nv">$UNITY</span><span class="w"> </span>-batchmode<span class="w"> </span>-nographics<span class="w"> </span>-createProject<span class="w"> </span>cnp-day9-unity<span class="w"> </span>-logFile<span class="w"> </span>day9-create.log<span class="w"> </span>-quit
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="gp">$ </span><span class="nb">echo</span><span class="w"> </span><span class="nv">$?</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="go">0</span>
+</span></code></pre></div>
+<p>batchmode 需要已啟用的授權，建專案的 log 裡會看到授權類型：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>[Licensing::Module] License group:
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  Product: Unity Personal Version
+</span></code></pre></div>
+<p>官方 README 提供用 git URL 加入套件的方式，直接改 <code>Packages/manifest.json</code>，版本釘在 tag（完整檔案：<a href="https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day9/manifest.json">manifest.json</a>）：</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">&quot;com.heroiclabs.nakama-unity&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://github.com/heroiclabs/nakama-unity.git?path=/Packages/Nakama#v3.22.0&quot;</span>
+</span></code></pre></div>
+<p>下次用 batchmode 開這個專案時，Package Manager 會自動抓下套件。</p>
+<h3 id="2-client">步驟 2:寫 client<a class="headerlink" href="#2-client" title="Permanent link">&para;</a></h3>
+<p><code>Assets/Scripts/Day9Client.cs</code>（完整檔案：<a href="https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day9/Day9Client.cs">Day9Client.cs</a>）是一個掛在場景物件上的 MonoBehaviour。參數從命令列讀取（<code>-player</code>、<code>-nakamaPort</code>、<code>-screenshot</code> 等），這樣同一個 build 可以用不同身分跑兩次。主要流程：</p>
+<div class="language-csharp highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kt">var</span><span class="w"> </span><span class="n">client</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">Client</span><span class="p">(</span><span class="s">&quot;http&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">host</span><span class="p">,</span><span class="w"> </span><span class="n">port</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;defaultkey&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">UnityWebRequestAdapter</span><span class="p">.</span><span class="n">Instance</span><span class="p">);</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="kt">var</span><span class="w"> </span><span class="n">session</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="n">client</span><span class="p">.</span><span class="n">AuthenticateDeviceAsync</span><span class="p">(</span><span class="s">$&quot;sprint5-day9-{playerName}-{Guid.NewGuid():N}&quot;</span><span class="p">);</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">Log</span><span class="p">(</span><span class="s">$&quot;login user={session.UserId.Substring(0, 8)} created={session.Created}&quot;</span><span class="p">);</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="kt">var</span><span class="w"> </span><span class="n">socket</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">client</span><span class="p">.</span><span class="n">NewSocket</span><span class="p">();</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="kt">var</span><span class="w"> </span><span class="n">matched</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">TaskCompletionSource</span><span class="o">&lt;</span><span class="n">IMatchmakerMatched</span><span class="o">&gt;</span><span class="p">();</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="kt">var</span><span class="w"> </span><span class="n">assigned</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">TaskCompletionSource</span><span class="o">&lt;</span><span class="n">Assignment</span><span class="o">&gt;</span><span class="p">();</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="n">socket</span><span class="p">.</span><span class="n">ReceivedMatchmakerMatched</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">m</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="n">matched</span><span class="p">.</span><span class="n">TrySetResult</span><span class="p">(</span><span class="n">m</span><span class="p">);</span>
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="n">socket</span><span class="p">.</span><span class="n">ReceivedNotification</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">=&gt;</span>
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="p">{</span>
+</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">n</span><span class="p">.</span><span class="n">Code</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">6006</span><span class="p">)</span><span class="w"> </span><span class="n">assigned</span><span class="p">.</span><span class="n">TrySetResult</span><span class="p">(</span><span class="n">JsonUtility</span><span class="p">.</span><span class="n">FromJson</span><span class="o">&lt;</span><span class="n">Assignment</span><span class="o">&gt;</span><span class="p">(</span><span class="n">n</span><span class="p">.</span><span class="n">Content</span><span class="p">));</span>
+</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="p">};</span>
+</span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="k">await</span><span class="w"> </span><span class="n">socket</span><span class="p">.</span><span class="n">ConnectAsync</span><span class="p">(</span><span class="n">session</span><span class="p">);</span>
+</span><span id="__span-3-14"><a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>
+</span><span id="__span-3-15"><a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="kt">var</span><span class="w"> </span><span class="n">ticket</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="n">socket</span><span class="p">.</span><span class="n">AddMatchmakerAsync</span><span class="p">(</span><span class="s">&quot;*&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">);</span>
+</span></code></pre></div>
+<p>跟 Day 7 一樣，要同時等到 <code>matchmaker_matched</code> 與 6006 通知才往下走，兩者的先後順序不固定：</p>
+<div class="language-csharp highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kt">var</span><span class="w"> </span><span class="n">timeout</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Task</span><span class="p">.</span><span class="n">Delay</span><span class="p">(</span><span class="n">TimeSpan</span><span class="p">.</span><span class="n">FromSeconds</span><span class="p">(</span><span class="mi">60</span><span class="p">));</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="k">await</span><span class="w"> </span><span class="n">Task</span><span class="p">.</span><span class="n">WhenAny</span><span class="p">(</span><span class="n">Task</span><span class="p">.</span><span class="n">WhenAll</span><span class="p">(</span><span class="n">matched</span><span class="p">.</span><span class="n">Task</span><span class="p">,</span><span class="w"> </span><span class="n">assigned</span><span class="p">.</span><span class="n">Task</span><span class="p">),</span><span class="w"> </span><span class="n">timeout</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">timeout</span><span class="p">)</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="p">{</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">    </span><span class="k">throw</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="nf">TimeoutException</span><span class="p">(</span><span class="s">$&quot;matched={matched.Task.IsCompleted} assignment={assigned.Task.IsCompleted}&quot;</span><span class="p">);</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="p">}</span>
+</span></code></pre></div>
+<p>RPC 由 SDK 處理字串編碼，回傳的 <code>Payload</code> 是 JSON 字串：</p>
+<div class="language-csharp highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kt">var</span><span class="w"> </span><span class="n">rpc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="n">client</span><span class="p">.</span><span class="n">RpcAsync</span><span class="p">(</span><span class="n">session</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;get_assignment&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;{}&quot;</span><span class="p">);</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="kt">var</span><span class="w"> </span><span class="n">fromRpc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">JsonUtility</span><span class="p">.</span><span class="n">FromJson</span><span class="o">&lt;</span><span class="n">Assignment</span><span class="o">&gt;</span><span class="p">(</span><span class="n">rpc</span><span class="p">.</span><span class="n">Payload</span><span class="p">);</span>
+</span></code></pre></div>
+<p><code>Assignment</code> 的欄位名稱必須跟 Day 7 Lua module 寫入的 key 一致（<code>gameserver</code>、<code>proxy</code>、<code>routing_token</code>、<code>direct</code>），<code>JsonUtility</code> 才解析得到。UDP 那一段用 <code>UdpClient</code>，把 token 接在 payload 後面，3 秒內沒回應就當成被擋下：</p>
+<div class="language-csharp highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kt">var</span><span class="w"> </span><span class="n">bytes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Encoding</span><span class="p">.</span><span class="n">UTF8</span><span class="p">.</span><span class="n">GetBytes</span><span class="p">(</span><span class="n">payload</span><span class="p">);</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="k">await</span><span class="w"> </span><span class="n">udp</span><span class="p">.</span><span class="n">SendAsync</span><span class="p">(</span><span class="n">bytes</span><span class="p">,</span><span class="w"> </span><span class="n">bytes</span><span class="p">.</span><span class="n">Length</span><span class="p">,</span><span class="w"> </span><span class="n">parts</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span><span class="w"> </span><span class="kt">int</span><span class="p">.</span><span class="n">Parse</span><span class="p">(</span><span class="n">parts</span><span class="p">[</span><span class="mi">1</span><span class="p">]));</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="kt">var</span><span class="w"> </span><span class="n">receive</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">udp</span><span class="p">.</span><span class="n">ReceiveAsync</span><span class="p">();</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="k">await</span><span class="w"> </span><span class="n">Task</span><span class="p">.</span><span class="n">WhenAny</span><span class="p">(</span><span class="n">receive</span><span class="p">,</span><span class="w"> </span><span class="n">Task</span><span class="p">.</span><span class="n">Delay</span><span class="p">(</span><span class="mi">3000</span><span class="p">))</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">receive</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="k">null</span><span class="p">;</span>
+</span></code></pre></div>
+<p>每一步都呼叫 <code>Log()</code>，同時寫進 <code>Debug.Log</code>（進 player log）與畫面上 <code>OnGUI</code> 顯示的文字。<code>OnGUI</code> 的白字壓在預設天空盒的地平線亮帶上不易辨識，client 啟動時把攝影機背景設成深色純色（<code>CameraClearFlags.SolidColor</code>）。</p>
+<h3 id="3-executemethod-build-macos-player">步驟 3:用 <code>-executeMethod</code> build macOS player<a class="headerlink" href="#3-executemethod-build-macos-player" title="Permanent link">&para;</a></h3>
+<p>Editor script <code>Assets/Editor/Day9Build.cs</code>（完整檔案：<a href="https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day9/Day9Build.cs">Day9Build.cs</a>）做三件事：建一個場景、放一個掛著 <code>Day9Client</code> 的物件、build 出 macOS player。</p>
+<div class="language-csharp highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">public</span><span class="w"> </span><span class="k">static</span><span class="w"> </span><span class="k">void</span><span class="w"> </span><span class="nf">BuildMac</span><span class="p">()</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="p">{</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">    </span><span class="kt">var</span><span class="w"> </span><span class="n">scene</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">EditorSceneManager</span><span class="p">.</span><span class="n">NewScene</span><span class="p">(</span><span class="n">NewSceneSetup</span><span class="p">.</span><span class="n">DefaultGameObjects</span><span class="p">,</span><span class="w"> </span><span class="n">NewSceneMode</span><span class="p">.</span><span class="n">Single</span><span class="p">);</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="kt">var</span><span class="w"> </span><span class="n">client</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">GameObject</span><span class="p">(</span><span class="s">&quot;Day9Client&quot;</span><span class="p">).</span><span class="n">AddComponent</span><span class="o">&lt;</span><span class="n">Day9Client</span><span class="o">&gt;</span><span class="p">();</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">    </span><span class="n">client</span><span class="p">.</span><span class="n">localMaterial</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">CreateMaterial</span><span class="p">(</span><span class="s">&quot;Assets/Materials/Local.mat&quot;</span><span class="p">,</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">Color</span><span class="p">(</span><span class="mf">0.2f</span><span class="p">,</span><span class="w"> </span><span class="mf">0.8f</span><span class="p">,</span><span class="w"> </span><span class="mf">0.4f</span><span class="p">));</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">    </span><span class="n">client</span><span class="p">.</span><span class="n">remoteMaterial</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">CreateMaterial</span><span class="p">(</span><span class="s">&quot;Assets/Materials/Remote.mat&quot;</span><span class="p">,</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">Color</span><span class="p">(</span><span class="mf">0.95f</span><span class="p">,</span><span class="w"> </span><span class="mf">0.45f</span><span class="p">,</span><span class="w"> </span><span class="mf">0.2f</span><span class="p">));</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">    </span><span class="n">System</span><span class="p">.</span><span class="n">IO</span><span class="p">.</span><span class="n">Directory</span><span class="p">.</span><span class="n">CreateDirectory</span><span class="p">(</span><span class="s">&quot;Assets/Scenes&quot;</span><span class="p">);</span>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">    </span><span class="n">EditorSceneManager</span><span class="p">.</span><span class="n">SaveScene</span><span class="p">(</span><span class="n">scene</span><span class="p">,</span><span class="w"> </span><span class="n">ScenePath</span><span class="p">);</span>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="w">    </span><span class="n">PlayerSettings</span><span class="p">.</span><span class="n">fullScreenMode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">FullScreenMode</span><span class="p">.</span><span class="n">Windowed</span><span class="p">;</span>
+</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="w">    </span><span class="n">PlayerSettings</span><span class="p">.</span><span class="n">runInBackground</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">true</span><span class="p">;</span>
+</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>
+</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="w">    </span><span class="kt">var</span><span class="w"> </span><span class="n">report</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">BuildPipeline</span><span class="p">.</span><span class="n">BuildPlayer</span><span class="p">(</span><span class="k">new</span><span class="w"> </span><span class="n">BuildPlayerOptions</span>
+</span><span id="__span-7-14"><a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="w">    </span><span class="p">{</span>
+</span><span id="__span-7-15"><a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="w">        </span><span class="n">scenes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="p">[]</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">ScenePath</span><span class="w"> </span><span class="p">},</span>
+</span><span id="__span-7-16"><a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="w">        </span><span class="n">locationPathName</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;Build/Day9Client.app&quot;</span><span class="p">,</span>
+</span><span id="__span-7-17"><a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="w">        </span><span class="n">target</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">BuildTarget</span><span class="p">.</span><span class="n">StandaloneOSX</span><span class="p">,</span>
+</span><span id="__span-7-18"><a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a><span class="w">        </span><span class="n">options</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">BuildOptions</span><span class="p">.</span><span class="n">None</span><span class="p">,</span>
+</span><span id="__span-7-19"><a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a><span class="w">    </span><span class="p">});</span>
+</span><span id="__span-7-20"><a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a><span class="w">    </span><span class="n">Debug</span><span class="p">.</span><span class="n">Log</span><span class="p">(</span><span class="s">$&quot;[day9-build] result={report.summary.result} size={report.summary.totalSize} errors={report.summary.totalErrors}&quot;</span><span class="p">);</span>
+</span><span id="__span-7-21"><a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a><span class="w">    </span><span class="n">EditorApplication</span><span class="p">.</span><span class="n">Exit</span><span class="p">(</span><span class="n">report</span><span class="p">.</span><span class="n">summary</span><span class="p">.</span><span class="n">result</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">UnityEditor</span><span class="p">.</span><span class="n">Build</span><span class="p">.</span><span class="n">Reporting</span><span class="p">.</span><span class="n">BuildResult</span><span class="p">.</span><span class="n">Succeeded</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+</span><span id="__span-7-22"><a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a><span class="p">}</span>
+</span></code></pre></div>
+<p>兩個 material 是 Part 2 要用的，原因見<a href="#mine-1">地雷 1</a>。<code>runInBackground</code> 要打開，否則兩個視窗同時跑時，失去焦點的那個會暫停更新。</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="gp">$ </span><span class="nv">$UNITY</span><span class="w"> </span>-batchmode<span class="w"> </span>-nographics<span class="w"> </span>-projectPath<span class="w"> </span>cnp-day9-unity<span class="w"> </span>-executeMethod<span class="w"> </span>Day9Build.BuildMac<span class="w"> </span>-logFile<span class="w"> </span>day9-build.log
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="gp">$ </span><span class="nb">echo</span><span class="w"> </span><span class="nv">$?</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="go">0</span>
+</span></code></pre></div>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>com.heroiclabs.nakama-unity@https://github.com/heroiclabs/nakama-unity.git?path=/Packages/Nakama#v3.22.0 (location: .../Library/PackageCache/com.heroiclabs.nakama-unity@903c3cd9c59d)
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>Build Finished, Result: Success.
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>[day9-build] result=Succeeded size=107192976 errors=0
+</span></code></pre></div>
+<p>log 裡可能出現 <code>Error: Access token is unavailable; failed to update</code>。只要授權仍解析為 Personal、build 結果是 <code>Succeeded</code>，就可以繼續。</p>
+<h3 id="4-player">步驟 4:跑兩個 player<a class="headerlink" href="#4-player" title="Permanent link">&para;</a></h3>
+<p>啟動 player 前，確認 <code>lab-game-server</code> Fleet 有 Ready 的 server，並把 <code>nakama-lab</code> 的 Nakama port-forward 到本機 17350（<code>kubectl -n nakama-lab port-forward svc/nakama 17350:7350</code>）。A 開視窗並在結束前截圖，B 用 <code>-batchmode -nographics</code> 在背景跑：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="gp">$ </span><span class="nv">APP</span><span class="o">=</span>cnp-day9-unity/Build/Day9Client.app/Contents/MacOS/Day9Client
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="gp">$ </span><span class="nv">$APP</span><span class="w"> </span>-logFile<span class="w"> </span>player-a.log<span class="w"> </span>-player<span class="w"> </span>unity-a<span class="w"> </span>-nakamaPort<span class="w"> </span><span class="m">17350</span><span class="w"> </span>-screenshot<span class="w"> </span>player-a.png<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span>-screen-width<span class="w"> </span><span class="m">1280</span><span class="w"> </span>-screen-height<span class="w"> </span><span class="m">720</span><span class="w"> </span>-screen-fullscreen<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="p">&amp;</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="gp">$ </span><span class="nv">$APP</span><span class="w"> </span>-batchmode<span class="w"> </span>-nographics<span class="w"> </span>-logFile<span class="w"> </span>player-b.log<span class="w"> </span>-player<span class="w"> </span>unity-b<span class="w"> </span>-nakamaPort<span class="w"> </span><span class="m">17350</span><span class="w"> </span><span class="p">&amp;</span>
+</span></code></pre></div>
+<p>兩個 player 都以 exit code 0 結束。從兩份 log 挑出 client 印的狀態行（下面節錄登入到結果的部分）：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="gp">$ </span>grep<span class="w"> </span>-hF<span class="w"> </span><span class="s1">&#39;[day9]&#39;</span><span class="w"> </span>player-a.log<span class="w"> </span>player-b.log
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="go">[day9] unity-a: login user=3509bbe2 created=True</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="go">[day9] unity-a: matchmaker ticket 90e22260</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="go">[day9] unity-a: matchmaker_matched users=2</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="go">[day9] unity-a: notification 6006 gameserver=lab-game-server-4f7v7-ddw75 token=wrb</span>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="go">[day9] unity-a: rpc get_assignment found=True matches_notification=True</span>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="go">[day9] unity-a: udp via proxy with token -&gt; ACK: hello-unity-a</span>
+</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="go">[day9] unity-a: udp via proxy with wrong token -&gt; (no reply)</span>
+</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="go">[day9] unity-a: RESULT ok=true gameserver=lab-game-server-4f7v7-ddw75 token=wrb</span>
+</span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="go">[day9] unity-b: login user=ee99bee2 created=True</span>
+</span><span id="__span-11-11"><a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="go">[day9] unity-b: matchmaker ticket b791dbb6</span>
+</span><span id="__span-11-12"><a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a><span class="go">[day9] unity-b: matchmaker_matched users=2</span>
+</span><span id="__span-11-13"><a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a><span class="go">[day9] unity-b: notification 6006 gameserver=lab-game-server-4f7v7-ddw75 token=wrb</span>
+</span><span id="__span-11-14"><a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a><span class="go">[day9] unity-b: rpc get_assignment found=True matches_notification=True</span>
+</span><span id="__span-11-15"><a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a><span class="go">[day9] unity-b: udp via proxy with token -&gt; ACK: hello-unity-b</span>
+</span><span id="__span-11-16"><a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a><span class="go">[day9] unity-b: udp via proxy with wrong token -&gt; (no reply)</span>
+</span><span id="__span-11-17"><a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a><span class="go">[day9] unity-b: RESULT ok=true gameserver=lab-game-server-4f7v7-ddw75 token=wrb</span>
+</span></code></pre></div>
+<p>GameServer 這一側的對照跟 Day 7 步驟 7 相同：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>gs<span class="w"> </span>lab-game-server-4f7v7-ddw75<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">    </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.state} {.metadata.labels.agones\.dev/fleet} tokens={.metadata.annotations.quilkin\.dev/tokens}&#39;</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="go">Allocated lab-game-server tokens=d3Ji</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="gp">$ </span><span class="nb">echo</span><span class="w"> </span>-n<span class="w"> </span>wrb<span class="w"> </span><span class="p">|</span><span class="w"> </span>base64
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="go">d3Ji</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="gp">$ </span>kubectl<span class="w"> </span>logs<span class="w"> </span>lab-game-server-4f7v7-ddw75<span class="w"> </span>-c<span class="w"> </span>simple-game-server<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span><span class="s1">&#39;Received UDP&#39;</span>
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="go">2026/09/29 05:02:25 Received UDP: hello-unity-b</span>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="go">2026/09/29 05:02:25 Received UDP: hello-unity-a</span>
+</span></code></pre></div>
+<p>再執行一次配對，這次分到另一顆 Ready 的 GameServer，兩個 player 一樣是 <code>RESULT ok=true</code>。player A 視窗的截圖：</p>
+<p><img alt="Unity player A 的畫面：依序列出登入、matchmaker ticket、配對成立、6006 通知的 GameServer 與 token、RPC 比對結果、UDP 經 Quilkin 收到 ACK、錯誤 token 無回應，以及 RESULT ok=true" src="../../assets/screenshots/sprint5-day9/sdk-flow-player-a.png" /></p>
+<h2 id="part-2relay-server">Part 2：relay server 與多人畫面同步<a class="headerlink" href="#part-2relay-server" title="Permanent link">&para;</a></h2>
+<h3 id="5-go-relay-server">步驟 5:用 Go 寫 relay server<a class="headerlink" href="#5-go-relay-server" title="Permanent link">&para;</a></h3>
+<p>relay server 用 Go 加 Agones Go SDK（v1.60.0）寫（完整檔案：<a href="https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day9/relay-server/main.go">relay-server/main.go</a>），協定是三種純文字訊息：</p>
+<table>
+<thead>
+<tr>
+<th>訊息</th>
+<th>意思</th>
+<th>relay 的反應</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>JOIN &lt;player&gt;</code></td>
+<td>玩家加入</td>
+<td>用來源位址記下這個玩家，回 <code>WELCOME &lt;player&gt;</code></td>
+</tr>
+<tr>
+<td><code>POS &lt;player&gt; &lt;seq&gt; &lt;x&gt; &lt;z&gt;</code></td>
+<td>玩家目前的位置</td>
+<td>原樣轉給其他所有玩家</td>
+</tr>
+<tr>
+<td><code>BYE &lt;player&gt;</code></td>
+<td>玩家離開</td>
+<td>從名單移除</td>
+</tr>
+</tbody>
+</table>
+<p>client 送出的每個封包尾端都帶著 routing token，Quilkin 轉送前已經剝掉，所以 relay 收到的是乾淨的訊息。轉發的核心：</p>
+<div class="language-go highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="k">case</span><span class="w"> </span><span class="s">&quot;POS&quot;</span><span class="p">:</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">    </span><span class="nx">p</span><span class="p">,</span><span class="w"> </span><span class="nx">ok</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">r</span><span class="p">.</span><span class="nx">peers</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">!</span><span class="nx">ok</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="w">        </span><span class="k">return</span>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">    </span><span class="p">}</span>
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="w">    </span><span class="nx">p</span><span class="p">.</span><span class="nx">lastSeen</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">time</span><span class="p">.</span><span class="nx">Now</span><span class="p">()</span>
+</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="nx">otherKey</span><span class="p">,</span><span class="w"> </span><span class="nx">other</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="k">range</span><span class="w"> </span><span class="nx">r</span><span class="p">.</span><span class="nx">peers</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="nx">otherKey</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="nx">key</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="w">            </span><span class="k">continue</span>
+</span><span id="__span-13-10"><a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="w">        </span><span class="p">}</span>
+</span><span id="__span-13-11"><a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="w">        </span><span class="nx">r</span><span class="p">.</span><span class="nx">send</span><span class="p">(</span><span class="nx">other</span><span class="p">.</span><span class="nx">addr</span><span class="p">,</span><span class="w"> </span><span class="nx">msg</span><span class="p">)</span>
+</span><span id="__span-13-12"><a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="w">        </span><span class="nx">r</span><span class="p">.</span><span class="nx">forwarded</span><span class="p">[</span><span class="nx">p</span><span class="p">.</span><span class="nx">name</span><span class="o">+</span><span class="s">&quot;-&gt;&quot;</span><span class="o">+</span><span class="nx">other</span><span class="p">.</span><span class="nx">name</span><span class="p">]</span><span class="o">++</span>
+</span><span id="__span-13-13"><a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="nx">n</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="nx">r</span><span class="p">.</span><span class="nx">forwarded</span><span class="p">[</span><span class="nx">p</span><span class="p">.</span><span class="nx">name</span><span class="o">+</span><span class="s">&quot;-&gt;&quot;</span><span class="o">+</span><span class="nx">other</span><span class="p">.</span><span class="nx">name</span><span class="p">];</span><span class="w"> </span><span class="nx">n</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nx">n</span><span class="o">%</span><span class="mi">50</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-13-14"><a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="w">            </span><span class="nx">log</span><span class="p">.</span><span class="nx">Printf</span><span class="p">(</span><span class="s">&quot;relay %s-&gt;%s count=%d last=%q&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">p</span><span class="p">.</span><span class="nx">name</span><span class="p">,</span><span class="w"> </span><span class="nx">other</span><span class="p">.</span><span class="nx">name</span><span class="p">,</span><span class="w"> </span><span class="nx">n</span><span class="p">,</span><span class="w"> </span><span class="nx">msg</span><span class="p">)</span>
+</span><span id="__span-13-15"><a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="w">        </span><span class="p">}</span>
+</span><span id="__span-13-16"><a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a><span class="w">    </span><span class="p">}</span>
+</span></code></pre></div>
+<p><code>key</code> 是封包的來源位址（IP:port）。所有玩家都經過 Quilkin 進來，來源 IP 都是 proxy 的出口 IP，relay 靠 port 分辨是哪個玩家。回傳給玩家的封包也送到這個位址，Quilkin 會把它轉回對應的 client。</p>
+<p>跟 Agones 的互動有四個：啟動後呼叫 <code>Ready()</code>；每 2 秒呼叫 <code>Health()</code>；用 <code>WatchGameServer()</code> 得知自己被分配；對戰結束時呼叫 <code>Shutdown()</code>。結束的條件是被分配之後，所有玩家都已離開，或 60 秒沒有收到任何封包：</p>
+<div class="language-go highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">r</span><span class="w"> </span><span class="o">*</span><span class="nx">relay</span><span class="p">)</span><span class="w"> </span><span class="nx">shouldShutdown</span><span class="p">()</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="w">    </span><span class="nx">r</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nx">Lock</span><span class="p">()</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">    </span><span class="k">defer</span><span class="w"> </span><span class="nx">r</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nx">Unlock</span><span class="p">()</span>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">!</span><span class="nx">r</span><span class="p">.</span><span class="nx">allocated</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nx">r</span><span class="p">.</span><span class="nx">lastPkt</span><span class="p">.</span><span class="nx">IsZero</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="kc">false</span>
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="w">    </span><span class="p">}</span>
+</span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nb">len</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nx">peers</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nx">time</span><span class="p">.</span><span class="nx">Since</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nx">lastPkt</span><span class="p">)</span><span class="w"> </span><span class="p">&gt;</span><span class="w"> </span><span class="nx">idleTimeout</span>
+</span><span id="__span-14-8"><a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="p">}</span>
+</span></code></pre></div>
+<p>這就是 Day 8 步驟 2 講的 graceful shutdown：由 game server 自己宣告對戰結束，Agones 不必等 health check 失敗。</p>
+<h3 id="6build-image-relay-fleet">步驟 6:build image 並部署 relay Fleet<a class="headerlink" href="#6build-image-relay-fleet" title="Permanent link">&para;</a></h3>
+<p>image 用 multi-stage Dockerfile，最終層是 distroless（完整檔案：<a href="https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day9/relay-server/Dockerfile">relay-server/Dockerfile</a>）：</p>
+<div class="language-dockerfile highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="k">FROM</span><span class="w"> </span><span class="s">golang:1.26</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="s">build</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="k">WORKDIR</span><span class="w"> </span><span class="s">/src</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="k">COPY</span><span class="w"> </span>go.mod<span class="w"> </span>go.sum<span class="w"> </span>./
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="k">RUN</span><span class="w"> </span>go<span class="w"> </span>mod<span class="w"> </span>download
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="k">COPY</span><span class="w"> </span>main.go<span class="w"> </span>./
+</span><span id="__span-15-6"><a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="k">RUN</span><span class="w"> </span><span class="nv">CGO_ENABLED</span><span class="o">=</span><span class="m">0</span><span class="w"> </span><span class="nv">GOOS</span><span class="o">=</span>linux<span class="w"> </span>go<span class="w"> </span>build<span class="w"> </span>-trimpath<span class="w"> </span>-ldflags<span class="o">=</span><span class="s2">&quot;-s -w&quot;</span><span class="w"> </span>-o<span class="w"> </span>/relay<span class="w"> </span>.
+</span><span id="__span-15-7"><a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>
+</span><span id="__span-15-8"><a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="k">FROM</span><span class="w"> </span><span class="s">gcr.io/distroless/static-debian12:nonroot</span>
+</span><span id="__span-15-9"><a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="k">COPY</span><span class="w"> </span>--from<span class="o">=</span>build<span class="w"> </span>/relay<span class="w"> </span>/relay
+</span><span id="__span-15-10"><a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a><span class="k">EXPOSE</span><span class="w"> </span><span class="s">7654/udp</span>
+</span><span id="__span-15-11"><a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a><span class="k">ENTRYPOINT</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;/relay&quot;</span><span class="p">]</span>
+</span></code></pre></div>
+<p>用 ACR Tasks 在雲端 build，不需要本機 Docker：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="gp">$ </span>az<span class="w"> </span>acr<span class="w"> </span>build<span class="w"> </span>-r<span class="w"> </span>&lt;ACR-NAME&gt;<span class="w"> </span>-t<span class="w"> </span>cnp-day9-relay:0.1.0<span class="w"> </span>--platform<span class="w"> </span>linux/amd64<span class="w"> </span>.
+</span></code></pre></div>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>    repository: cnp-day9-relay
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>    tag: 0.1.0
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>    digest: sha256:bb1dff40c35c8c41b0b62d35a90b95fc5af20c34e515db166d3ec8aeed3a7463
+</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>Run ID: cef was successful after 1m21s
+</span></code></pre></div>
+<p>前提是叢集要有權限拉這個 registry 的 image，可以用 <code>az aks check-acr -g &lt;RESOURCE-GROUP&gt; -n &lt;CLUSTER&gt; --acr &lt;ACR-NAME&gt;.azurecr.io</code> 確認；沒有權限時，授權方式見 <a href="https://learn.microsoft.com/en-us/azure/aks/cluster-container-registry-integration">AKS 與 Azure Container Registry 整合</a>。接著 Fleet 由 Day 7 的 <code>lab-game-server</code> 改出（完整檔案：<a href="https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day9/relay-fleet.yaml">relay-fleet.yaml</a>）：名稱改成 <code>lab-relay-server</code>、container 改用 relay image，port 仍是 7654。</p>
+<p>Nakama 這一側改兩處。第一處是 Lua module：allocation selector 原本寫死 <code>lab-game-server</code>，改成從 runtime env 讀（完整檔案：<a href="https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day9/nakama-lab-module.yaml">nakama-lab-module.yaml</a>）：</p>
+<div class="language-lua highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="nv">selectors</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nv">matchLabels</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;agones.dev/fleet&quot;</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nv">context</span><span class="p">.</span><span class="py">env</span><span class="p">[</span><span class="s2">&quot;FLEET_NAME&quot;</span><span class="p">]</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">},</span>
+</span></code></pre></div>
+<p>第二處是 Nakama 啟動參數，加上 <code>--runtime.env "FLEET_NAME=lab-relay-server"</code>（<a href="https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day9/nakama-lab.yaml">nakama-lab.yaml</a>）。套用修改後的 module 與 Deployment，等 Nakama rollout 完成；Nakama 的 pod 換過之後，原本的 port-forward 會失效，要重開一次（見 <a href="../sprint5-day6-matchmaking/#mine-3">Day 6 地雷 3</a>）。部署 relay Fleet 後，兩顆 relay 都 Ready：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>NAME                           STATE   ADDRESS         PORT   NODE
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>lab-relay-server-zn6v7-5k8cb   Ready   &lt;NODE-IP&gt;       7020   aks-gslab-29120627-vmss000000
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>lab-relay-server-zn6v7-7rxkc   Ready   &lt;NODE-IP&gt;       7843   aks-gslab-29120627-vmss000000
+</span></code></pre></div>
+<p>relay 的 log 第一行是 <code>relay listening on :7654, marked Ready</code>，代表它已經呼叫過 <code>Ready()</code>。</p>
+<h3 id="7client-relay">步驟 7:client 加上 relay 模式<a class="headerlink" href="#7client-relay" title="Permanent link">&para;</a></h3>
+<p>client 加一個 <code>-relay &lt;秒數&gt;</code> 參數。拿到 assignment 之後，改走 relay 流程：先用錯的 token 送一次 <code>JOIN</code> 確認被擋下，再用正確 token 加入，然後每 50 毫秒送一次自己的位置，讓方塊繞著圓心轉。兩個 player 的相位差半圈，畫面上會在圓的兩端：</p>
+<div class="language-csharp highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="n">Time</span><span class="p">.</span><span class="n">realtimeSinceStartup</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">start</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">relaySeconds</span><span class="p">)</span>
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="p">{</span>
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="w">    </span><span class="kt">var</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Time</span><span class="p">.</span><span class="n">realtimeSinceStartup</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">start</span><span class="p">;</span>
+</span><span id="__span-20-4"><a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="w">    </span><span class="kt">var</span><span class="w"> </span><span class="n">pos</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">Vector3</span><span class="p">(</span><span class="n">Mathf</span><span class="p">.</span><span class="n">Cos</span><span class="p">(</span><span class="n">t</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">1.5f</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">phase</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">4f</span><span class="p">,</span><span class="w"> </span><span class="mf">0.5f</span><span class="p">,</span><span class="w"> </span><span class="n">Mathf</span><span class="p">.</span><span class="n">Sin</span><span class="p">(</span><span class="n">t</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">1.5f</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">phase</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">4f</span><span class="p">);</span>
+</span><span id="__span-20-5"><a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="w">    </span><span class="n">local</span><span class="p">.</span><span class="n">transform</span><span class="p">.</span><span class="n">position</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">pos</span><span class="p">;</span>
+</span><span id="__span-20-6"><a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="w">    </span><span class="n">sent</span><span class="o">++</span><span class="p">;</span>
+</span><span id="__span-20-7"><a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="w">    </span><span class="kt">var</span><span class="w"> </span><span class="n">msg</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Encoding</span><span class="p">.</span><span class="n">UTF8</span><span class="p">.</span><span class="n">GetBytes</span><span class="p">(</span><span class="s">$&quot;POS {playerName} {sent} {pos.x:F2} {pos.z:F2}&quot;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">token</span><span class="p">);</span>
+</span><span id="__span-20-8"><a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a><span class="w">    </span><span class="k">await</span><span class="w"> </span><span class="n">udp</span><span class="p">.</span><span class="n">SendAsync</span><span class="p">(</span><span class="n">msg</span><span class="p">,</span><span class="w"> </span><span class="n">msg</span><span class="p">.</span><span class="n">Length</span><span class="p">);</span>
+</span><span id="__span-20-9"><a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">framesDir</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="k">null</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="n">nextShot</span><span class="p">)</span>
+</span><span id="__span-20-10"><a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a><span class="w">    </span><span class="p">{</span>
+</span><span id="__span-20-11"><a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a><span class="w">        </span><span class="n">ScreenCapture</span><span class="p">.</span><span class="n">CaptureScreenshot</span><span class="p">(</span><span class="n">System</span><span class="p">.</span><span class="n">IO</span><span class="p">.</span><span class="n">Path</span><span class="p">.</span><span class="n">Combine</span><span class="p">(</span><span class="n">framesDir</span><span class="p">,</span><span class="w"> </span><span class="s">$&quot;frame-{frame++:D3}.png&quot;</span><span class="p">));</span>
+</span><span id="__span-20-12"><a id="__codelineno-20-12" name="__codelineno-20-12" href="#__codelineno-20-12"></a><span class="w">        </span><span class="n">nextShot</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mf">0.25f</span><span class="p">;</span>
+</span><span id="__span-20-13"><a id="__codelineno-20-13" name="__codelineno-20-13" href="#__codelineno-20-13"></a><span class="w">    </span><span class="p">}</span>
+</span><span id="__span-20-14"><a id="__codelineno-20-14" name="__codelineno-20-14" href="#__codelineno-20-14"></a><span class="w">    </span><span class="k">await</span><span class="w"> </span><span class="n">Task</span><span class="p">.</span><span class="n">Delay</span><span class="p">(</span><span class="mi">50</span><span class="p">);</span>
+</span><span id="__span-20-15"><a id="__codelineno-20-15" name="__codelineno-20-15" href="#__codelineno-20-15"></a><span class="p">}</span>
+</span></code></pre></div>
+<p>同時另一個迴圈接收對方的 <code>POS</code>，更新代表對方的方塊位置，並分別計數：</p>
+<div class="language-csharp highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="kt">var</span><span class="w"> </span><span class="n">f</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Encoding</span><span class="p">.</span><span class="n">UTF8</span><span class="p">.</span><span class="n">GetString</span><span class="p">(</span><span class="n">receive</span><span class="p">.</span><span class="n">Result</span><span class="p">.</span><span class="n">Buffer</span><span class="p">).</span><span class="n">Trim</span><span class="p">().</span><span class="n">Split</span><span class="p">(</span><span class="sc">&#39; &#39;</span><span class="p">);</span>
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">f</span><span class="p">.</span><span class="n">Length</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">5</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">f</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="s">&quot;POS&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">f</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">playerName</span><span class="p">)</span><span class="w"> </span><span class="k">continue</span><span class="p">;</span>
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="n">receivedFrom</span><span class="p">[</span><span class="n">f</span><span class="p">[</span><span class="mi">1</span><span class="p">]]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">receivedFrom</span><span class="p">.</span><span class="n">TryGetValue</span><span class="p">(</span><span class="n">f</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span><span class="w"> </span><span class="k">out</span><span class="w"> </span><span class="kt">var</span><span class="w"> </span><span class="n">n</span><span class="p">)</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span>
+</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="kt">var</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kt">float</span><span class="p">.</span><span class="n">Parse</span><span class="p">(</span><span class="n">f</span><span class="p">[</span><span class="mi">3</span><span class="p">],</span><span class="w"> </span><span class="n">System</span><span class="p">.</span><span class="n">Globalization</span><span class="p">.</span><span class="n">CultureInfo</span><span class="p">.</span><span class="n">InvariantCulture</span><span class="p">);</span>
+</span><span id="__span-21-5"><a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="kt">var</span><span class="w"> </span><span class="n">z</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kt">float</span><span class="p">.</span><span class="n">Parse</span><span class="p">(</span><span class="n">f</span><span class="p">[</span><span class="mi">4</span><span class="p">],</span><span class="w"> </span><span class="n">System</span><span class="p">.</span><span class="n">Globalization</span><span class="p">.</span><span class="n">CultureInfo</span><span class="p">.</span><span class="n">InvariantCulture</span><span class="p">);</span>
+</span><span id="__span-21-6"><a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="n">Avatar</span><span class="p">(</span><span class="n">f</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span><span class="w"> </span><span class="k">false</span><span class="p">).</span><span class="n">transform</span><span class="p">.</span><span class="n">position</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">new</span><span class="w"> </span><span class="n">Vector3</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="mf">0.5f</span><span class="p">,</span><span class="w"> </span><span class="n">z</span><span class="p">);</span>
+</span></code></pre></div>
+<p>時間到了送 <code>BYE</code>，最後判定：收到對方的封包數至少是自己送出數的一半，才算 <code>RESULT ok=true</code>。解析座標時固定用 <code>InvariantCulture</code>，避免系統語系把小數點當成逗號。</p>
+<h3 id="8">步驟 8:兩個視窗互相看到<a class="headerlink" href="#8" title="Permanent link">&para;</a></h3>
+<p>這一步兩個 player 都開視窗，各自每 0.25 秒存一張畫面：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="gp">$ </span><span class="nv">$APP</span><span class="w"> </span>-logFile<span class="w"> </span>relay-a.log<span class="w"> </span>-player<span class="w"> </span>unity-a<span class="w"> </span>-nakamaPort<span class="w"> </span><span class="m">17350</span><span class="w"> </span>-relay<span class="w"> </span><span class="m">10</span><span class="w"> </span>-frames<span class="w"> </span>frames-a<span class="w"> </span>-screenshot<span class="w"> </span>relay-a.png<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="w">    </span>-screen-width<span class="w"> </span><span class="m">960</span><span class="w"> </span>-screen-height<span class="w"> </span><span class="m">540</span><span class="w"> </span>-screen-fullscreen<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="p">&amp;</span>
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="gp">$ </span><span class="nv">$APP</span><span class="w"> </span>-logFile<span class="w"> </span>relay-b.log<span class="w"> </span>-player<span class="w"> </span>unity-b<span class="w"> </span>-nakamaPort<span class="w"> </span><span class="m">17350</span><span class="w"> </span>-relay<span class="w"> </span><span class="m">10</span><span class="w"> </span>-frames<span class="w"> </span>frames-b<span class="w"> </span>-screenshot<span class="w"> </span>relay-b.png<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="w">    </span>-screen-width<span class="w"> </span><span class="m">960</span><span class="w"> </span>-screen-height<span class="w"> </span><span class="m">540</span><span class="w"> </span>-screen-fullscreen<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="p">&amp;</span>
+</span></code></pre></div>
+<p>兩個 player 都以 exit code 0 結束：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="gp">$ </span>grep<span class="w"> </span>-hF<span class="w"> </span><span class="s1">&#39;[day9]&#39;</span><span class="w"> </span>relay-a.log<span class="w"> </span>relay-b.log<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s1">&#39;notification|JOIN|RELAY|RESULT&#39;</span>
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="go">[day9] unity-a: notification 6006 gameserver=lab-relay-server-zn6v7-hbck9 token=sa4</span>
+</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="go">[day9] unity-a: rpc get_assignment found=True matches_notification=True</span>
+</span><span id="__span-23-4"><a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="go">[day9] unity-a: relay JOIN with wrong token -&gt; (no reply)</span>
+</span><span id="__span-23-5"><a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="go">[day9] unity-a: relay JOIN with token -&gt; WELCOME unity-a</span>
+</span><span id="__span-23-6"><a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="go">[day9] unity-a: RELAY sent=153 received=unity-b:154</span>
+</span><span id="__span-23-7"><a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="go">[day9] unity-a: RESULT ok=true gameserver=lab-relay-server-zn6v7-hbck9 token=sa4</span>
+</span><span id="__span-23-8"><a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a><span class="go">[day9] unity-b: notification 6006 gameserver=lab-relay-server-zn6v7-hbck9 token=sa4</span>
+</span><span id="__span-23-9"><a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a><span class="go">[day9] unity-b: rpc get_assignment found=True matches_notification=True</span>
+</span><span id="__span-23-10"><a id="__codelineno-23-10" name="__codelineno-23-10" href="#__codelineno-23-10"></a><span class="go">[day9] unity-b: relay JOIN with wrong token -&gt; (no reply)</span>
+</span><span id="__span-23-11"><a id="__codelineno-23-11" name="__codelineno-23-11" href="#__codelineno-23-11"></a><span class="go">[day9] unity-b: relay JOIN with token -&gt; WELCOME unity-b</span>
+</span><span id="__span-23-12"><a id="__codelineno-23-12" name="__codelineno-23-12" href="#__codelineno-23-12"></a><span class="go">[day9] unity-b: RELAY sent=154 received=unity-a:153</span>
+</span><span id="__span-23-13"><a id="__codelineno-23-13" name="__codelineno-23-13" href="#__codelineno-23-13"></a><span class="go">[day9] unity-b: RESULT ok=true gameserver=lab-relay-server-zn6v7-hbck9 token=sa4</span>
+</span></code></pre></div>
+<p>10 秒內雙方各送出約 150 個位置，也收到對方約 150 個，沒有掉包。想把兩個視窗的逐格畫面左右並排成 GIF，可以用 ffmpeg：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="gp">$ </span>ffmpeg<span class="w"> </span>-framerate<span class="w"> </span><span class="m">4</span><span class="w"> </span>-i<span class="w"> </span>frames-a/frame-%03d.png<span class="w"> </span>-framerate<span class="w"> </span><span class="m">4</span><span class="w"> </span>-i<span class="w"> </span>frames-b/frame-%03d.png<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="w">    </span>-filter_complex<span class="w"> </span><span class="s2">&quot;[0:v]scale=480:-1[a];[1:v]scale=480:-1[b];[a][b]hstack=inputs=2,split[s0][s1];[s0]palettegen=max_colors=64[p];[s1][p]paletteuse=dither=bayer&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-24-3"><a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="w">    </span>-loop<span class="w"> </span><span class="m">0</span><span class="w"> </span>relay-two-players.gif
+</span></code></pre></div>
+<p><img alt="兩個 Unity 視窗左右並排的動畫：左邊是 player A、右邊是 player B，每個視窗裡綠色方塊是自己、橘色方塊是對方，兩個方塊沿著同一個圓相隔半圈移動" src="../../assets/screenshots/sprint5-day9/relay-two-players.gif" /></p>
+<p>綠色方塊是自己，橘色是對方。A 視窗裡的橘色方塊，就是 B 視窗裡的綠色方塊，位置互相對應。結束時兩個視窗的畫面：</p>
+<p><img alt="player A 視窗結束時的畫面：綠色方塊在上方、橘色方塊在下方，狀態文字顯示 RELAY sent=153 received=unity-b:154 與 RESULT ok=true" src="../../assets/screenshots/sprint5-day9/relay-player-a.png" /></p>
+<p><img alt="player B 視窗結束時的畫面：兩個方塊的位置與 A 視窗對應，狀態文字顯示 RESULT ok=true" src="../../assets/screenshots/sprint5-day9/relay-player-b.png" /></p>
+<p>relay server 這一側的 log 與 GameServer 狀態：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>2026/09/29 05:18:00 relay listening on :7654, marked Ready
+</span><span id="__span-25-2"><a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a>2026/09/29 05:29:26 state Allocated tokens=c2E0
+</span><span id="__span-25-3"><a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a>2026/09/29 05:29:31 join player=unity-a from=&lt;PROXY-EGRESS-IP&gt;:1026 peers=1
+</span><span id="__span-25-4"><a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a>2026/09/29 05:29:31 join player=unity-b from=&lt;PROXY-EGRESS-IP&gt;:1028 peers=2
+</span><span id="__span-25-5"><a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a>2026/09/29 05:29:31 relay unity-a-&gt;unity-b count=1 last=&quot;POS unity-a 1 4.00 0.00&quot;
+</span><span id="__span-25-6"><a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a>2026/09/29 05:29:31 relay unity-b-&gt;unity-a count=1 last=&quot;POS unity-b 1 -4.00 0.00&quot;
+</span><span id="__span-25-7"><a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a>2026/09/29 05:29:34 relay unity-a-&gt;unity-b count=50 last=&quot;POS unity-a 50 0.49 -3.97&quot;
+</span><span id="__span-25-8"><a id="__codelineno-25-8" name="__codelineno-25-8" href="#__codelineno-25-8"></a>2026/09/29 05:29:37 relay unity-b-&gt;unity-a count=100 last=&quot;POS unity-b 100 3.87 1.03&quot;
+</span><span id="__span-25-9"><a id="__codelineno-25-9" name="__codelineno-25-9" href="#__codelineno-25-9"></a>2026/09/29 05:29:41 relay unity-a-&gt;unity-b count=150 last=&quot;POS unity-a 150 -1.92 3.51&quot;
+</span><span id="__span-25-10"><a id="__codelineno-25-10" name="__codelineno-25-10" href="#__codelineno-25-10"></a>2026/09/29 05:29:41 relay unity-b-&gt;unity-a count=150 last=&quot;POS unity-b 150 1.73 -3.61&quot;
+</span><span id="__span-25-11"><a id="__codelineno-25-11" name="__codelineno-25-11" href="#__codelineno-25-11"></a>2026/09/29 05:29:41 bye player=unity-a peers=1
+</span><span id="__span-25-12"><a id="__codelineno-25-12" name="__codelineno-25-12" href="#__codelineno-25-12"></a>2026/09/29 05:29:41 bye player=unity-b peers=0
+</span><span id="__span-25-13"><a id="__codelineno-25-13" name="__codelineno-25-13" href="#__codelineno-25-13"></a>2026/09/29 05:29:42 session ended, calling SDK Shutdown
+</span></code></pre></div>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>05:29:26 lab-relay-server-zn6v7-hbck9   Allocated
+</span><span id="__span-26-2"><a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a>05:29:42 lab-relay-server-zn6v7-hbck9   Shutdown
+</span><span id="__span-26-3"><a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a>05:29:42 lab-relay-server-zn6v7-q6b8f   PortAllocation
+</span><span id="__span-26-4"><a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a>05:29:44 lab-relay-server-zn6v7-q6b8f   Ready
+</span></code></pre></div>
+<p>對照 relay 的 log：</p>
+<ul>
+<li><code>c2E0</code> 是 <code>sa4</code> 的 base64，跟 client 收到的 token 相同。</li>
+<li>兩個玩家的來源都是同一個 proxy 出口 IP，port 分別是 1026 與 1028。relay 看不到玩家的真實 IP，只能用 port 分辨。</li>
+<li>兩人都 <code>bye</code> 之後 1 秒，relay 呼叫 SDK <code>Shutdown()</code>，GameServer 轉成 <code>Shutdown</code>，Fleet 在 2 秒內補出新的 Ready。這個 relay 能自己收尾，不像 <code>simple-game-server</code> 要手動刪。</li>
+</ul>
+<h3 id="9">步驟 9:收尾<a class="headerlink" href="#9" title="Permanent link">&para;</a></h3>
+<p>relay 在對戰結束時會自己呼叫 <code>Shutdown()</code>，不需要手動刪 GameServer。不再使用時，依序刪掉 <code>lab-game-server</code> Fleet、<code>lab-relay-server</code> Fleet、<code>nakama-lab</code> namespace、<code>nakama-lab-gameserverallocation-create</code> Role/RoleBinding，最後刪掉演練節點池：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>delete<span class="w"> </span>-g<span class="w"> </span>&lt;RESOURCE-GROUP&gt;<span class="w"> </span>--cluster-name<span class="w"> </span>&lt;CLUSTER&gt;<span class="w"> </span>-n<span class="w"> </span>gslab
+</span></code></pre></div>
+<h2 id="_2">自我檢查<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>-executeMethod Day9Build.BuildMac</code> 的 log：<code>Build Finished, Result: Success.</code>，<code>errors=0</code>。</li>
+<li>兩個 player 的 log（Part 1）：同一個 <code>gameserver=</code> 與 <code>token=</code>；<code>matches_notification=True</code>；帶 token 收到 <code>ACK</code>、錯 token <code>(no reply)</code>；<code>RESULT ok=true</code>，exit 0。</li>
+<li><code>az acr build</code> 與 relay Fleet：build <code>successful</code>；<code>kubectl get gs</code> 有 2 顆 <code>lab-relay-server-*</code> Ready，log 有 <code>marked Ready</code>。</li>
+<li>兩個 player 的 log（Part 2）：<code>WELCOME &lt;player&gt;</code>；<code>RELAY received</code> 至少是自己 <code>sent</code> 的一半（本次量到約 153/154）；兩個視窗都看得到對方的方塊。</li>
+<li>relay server 的 log 與 <code>kubectl get gs -w</code>：兩個 <code>join</code> 來自同一個 IP、不同 port；兩個 <code>bye</code> 之後 <code>calling SDK Shutdown</code>，GameServer 轉 <code>Shutdown</code>，Fleet 補出新 Ready。</li>
+</ul>
+<h2 id="_3">地雷記錄<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<h3 id="mine-1">地雷 1:執行期建立的方塊在 player build 裡變成洋紅色<a class="headerlink" href="#mine-1" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：用 <code>GameObject.CreatePrimitive(PrimitiveType.Cube)</code> 在執行期建出方塊，再設定 <code>material.color</code>，build 出來的 player 裡方塊全部顯示成洋紅色，顏色設定沒有作用。</p>
+<p><strong>根因</strong>：這是 built-in render pipeline 的專案，build 時 Unity 只打包場景與資產實際引用到的 shader。場景裡沒有任何物件用到 Standard shader，它就被剝掉了；執行期才建的方塊找不到 shader，顯示成 Unity 代表「shader 錯誤」的洋紅色。</p>
+<p><strong>修法</strong>：在 build script 裡用 <code>new Material(Shader.Find("Standard"))</code> 建成 material 資產，指派給場景中 <code>Day9Client</code> 的序列化欄位，讓 Standard shader 因為被引用而打包進去；執行期改用 <code>sharedMaterial</code> 套上這兩個 material。另一個做法是把 shader 加進 Graphics Settings 的 <a href="https://docs.unity3d.com/6000.3/Documentation/Manual/class-GraphicsSettings.html">Always Included Shaders</a>。</p>
+<h2 id="_4">帶得走的東西<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<ul>
+<li>換成 SDK，省掉的是 WebSocket 與訊息格式的細節；登入、配對、RPC、UDP 帶 token 這條路本身跟 Day 7 一模一樣。</li>
+<li>Unity 可以完全用命令列操作：Editor 的 <code>-batchmode -executeMethod</code> 負責建專案與 build，player 的 <code>-logFile</code> 把執行結果寫進檔案，<code>ScreenCapture</code> 可以在沒人看著時存下畫面。</li>
+<li>要讓玩家看到彼此，game server 必須轉發；echo server 只能證明連得上，證明不了多人。</li>
+<li>經 Quilkin 進來的封包來源都是 proxy 的 IP，game server 靠 port 分辨玩家，看不到玩家的真實位址。</li>
+<li>game server 在對戰結束時自己呼叫 SDK <code>Shutdown()</code>，Fleet 會自動補回容量，營運端不需要清理。</li>
+</ul>
+<h2 id="_5">正式環境還要補的<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<p>WebGL、iOS、Android 的網路 API 限制各不相同，要上這些平台得分別驗證。Nakama 要有對外入口與 TLS，不能靠 port-forward。兩個 player 在同一台機器上時網路條件相同，收發數字不能代表真實玩家的網路狀況。</p>
+<p>relay 是純轉發：不驗證位置是否合理，也不檢查 <code>JOIN</code> 的玩家是不是這場配對名單上的人。正式環境要在玩家加入時，由 relay 以 server-to-server 的方式呼叫 Nakama RPC 查詢配對名單。client 也要補上玩家輸入、插值、預測與延遲補償。</p>
+<p>要擋作弊，server 必須自己計算遊戲狀態，不能只轉發。一個做法是用 Unity 做 dedicated server build（需要另外安裝 Dedicated Server Build Support 模組），搭配 Agones 的 Unity SDK 呼叫 <code>Ready()</code>、<code>Health()</code>、<code>Shutdown()</code>。</p>
+<h2 id="_6">延伸閱讀<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
+<p>想往下深挖，從這幾份開始：</p>
+<ul>
+<li><strong><a href="https://github.com/heroiclabs/nakama-unity">nakama-unity</a></strong> —— 官方 Unity client 的安裝方式（含 git URL 釘版本）與 session、socket、RPC 的用法範例。</li>
+<li><strong><a href="https://docs.unity3d.com/6000.3/Documentation/Manual/EditorCommandLineArguments.html">Unity Editor 命令列參數</a></strong> —— <code>-batchmode</code>、<code>-createProject</code>、<code>-executeMethod</code>、<code>-logFile</code> 的說明，對照步驟 1 與步驟 3。</li>
+<li><strong><a href="https://docs.unity3d.com/6000.3/Documentation/Manual/PlayerCommandLineArguments.html">Unity Player 命令列參數</a></strong> —— player 的 <code>-batchmode</code>、<code>-nographics</code>、<code>-logFile</code> 與 <code>-screen-*</code> 視窗參數。</li>
+<li><strong><a href="https://agones.dev/site/docs/guides/client-sdks/go/">Agones Go SDK</a></strong> —— relay server 用到的 <code>Ready</code>、<code>Health</code>、<code>Shutdown</code> 等生命週期呼叫。</li>
+<li><strong><a href="https://agones.dev/site/docs/guides/client-sdks/unity/">Agones Unity SDK</a></strong> —— 用 Unity 寫 dedicated server 時對應的 SDK 與安裝方式。</li>
+<li><strong><a href="https://heroiclabs.com/docs/nakama/concepts/multiplayer/relayed/">Nakama client relayed multiplayer</a></strong> —— Nakama 內建的轉發式多人模式，與本章 Agones 上的 relay server 對照。</li>
+</ul>
+<h2 id="_7">下一步<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h2>
+<p><a href="../sprint5-day10-decision-matrix/">Day 10</a> 不動手：回顧這十天的架構怎麼接起來、實務上什麼情況值得用 Agones 與 Quilkin、後端用 Nakama 還是自建，並列出這門課刻意沒教的主題。</p>
+<hr />
+<div class="admonition quote">
+<p>Nakama 標誌為 Heroic Labs 之官方資產，此處作社群教學用途。</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到頂端
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="頁腳" >
+        
+          
+          <a href="../sprint5-day8-observability-resilience/" class="md-footer__link md-footer__link--prev" aria-label="上一頁: Day 8 · 觀測與韌性">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                上一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 8 · 觀測與韌性
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../sprint5-day10-decision-matrix/" class="md-footer__link md-footer__link--next" aria-label="下一頁: Day 10 · 遊戲伺服器平台總結">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                下一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 10 · 遊戲伺服器平台總結
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      KAI Scheduler、HAMi、Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,作社群教學用途
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.code.annotate", "content.code.select", "content.tabs.link", "search.suggest", "search.highlight", "search.share"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u8907\u88fd", "clipboard.copy": "\u8907\u88fd", "search.result.more.one": "\u6b64\u9801\u5c1a\u6709 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.more.other": "\u6b64\u9801\u5c1a\u6709 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.none": "\u6c92\u6709\u7b26\u5408\u7684\u9805\u76ee", "search.result.one": "\u627e\u5230 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.other": "\u627e\u5230 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.placeholder": "\u6253\u5b57\u9032\u884c\u641c\u5c0b", "search.result.term.missing": "\u7f3a\u5c11\u5b57\u8a5e", "select.version": "\u9078\u64c7\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
