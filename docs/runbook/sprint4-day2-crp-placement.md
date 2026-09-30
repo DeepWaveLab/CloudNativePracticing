@@ -212,7 +212,7 @@ Day 1 與 Day 2 共用同一台 `cnp-fleet-vm`,做完後整台刪除:
 
 - **[ClusterResourcePlacement 概念頁](https://kubefleet.dev/docs/concepts/crp/)** —— CRP 的 resourceSelectors / policy / strategy 三段結構,以及 PickAll / PickFixed / PickN 的官方定義,對照今天三種選法的實測。
 - **[KubeFleet Placement 使用文件](https://kubefleet.dev/docs/how-tos/crp/)** —— 逐段解讀 placement status 的六個 condition(Scheduled → Available)的官方說明。
-- **[clusterAffinity / label selector 文件](https://kubefleet.dev/docs/how-tos/affinity/)** —— 階段 3「依標籤選」用到的 `requiredDuringSchedulingIgnoredDuringExecution` 與 `matchLabels` 語法出處。
+- **[clusterAffinity / label selector 文件](https://kubefleet.dev/docs/how-tos/affinities/)** —— 階段 3「依標籤選」用到的 `requiredDuringSchedulingIgnoredDuringExecution` 與 `matchLabels` 語法出處。
 
 ## 下一步
 

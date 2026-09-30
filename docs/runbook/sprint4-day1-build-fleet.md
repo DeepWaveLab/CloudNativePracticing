@@ -277,7 +277,7 @@ hub-agent 一裝好,查 hub 上的 API 資源就能知道 v0.3.1 到底提供哪
 
 - **[KubeFleet Quickstart](https://kubefleet.dev/docs/getting-started/)** —— 今天用的 hub-agent / member-agent 安裝與 join 指令稿的來源。它**沒寫**的部分才是雷:要你開多座 kind 叢集,卻沒提 `fs.inotify.*` 前置(地雷 #159 的成因)。
 - **[kind 這個工具的 "Known Issues"](https://kind.sigs.k8s.io/docs/user/known-issues/)** —— 「Pod errors due to too many open files」那一條,就是 #159 要人事先調高的 `fs.inotify.max_user_instances` / `max_user_watches`。
-- **[KubeFleet MemberCluster 概念頁](https://kubefleet.dev/docs/concepts/cluster/)** —— join 五步、`Joined` 與 `Healthy` 兩組 condition 的官方定義,對照今天實測的 status 逐字。
+- **[KubeFleet MemberCluster 概念頁](https://kubefleet.dev/docs/concepts/membercluster/)** —— join 的五個步驟與 `Joined` 狀態的官方說明,對照今天實測的 status。
 
 ## 下一步
 
