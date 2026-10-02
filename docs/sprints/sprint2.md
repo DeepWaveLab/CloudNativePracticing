@@ -1,6 +1,6 @@
 # Sprint 2 · eBPF 與執行期安全
 
-同一批核心事件,四種取用方式。從自己掛探針追 syscall 開始,一路走到把 Kubernetes 的 Service 實作整個換掉——這門課在 AKS 上把 **bpftrace**、**Falco**、**Tetragon**、**Cilium 與 Hubble** 各實測一輪,寫成可照抄的 runbook。每一章的指令與輸出都來自真實跑過的驗證紀錄,途中踩到的 **76 顆雷**以具名地雷收錄在各章。
+eBPF 讓程式可以安全地在 Linux 核心裡執行，許多觀測、安全與網路工具都建立在它上面。這個 sprint 從 eBPF 的基本概念開始，在 AKS 上依序操作 **bpftrace**、**Falco**、**Tetragon**、**Cilium 與 Hubble**，學會每一套看得到什麼、看不到什麼，最後一章整理四套工具的分工。
 
 <div style="text-align: center;" markdown>
 
@@ -13,13 +13,13 @@
 &nbsp;&nbsp;&nbsp;&nbsp;
 [![Cilium](../assets/logos/cilium-icon-color.svg){ width="72" }](https://cilium.io/)
 
-*四套工具:bpftrace(自己動手看)、Falco(規則引擎替你判斷)、Tetragon(在核心裡攔下來)、Cilium 與 Hubble(換掉網路資料平面並看清楚流量)。*
+*bpftrace 用來撰寫追蹤腳本，Falco 用規則偵測異常行為，Tetragon 在核心裡過濾與攔截事件，Cilium 取代網路資料平面，Hubble 觀察流量。*
 
 </div>
 
-**Day 0 從零講起,不預設你碰過 eBPF。** 而這個 sprint 有一個貫穿全程的問法:同一個動作,兩套工具同時開著跑——最值得看的結論,往往出現在**它們答案一樣錯**的那一格。
+Day 0 從零講起，不需要先接觸過 eBPF，也不需要 Sprint 1 的內容。Day 0 到 Day 6 在同一座叢集上進行，Day 7 起換成 Cilium 時要另建一座不帶 CNI 的 AKS 叢集（BYOCNI）。
 
-## 十一天的路線(Day 0–10)
+## 課程路線（Day 0–10）
 
 <div class="grid cards" markdown>
 
@@ -30,7 +30,7 @@
 
     ---
 
-    核心多長出的那套受控擴充介面:程式怎麼進去、掛得到哪些位置、verifier 憑什麼拒絕,以及為什麼同一支程式換一顆 kernel 還能跑。
+    說明 eBPF 程式怎麼載入核心、能掛在哪些位置、verifier 怎麼檢查程式是否安全，以及同一支程式為什麼能在不同版本的 kernel 上執行；最後部署一顆特權 pod，用一行 bpftrace 追蹤另一顆 pod 的程式執行。
 
 -   ![bpftrace](../assets/logos/bpftrace-logo.svg#only-light){ width="72" }
     ![bpftrace](../assets/logos/bpftrace-logo-dark.svg#only-dark){ width="72" }
@@ -39,13 +39,13 @@
 
     ---
 
-    `execsnoop`、`opensnoop`、`tcpconnect` 各自的邊界,加一支自己寫的追蹤腳本;共同盲點是沒有 pod 身分。
+    用 `execsnoop`、`opensnoop`、`tcpconnect` 觀察行程執行、檔案開啟與對外連線，了解各自的限制；再自己寫一支 `.bt` 腳本，找出寫入特定目錄的行程。
 
 -   **Day 2 · [把核心事件接回 Kubernetes](../runbook/sprint2-day2-bpftrace-kubernetes.md)**
 
     ---
 
-    cgroup id 換算回 pod 名字的五步鏈(整條不碰 API server),只追一顆 pod 的過濾器,以及一份手工的行為基線。
+    把 bpftrace 輸出的 cgroup id 對應回 pod 名稱，過程不需要呼叫 API server；再用這個對應寫出只追蹤單一 pod 的過濾器，替一顆 nginx 建立啟動行為基線。
 
 -   ![Falco](../assets/logos/falco-icon-color.svg){ width="44" }
 
@@ -53,7 +53,7 @@
 
     ---
 
-    預設只有 25 條規則,而閒置八分半是零告警。完整解剖一條規則的 condition 怎麼收斂到 syscall 欄位。
+    安裝 Falco，拆解一條預設規則從 `condition` 到 syscall 欄位的結構，觸發告警並找出告警裡用來辨識 pod 的欄位。
 
 -   ![Falco](../assets/logos/falco-icon-color.svg){ width="44" }
 
@@ -61,7 +61,7 @@
 
     ---
 
-    補上 Day 3 找到的兩個洞,把誤報從每分鐘 180 筆調到 0——然後把交出去的偵測力量給你看。
+    用 `list`、`macro`、`rule` 撰寫自訂規則，補上預設規則沒涵蓋的情況；用 `exceptions` 調校誤報並了解調校會犧牲哪些偵測能力，最後用 Falcosidekick 把告警送出節點。
 
 -   ![Tetragon](../assets/logos/tetragon-icon-color.svg){ width="44" }
 
@@ -69,7 +69,7 @@
 
     ---
 
-    核心層過濾是真的:3000 次不符合的操作零筆出核心。但兩套工具在 `nsenter` 這題錯得一模一樣。
+    安裝 Tetragon 並撰寫 TracingPolicy，了解在核心裡過濾事件與 Falco 在使用者空間比對規則的差別，再讓兩套工具同時觀察同一組可疑操作。
 
 -   ![Tetragon](../assets/logos/tetragon-icon-color.svg){ width="44" }
 
@@ -77,7 +77,7 @@
 
     ---
 
-    SIGKILL 到底是擋住了操作,還是只是事後殺掉行程?量給你看。以及寫錯一條攔截規則,從應用側看是什麼樣子。
+    用 Tetragon 對違規行程送出 SIGKILL，同時確認正常工作負載不受影響；並說明 SIGKILL 是在操作之前擋下還是事後終止，以及規則寫錯時應用程式會看到什麼。
 
 -   ![Cilium](../assets/logos/cilium-icon-color.svg){ width="44" }
 
@@ -85,15 +85,15 @@
 
     ---
 
-    一座沒有 CNI 的叢集長什麼樣,以及動手換掉之前先問清楚:那個要被換掉的元件,現在到底還在做什麼?
+    建立 BYOCNI 叢集，自行安裝 Cilium 並開啟 kube-proxy replacement。動手前先了解 kube-proxy 負責哪些工作，完成後確認叢集裡沒有 kube-proxy、Service 仍然可用。
 
 -   ![Cilium](../assets/logos/cilium-icon-color.svg){ width="44" }
 
-    **Day 8 · [CiliumNetworkPolicy(L3/L4 → L7)](../runbook/sprint2-day8-cilium-network-policy.md)**
+    **Day 8 · [CiliumNetworkPolicy（L3/L4 → L7）](../runbook/sprint2-day8-cilium-network-policy.md)**
 
     ---
 
-    從命名空間隔離寫到 HTTP 方法:同一顆 pod、同一個服務,GET 通過而 POST 被擋。以及網路政策為什麼只會放寬不會收緊。
+    撰寫 CiliumNetworkPolicy，從命名空間隔離、埠限制、FQDN 做到 L7 的 HTTP 方法控制，例如同一個服務允許 GET、拒絕 POST；也說明多條政策疊加時的生效規則。
 
 -   ![Cilium](../assets/logos/cilium-icon-color.svg){ width="44" }
 
@@ -101,12 +101,12 @@
 
     ---
 
-    被擋下的流量看得見嗎?三個探針各問一件事,而其中一個答案是:它看不見這座叢集最大的政策破口。
+    開啟 Hubble 的 CLI 與 UI，找出 Day 8 被 L4 丟棄與被 L7 拒絕的流量，並了解 Hubble 觀察不到的範圍。
 
--   **Day 10 · [綜合:四套工具的分工](../runbook/sprint2-day10-decision-matrix.md)**
+-   **Day 10 · [綜合：四套工具的分工](../runbook/sprint2-day10-decision-matrix.md)**
 
     ---
 
-    整個 sprint 的數字收斂成一張分工表,每一格都追溯得到某一天的量測;以及那句貫穿全程的結論——**盲點就是執行點**。
+    不動手。整理四套工具的掛載位置、資源用量與失效模式，說明每套工具的觀測盲點來自它掛在核心的哪個位置，以及各自適合的用途。
 
 </div>

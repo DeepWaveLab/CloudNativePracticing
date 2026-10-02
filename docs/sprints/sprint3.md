@@ -1,6 +1,6 @@
 # Sprint 3 · WebAssembly
 
-容器之外的另一種執行層。這門課在 AKS 上把 wasm 進 Kubernetes 的三條現行路線——**wasmCloud**、**WasmEdge + runwasi**、**Spin/SpinKube**——各實測一輪,寫成可照抄的 runbook。每一章的指令與輸出都來自真實跑過的驗證紀錄,途中踩到的 **41 顆雷**以具名地雷收錄在各章。
+WebAssembly（wasm）是容器之外另一種在 Kubernetes 上執行程式的方式。這個 sprint 先說明 wasm 是什麼、Kubernetes 怎麼透過 RuntimeClass 與 containerd shim 執行它，再在 AKS 上操作三條路線：**wasmCloud**、**WasmEdge + runwasi**、**Spin/SpinKube**，了解各自的部署方式與對節點的改動。過程中也會量測 WasmEdge 與一般容器的冷啟動與記憶體用量，並練習移除 SpinKube、檢查節點上的殘留，最後一章整理成選型用的決策表。
 
 <div style="text-align: center;" markdown>
 
@@ -12,15 +12,15 @@
 &nbsp;&nbsp;&nbsp;&nbsp;
 [![SpinKube](../assets/logos/spinkube-icon-color.svg){ width="80" }](https://www.spinkube.dev/)
 
-*三條路線:wasmCloud(完全不碰節點)、WasmEdge(手動裝 shim)、SpinKube(operator 自動改節點)。*
+*三條路線對節點的改動由小到大：wasmCloud 不改動節點，WasmEdge 要手動安裝 shim，SpinKube 由 operator 修改節點設定。*
 
 </div>
 
-三條路線刻意照**對節點的侵入程度由低到高**排:最乾淨的先做,最後才動 containerd,前面的量測才不會被後面的改動污染,而最後一天也才有乾淨的基準可以驗「拆得掉嗎」。
+三條路線依對節點的改動由小到大排列。Day 1 會先存下原始節點的設定，之後每條路線都拿它比對，看出安裝時改了什麼、移除後還留下什麼。
 
-**Day 0 給三個問題與判斷方法出發**:工作負載要不要長得像 Kubernetes 原生?動機是不是冷啟動或密度?你選的工具明年還在嗎?每條路線收尾那天當場下判定,Day 9 收成決策表——途中有兩個量測結果跟宣傳方向相反。
+Day 0 會提出三個選型問題：工作負載需不需要用一般的 Kubernetes 物件管理？導入的動機是冷啟動速度還是部署密度？選用的工具明年是否還在維護？每條路線結束時都用這三個問題判斷，Day 9 整理成決策表。
 
-## 課程路線(Day 0–9)
+## 課程路線（Day 0–9）
 
 <div class="grid cards" markdown>
 
@@ -30,15 +30,15 @@
 
     ---
 
-    不是語言,是編譯目標;預設零能力的沙箱。三個問題與「怎麼判斷工具還活著」的五條檢查清單,都從這裡出發。
+    不需要叢集。介紹 wasm 這種編譯目標、它預設沒有任何系統能力的沙箱模型，以及 Kubernetes 執行 wasm 的機制；並提供判斷開源專案是否還在維護的檢查清單。
 
 -   ![Kubernetes](../assets/logos/kubernetes-icon-color.svg){ width="44" }
 
-    **Day 1 · [RuntimeClass 七層實測](../runbook/sprint3-day1-three-generations.md)**
+    **Day 1 · [RuntimeClass 與節點執行路徑](../runbook/sprint3-day1-three-generations.md)**
 
     ---
 
-    把 RuntimeClass 從 Pod spec 追到節點上的 shim 行程,七層逐層指出來;順便對已退役的 WASI node pool 下指令,看它今天回什麼。
+    建立叢集，把 RuntimeClass 從 Pod spec 一路追到節點上的 shim 行程，逐層說明每一段的設定；也確認 Krustlet 與 AKS WASI node pool 這兩條已退役路線的現況，並存下之後比對用的節點設定。
 
 -   ![wasmCloud](../assets/logos/wasmcloud-icon-color.svg){ width="44" }
 
@@ -46,15 +46,15 @@
 
     ---
 
-    一條不碰節點的路線:五份 diff 零行輸出為證。代價換到哪裡去了,三筆帳一起看。
+    安裝 wasmCloud 並執行第一個元件，了解它為什麼不經過 kubelet 與 CRI；比對節點設定確認這條路線沒有改動節點，並說明這種做法的代價。
 
 -   ![wasmCloud](../assets/logos/wasmcloud-icon-color.svg){ width="44" }
 
-    **Day 3 · [分散式模型與驗收改寫](../runbook/sprint3-day3-wasmcloud-distributed.md)**
+    **Day 3 · [wasmCloud 分散式模型](../runbook/sprint3-day3-wasmcloud-distributed.md)**
 
     ---
 
-    原訂驗收在 2.6.1 上表達不出來——判定「做不到」需要三層證據。改驗它實際支援的事,兩半都過。
+    加入第二台節點，學 wasmCloud 的分散式模型：同一個映像怎麼只靠能力設定改變行為，以及 workload 會被排到哪台節點；也說明怎麼確認某項功能在目前版本裡沒有對應機制。
 
 -   ![WasmEdge](../assets/logos/wasmedge-icon-color.svg){ width="44" }
 
@@ -62,59 +62,59 @@
 
     ---
 
-    手動裝 shim,精確量出「第幾步開始節點不一樣」。而「同一支 wasm 程式」在兩個執行期之間不存在——差在第 5 個位元組。
+    手動安裝 WasmEdge shim、修改 containerd 設定並建立 RuntimeClass，每做一步就和原始節點比對；也說明同一支 wasm 程式為什麼不一定能在兩個執行期之間通用。
 
 -   ![WebAssembly](../assets/logos/webassembly-icon-color.svg){ width="44" }
 
-    **Day 5 · [成本實測](../runbook/sprint3-day5-cost-measurement.md)**
+    **Day 5 · [冷啟動、記憶體與映像大小](../runbook/sprint3-day5-cost-measurement.md)**
 
     ---
 
-    同一份原始碼編三個目標。冷啟動的差異量不出來,記憶體的差異方向跟宣傳相反——兩個帶信賴區間的否定結論。
+    把同一份原始碼編成三個目標，在同一顆節點上比較冷啟動、記憶體與映像大小，並學會用對照組與信賴區間判斷量到的差異是否成立。
 
 -   ![SpinKube](../assets/logos/spinkube-icon-color.svg){ width="44" }
 
-    **Day 6 · [SpinKube(上):shim 佈建](../runbook/sprint3-day6-spinkube-shim.md)**
+    **Day 6 · [SpinKube（上）：shim 佈建](../runbook/sprint3-day6-spinkube-shim.md)**
 
     ---
 
-    operator 自動改節點——供應鏈、紀錄、範圍六件事都做得比手動好,唯一做壞的是它用猜的那一步。
+    安裝 cert-manager 與 runtime-class-manager，由它自動把 Spin 的 shim 裝上節點；和 Day 4 的手動流程對照，看自動化做了哪些事，以及它在 AKS 上判斷錯 containerd 設定路徑時怎麼發現與修正。
 
 -   ![SpinKube](../assets/logos/spinkube-icon-color.svg){ width="44" }
 
-    **Day 7 · [SpinKube(下):operator](../runbook/sprint3-day7-spinkube-operator.md)**
+    **Day 7 · [SpinKube（下）：operator](../runbook/sprint3-day7-spinkube-operator.md)**
 
     ---
 
-    停更 13 個月的 operator 裝起來零摩擦,而它其實不是執行機制——一份三個欄位的 Deployment 證明了這件事。
+    安裝 spin-operator 與 `SpinApp` CRD，再用一份一般的 Deployment 執行同一支 Spin 應用，說明 operator 與執行機制是兩件分開的事。
 
 -   ![SpinKube](../assets/logos/spinkube-icon-color.svg){ width="44" }
 
-    **Day 8 · [拆得掉嗎:可逆性驗收](../runbook/sprint3-day8-reversibility.md)**
+    **Day 8 · [SpinKube 移除與節點殘留](../runbook/sprint3-day8-reversibility.md)**
 
     ---
 
-    兩個情境的解除安裝對照,結論收在一句話:在 AKS 上,能用的 SpinKube 一定拆不乾淨。
+    由上而下逐層移除 SpinKube，每移除一層就和 Day 1 的節點設定比對；對照設定有沒有手動改過的兩種情境，列出需要手動清理的殘留。
 
 -   ![WebAssembly](../assets/logos/webassembly-icon-color.svg){ width="44" }
 
-    **Day 9 · [綜合:三條路線的決策表](../runbook/sprint3-day9-decision-matrix.md)**
+    **Day 9 · [綜合：三條路線的決策表](../runbook/sprint3-day9-decision-matrix.md)**
 
     ---
 
-    三條路線在各自收尾那天下過的判定,收成 44 格決策表——每一格標明實測、查證還是推論。含整個 sprint 的地雷與驗收改寫回顧。
+    不動手。用 Day 0 的三個問題比較三條路線，判斷各自適合哪種工作負載，以及導入前還要確認哪些限制。
 
 </div>
 
-## 這個 sprint 的量測紀律
+## 學完之後
 
-- **節點基準先存後比**:Day 1 存下原始節點的四份快照,之後每一天的「有沒有動到節點」都拿它逐字 diff——Day 2 五份零行、Day 8 拆完歸零,證據都是 `exit=0`。
-- **量不出來就說量不出來**:冷啟動用 null control 加 bootstrap 信賴區間,兩批判定不一致就不排名。
-- **驗收表達不出來就改寫,不硬湊**:Day 3、Day 4 各改寫一次,原本要驗什麼、為什麼不行、改驗什麼,三段寫清楚。
+- 能說明 Kubernetes 執行 wasm 的完整路徑（RuntimeClass → handler → containerd shim），並在節點上找到每一層對應的設定。
+- 能依工作負載型態、導入動機與專案維護狀態，判斷三條路線裡哪一條適合自家平台，或目前都不適合。
+- 導入會改動節點的元件之前，知道要先存下節點設定、移除後再比對殘留。
 
 從 [Day 0](../runbook/sprint3-day0-wasm-concepts.md) 開始。
 
 ---
 
 !!! quote ""
-    WebAssembly 標誌為 WebAssembly 專案之官方資產(CC0 1.0);wasmCloud、WasmEdge(wasm-edge-runtime)、SpinKube、Kubernetes 標誌為 CNCF(Linux Foundation)官方資產。此處皆作社群教學用途。
+    WebAssembly 標誌為 WebAssembly 專案之官方資產（CC0 1.0）；wasmCloud、WasmEdge（wasm-edge-runtime）、SpinKube、Kubernetes 標誌為 CNCF（Linux Foundation）官方資產。此處皆作社群教學用途。

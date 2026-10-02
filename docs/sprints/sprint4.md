@@ -1,6 +1,6 @@
 # Sprint 4 · 服務網格與機密運算
 
-基礎設施接管應用層的兩件事:一是服務之間的傳輸與 L7 安全(服務網格),二是工作負載自己的記憶體機密性(機密運算)。這門課在 AKS 上把這兩塊各實測一輪,寫成可照抄的 runbook。**Part 1(服務網格,Day 0–4)已完成**:Envoy Gateway 的 north-south 入口與 HTTP/3、Istio ambient 與 Cilium 兩條 east-west mesh 照軸選型。**Part 2(機密運算,Day 5–9)已完成**:Kata 沙箱、SEV-SNP 的 kata-cc、遠端證明讓祕密只在證明過的 pod 裡解開(改一個 env 就拿不到)。每一章的指令與輸出都來自真實跑過的驗證紀錄。
+這個 sprint 處理應用層的兩類安全需求：服務之間的通訊安全，以及工作負載記憶體的保護。**Part 1 服務網格（Day 0–4）**：用 Envoy Gateway 處理叢集入口流量並開啟 HTTP/3，再比較 Istio ambient 的 mTLS、工作負載身分與斷路，以及 Cilium 的 WireGuard 加密與 L7 政策。**Part 2 機密運算（Day 5–9）**：用 Kata 隔離 pod，在 AMD SEV-SNP 硬體上執行 kata-cc，並用遠端證明讓金鑰只發給通過驗證的 pod。
 
 <div style="text-align: center;" markdown>
 
@@ -10,13 +10,13 @@
 &nbsp;&nbsp;&nbsp;&nbsp;
 [![Cilium](../assets/logos/cilium-icon-color.svg){ width="76" }](https://cilium.io/)
 
-*Part 1 的三套:Envoy Gateway(north-south 入口)、Istio ambient 與 Cilium(兩條 east-west mesh)。*
+*Part 1 的三套工具：Envoy Gateway 處理 north-south 入口流量，Istio ambient 與 Cilium 是兩種 east-west mesh。*
 
 </div>
 
-整季走同一座 AKS 叢集,BYOCNI 上游 Cilium 當 CNI。Part 1 在一般節點池上跑、接續 Sprint 2 的 eBPF;Part 2 換一個威脅模型——當節點與雲平台都不該被信任時,加密與金鑰不能再放在節點的記憶體裡。
+Part 1 在一座自行安裝 Cilium 當 CNI 的 AKS 叢集（BYOCNI）上進行，會用到 Sprint 2 介紹過的 Cilium。Part 2 需要支援 AMD SEV-SNP 的機密運算機型（Azure 的 `_cc_v5` 系列），不是每個區域都有：Day 6 沿用 Part 1 的叢集，Day 7 起要在有供貨的區域另建一座叢集，章節會說明怎麼查詢。
 
-## Part 1 · 服務網格(Day 0–4,已完成)
+## Part 1 · 服務網格（Day 0–4）
 
 <div class="grid cards" markdown>
 
@@ -26,56 +26,54 @@
 
     ---
 
-    north-south 入口、east-west mesh、L7 落點三層先分清楚:eBPF 拿下 L3/L4 之後,mesh 這層還負責什麼。
+    不需要安裝。分清楚 CNI、east-west mesh、north-south gateway 三層各負責什麼，說明 sidecar 模式為什麼逐漸被取代，以及 eBPF 處理 L3/L4 之後 mesh 還負責哪些事。
 
 -   ![Envoy](../assets/logos/envoy-icon-color.svg){ width="44" }
 
-    **Day 1 · [Envoy Gateway 取代 Ingress + HTTP/3](../runbook/sprint4-day1-envoy-gateway.md)**
+    **Day 1 · [Envoy Gateway 與 HTTP/3](../runbook/sprint4-day1-envoy-gateway.md)**
 
     ---
 
-    用 Gateway API 三件套把入口流量重接一次,並開起 Ingress 一直做不好的 HTTP/3——在瀏覽器 DevTools 上驗到協定真的是 h3。
+    建立 BYOCNI 叢集並安裝 Cilium 與 Envoy Gateway，用 Gateway API 的 GatewayClass、Gateway、HTTPRoute 設定入口路由，再開啟 HTTP/3，並在瀏覽器 DevTools 確認連線協定是 h3。
 
 -   ![Istio](../assets/logos/istio-icon-color.svg){ width="44" }
 
-    **Day 2 · [Istio ambient east-west mesh](../runbook/sprint4-day2-istio-ambient.md)**
+    **Day 2 · [Istio ambient：服務間 mTLS 與斷路](../runbook/sprint4-day2-istio-ambient.md)**
 
     ---
 
-    ztunnel 的 HBONE 隧道做到服務間自動 mTLS 加 SPIFFE 身分,waypoint 上設一條斷路、50 並發壓出 28 筆 503。
+    用不需要 sidecar 的 Istio ambient 模式，讓服務間流量經 ztunnel 自動加上 mTLS 與 SPIFFE 身分；再在 waypoint 設定斷路，觀察超過門檻的請求被拒絕。
 
 -   ![Cilium](../assets/logos/cilium-icon-color.svg){ width="44" }
 
-    **Day 3 · [Cilium east-west mesh](../runbook/sprint4-day3-cilium-mesh.md)**
+    **Day 3 · [Cilium mesh：WireGuard 加密與 L7](../runbook/sprint4-day3-cilium-mesh.md)**
 
     ---
 
-    換 Cilium 自己的 mesh 做同一組驗收:WireGuard 傳輸加密(抓包 2412 個密文封包、0 明文)、L7 policy、以及誠實面對還在 beta 的身分綁定。
+    移除 Istio，改用 Cilium 的 mesh：用 WireGuard 做傳輸加密並抓包確認，套用一條 L7 policy，並分清楚傳輸加密與工作負載身分的差別，後者在 Cilium 仍是 beta。
 
 -   ![Istio](../assets/logos/istio-icon-color.svg){ width="36" }
     ![Cilium](../assets/logos/cilium-icon-color.svg){ width="36" }
 
-    **Day 4 · [Istio 與 Cilium 橫向對比](../runbook/sprint4-day4-istio-vs-cilium.md)**
+    **Day 4 · [Istio 與 Cilium 比較](../runbook/sprint4-day4-istio-vs-cilium.md)**
 
     ---
 
-    同一座叢集、同一個拓樸量出兩邊的資源、延遲、節點侵入,收成一張決策表。結論:eBPF 贏在 L4,Istio 贏在 L7 與身分。
+    在同一座叢集、同一個拓樸下比較 Istio 與 Cilium 的加密與身分、L7 能力、資源用量、延遲與對節點的改動，整理成決策表：Cilium 的強項在 L4，Istio 的強項在 L7 與身分。
 
 </div>
 
-## Part 2 · 機密運算(Day 5–9,已完成)
-
-Confidential Containers 需要 SEV-SNP 的 `_cc_v5` 機密硬體,而東京沒賣、只能換區另建叢集——這個現實本身就是 Part 2 的第一課。
+## Part 2 · 機密運算（Day 5–9）
 
 <div class="grid cards" markdown>
 
 -   ![Kubernetes](../assets/logos/kubernetes-icon-color.svg){ width="44" }
 
-    **Day 5 · [機密運算防的是誰](../runbook/sprint4-day5-confidential-concepts.md)**
+    **Day 5 · [機密運算的威脅模型](../runbook/sprint4-day5-confidential-concepts.md)**
 
     ---
 
-    機密運算保護 guest 不被主機看,跟一般 Kata 沙箱「保護主機不被 guest 害」方向相反;而它跟 eBPF「從主機看清楚工作負載」的立場也正好相反。
+    不需要安裝。說明 Kata 沙箱保護主機不受工作負載影響，機密運算則保護工作負載的記憶體不被主機讀取，兩者方向相反；並介紹 Kata 與 Confidential Containers（CoCo）的關係。
 
 -   ![Kubernetes](../assets/logos/kubernetes-icon-color.svg){ width="44" }
 
@@ -83,23 +81,23 @@ Confidential Containers 需要 SEV-SNP 的 `_cc_v5` 機密硬體,而東京沒賣
 
     ---
 
-    pod 跑進獨立 kernel 的輕量 VM(`.mshv`),又是那條 RuntimeClass → handler → shim 鏈;自管 Cilium 接住 AzureLinux Kata 節點。
+    在 Part 1 的叢集加入 Kata 節點池，讓 pod 跑在有獨立 kernel 的輕量 VM 裡；找出 RuntimeClass handler 對應的節點設定，並確認 Kata 節點在自行安裝的 Cilium 下網路正常。
 
 -   ![Kubernetes](../assets/logos/kubernetes-icon-color.svg){ width="44" }
 
-    **Day 7 · [kata-cc:SEV-SNP 機密硬體](../runbook/sprint4-day7-katacc.md)**
+    **Day 7 · [kata-cc：SEV-SNP 機密硬體](../runbook/sprint4-day7-katacc.md)**
 
     ---
 
-    pod 跑在真 SEV-SNP 硬體上,而它挑區域、挑池角色、要安全政策——五顆地雷,外加各家雲的機密硬體對照。
+    把 handler 換成 `kata-cc`、節點換成 AMD SEV-SNP 機型，讓 pod 跑在記憶體由 CPU 硬體加密的 VM 裡；也說明怎麼查詢有供貨的區域、kata-cc 節點池的角色限制，以及 pod 為什麼要附安全政策才能啟動。
 
 -   ![Kubernetes](../assets/logos/kubernetes-icon-color.svg){ width="44" }
 
-    **Day 8 · [遠端證明:讓祕密只在 TEE 裡解開](../runbook/sprint4-day8-attestation.md)**
+    **Day 8 · [遠端證明：MAA、SKR 與金鑰釋放](../runbook/sprint4-day8-attestation.md)**
 
     ---
 
-    符合政策的 pod 拿得到金鑰、改一個 env → measurement 變 → 被拒。機密運算真正重要的:證明先行,拿祕密在後。
+    串接 MAA 遠端證明、SKR sidecar 與 Key Vault Premium，把金鑰的釋放條件綁在 pod 的 measurement 上：符合政策的 pod 拿得到金鑰，改了一個環境變數的 pod 會被拒絕。
 
 -   ![Kubernetes](../assets/logos/kubernetes-icon-color.svg){ width="44" }
 
@@ -107,15 +105,17 @@ Confidential Containers 需要 SEV-SNP 的 `_cc_v5` 機密硬體,而東京沒賣
 
     ---
 
-    可逆性、AKS kata-cc vs 上游 CoCo 決策表;收束兩個 Part 對「主機該不該看得到工作負載」的相反立場。
+    不動手。說明移除機密節點池後叢集留下什麼，用決策表比較 AKS kata-cc 與上游 CoCo，並對照兩個 Part 對「主機是否該看得到工作負載」的不同立場。
 
-## 這個 sprint 的貫穿問題
+</div>
 
-Part 1 的每一套加密,金鑰都在節點的記憶體裡、root 進得了節點就看得到明文。Part 2 換掉這個前提:當節點本身不可信,加密要往硬體挪。兩個 Part 合起來回答一件事——基礎設施能替應用扛下多少安全責任,以及扛不下的那部分長什麼樣。
+## 兩個 Part 的關係
+
+Part 1 的各種加密，金鑰都存在節點的記憶體裡，能以 root 登入節點的人就讀得到明文。Part 2 處理節點本身不可信的情況，把記憶體加密交給 CPU 硬體，金鑰由遠端證明的結果決定能不能釋放。兩個 Part 合起來，說明基礎設施能替應用承擔哪些安全責任，以及哪些仍要由應用自己處理。
 
 從 [Day 0](../runbook/sprint4-day0-mesh-concepts.md) 開始。
 
 ---
 
 !!! quote ""
-    Envoy、Istio、Cilium、Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,此處皆作社群教學用途。
+    Envoy、Istio、Cilium、Kubernetes 標誌為 CNCF（Linux Foundation）官方資產，此處皆作社群教學用途。
