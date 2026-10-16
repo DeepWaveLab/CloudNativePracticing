@@ -1,29 +1,46 @@
-# Day 9: Part 2 總結——AKS kata-cc vs 上游 CoCo 決策表
+# Day 9：把機密容器的驗證結果帶回部署決策
 
 ![Kubernetes 官方標誌](../assets/logos/kubernetes-icon-color.svg){ align=right width="80" }
 
-> Part 2 五天做完了:概念、Kata、kata-cc、遠端證明。這一天不動手,把它收成能拿去用的東西——移除節點池的可逆性、AKS kata-cc 跟上游 CoCo 差在哪,最後把「基礎設施該不該看得到工作負載」這個對比講完。這也是整門課的最後一頁。
+機密 Pod 已經能啟動，核准政策取得金鑰，變更政策的版本則被拒絕。現在團隊要決定是否採用這個配置，也要知道實驗資源移除後會留下什麼。這章會把需求、證據與維運責任連起來，判斷下一步該保留、補測或清理哪些項目。
 
-!!! abstract "你在課程的哪裡"
-    - **Day 5–8**:機密運算防誰、Kata sandboxing、kata-cc 機密硬體、遠端證明的金鑰釋放與篡改對照。
-    - **今天**:不動手。可逆性、決策表、整季收束。
-    - **接下來**:回[課程總覽](../index.md)。
+## 每一項成功結果，都有自己的範圍
 
-## 走過的路(Part 2)
+[Day 6](sprint4-day6-kata-sandboxing.md) 用實際宿主與 guest 核心、runtime 設定及網路結果，檢查一般 Kata。這回答 VM 隔離與選定網路路徑是否符合預期，沒有證明宿主無法讀取私有記憶體。
 
-```mermaid
-flowchart TB
-    A["Day 5 · 防的是誰<br/>機密運算保護 guest 不被主機看;與 Kata sandboxing 方向相反"]
-    B["Day 6 · Kata sandboxing<br/>獨立 kernel 的輕量 VM;RuntimeClass 換 handler"]
-    C["Day 7 · kata-cc<br/>SEV-SNP 硬體;而它挑區域、挑池角色、要安全政策"]
-    D["Day 8 · 遠端證明<br/>符合政策→RELEASED / 篡改一個 env→DENIED"]
-    E["Day 9 · 收束<br/>可逆性 / 決策表"]
-    A --> B --> C --> D --> E
-```
+[Day 7](sprint4-day7-katacc.md) 使用機密容器所需的 SKU、RuntimeClass 與政策讓 Pod 啟動，確認平台配置方向；[Day 8](sprint4-day8-attestation.md) 再將政策雜湊綁到金鑰釋出條件。變更版新增環境變數後重新產生政策，保持金鑰條件不變，得到拒絕結果。這比單看 Running 多了一項秘密釋出驗證，但沒有涵蓋所有可能的 Pod 變更。
 
-## 可逆性:移除 kata-cc 池,RuntimeClass 留著
+因此選擇起點時，可以先問：
 
-拆除從移除 kata-cc 節點池開始。節點池刪掉之後,RuntimeClass 仍在:
+| 主要需求 | 可優先評估的起點 | 還要補的證據 |
+|---|---|---|
+| 降低不受信任程式影響宿主的風險 | 一般 Kata | 應用相容性、啟動與資源成本、實際隔離需求 |
+| 對不受信任宿主保護敏感執行資料 | 機密 VM／kata-cc | 完整信任政策、證明條件與秘密輸出方式 |
+| 只有指定政策的工作負載可取得金鑰 | 證明服務加金鑰釋出政策 | 權限最小化、政策升級流程、拒絕原因與故障處理 |
+
+這些起點可以組合。網路加密仍保護傳輸，機密執行保護受信任範圍內的資料，應用授權仍決定誰能使用服務；任何一項都不會自動取代其他項目。
+
+## AKS 整合與上游 CoCo，責任差在哪裡？
+
+本課實測的是 Azure AKS 的整合方式。上游 CoCo 可以搭配 **Trustee**，也就是協助證明與秘密交付的一組服務；其中 **Attestation Service** 驗證證據，**KBS（Key Broker Service）**依驗證與資源政策控制秘密交付。
+
+以下對照用來理解元件責任。右欄是官方架構說明，本課沒有部署它，不能把兩邊當成已完成的對等實驗。
+
+| 工作 | 本課 AKS 配置 | 上游 CoCo 常見配置 |
+|---|---|---|
+| Pod 執行環境 | AKS 提供的 kata-cc 節點與 runtime | 依平台部署 Kata 與機密 guest 元件 |
+| 驗證證據 | MAA | Trustee 的 Attestation Service |
+| 控制秘密交付 | SKR 搭配 Key Vault release policy | KBS 與資源政策 |
+| 產生 guest 政策 | `az confcom katapolicygen` | `genpolicy` 等對應工具 |
+| 硬體與平台整合 | 依 AKS 支援的 SKU、OS、區域與版本 | 自行確認平台、韌體、runtime 與證明服務的相容性 |
+
+上游方式提供不同部署選擇，也增加自行維護與驗證的範圍。它不必然等於每個 Pod 都另開一台雲端 VM；peer-pods 是其中一種部署方式，本課沒有測試其效能與成本。[CoCo Trustee 架構](https://confidentialcontainers.org/docs/attestation/)
+
+若既有系統已依賴 Azure 金鑰服務，可以先評估本課的整合路徑；若要跨平台部署，則應重新確認硬體、證明方及秘密管理方式。不能只替換雲端機型名稱，就假定流程與安全保證等價。
+
+## 移除節點池，不會自動移除 RuntimeClass
+
+實驗移除 kata-cc 節點池後，叢集還保留 RuntimeClass。以下輸出呈現的是 API 物件與剩餘節點 handler 清單：
 
 ```console
 $ kubectl get runtimeclass          # kata-cc 節點池已刪
@@ -32,62 +49,43 @@ kata-vm-isolation   kata       ← 還在
 # 剩下的系統節點 handlers:(空)
 ```
 
-**跟 Sprint 3 Day 8 同一種情況**:RuntimeClass 是叢集層(etcd)物件,移除節點(節點層)不會清它。此時指 `kata-cc-isolation` 的 pod 會卡在「no runtime configured」——handler 在,實作沒了。要真的清乾淨,得 `kubectl delete runtimeclass` 或直接刪整座叢集。
+`kata-cc-isolation` 仍宣告 handler 名稱 `kata-cc`，但提供它的節點已移除。RuntimeClass 是叢集物件，節點上的 runtime 實作則是另一層；兩者生命週期不同。
 
-## 決策表:AKS kata-cc vs 上游 CoCo
+此時再建立使用這個 RuntimeClass 的 Pod，可能因排程限制而 Pending，或在排到不支援的節點後建立 sandbox 失敗，取決於 RuntimeClass 與節點設定。原紀錄沒有留下新的失敗 Pod 事件，因此不能把某一個錯誤訊息當成本次已測結果。剩餘節點的 handler 清單空白，也不代表一般容器 runtime 消失。
 
-本課實測的是 **AKS 的 kata-cc**;上游 CoCo(自架)是另一套元件,這裡講解對照、不實作(peer-pods 的「每 pod 一台計費 VM」成本模型危險,刻意避開)。每一格標明是實測還是查證。
+下圖列出要分開檢查的範圍。刪除其中一層，不會自動證明其他層也已移除。
 
-| 面向 | AKS kata-cc(實測) | 上游 CoCo(查證) |
-|---|---|---|
-| 執行底座 | Kata(OpenInfra)+ CoCo(CNCF Incubating) | 同 |
-| 遠端證明驗證方 | **MAA**(Day 8 實測) | **Trustee / KBS** |
-| 金鑰釋放 | **SKR sidecar + Key Vault release policy**(綁 hostdata,Day 8 實測) | KBS 直接管 secret |
-| 產政策工具 | `az confcom katapolicygen`（macOS 沒實作→podman 繞道) | `genpolicy` |
-| CoCo Operator | 用不到(AKS 受管) | **已封存(archived,截至 2026-08)**,呼應 Sprint 3 SpinKube 的「元件已死但教學還在教」 |
-| peer-pods | 不做(成本模型危險) | 可選 |
-| 節點 SKU | `_cc_v5`(SEV-SNP 可巢狀);**東京無、西歐有** | 視自備硬體 |
-| 節點 OS | **只支援 AzureLinux** | 視發行版 |
+![清理要分別檢查 Pod、RuntimeClass、節點與外部秘密資源](../assets/diagrams/s4d9-cleanup-scope.svg)
 
-**跨雲硬體對照**見 [Day 7](sprint4-day7-katacc.md)——Azure `_cc_v5` / GCP Confidential VM / AWS Nitro Enclaves / OpenStack 與地端裸機各自的前提;要點是機密運算永遠綁「CPU 有沒有那個硬體功能」,各家包成不同機型與服務名。
+先確認沒有工作負載依賴要移除的 runtime，再處理節點池與不再使用的 RuntimeClass。若環境是共用叢集，還要確認這些物件是否由平台管理、是否仍被其他服務使用。外部的 Key Vault、MAA、managed identity 與聯合身分也需各自盤點；移除節點池不會自動移除它們。
 
-## 兩個 Part 收在同一個問題:主機該不該看得到工作負載
+本課的清理紀錄包含移除練習叢集及相關外部資源的結果，但沒有逐份節點設定快照證明所有檔案回到原狀。因此可主張已移除所列實驗資源，不能說整個平台已完成逐位元回復驗證。
 
-把 Sprint 4 兩半並排:
+## 採用之前，還有哪些未完成項目？
 
-- **Part 1**——eBPF 與 mesh 把**流量邊界**交給基礎設施,而 eBPF 的立場是「從主機**看清楚**工作負載」:看得愈清楚,治理愈有力。
-- **Part 2**——kata-cc 與 CoCo 把**記憶體邊界**交給硬體,而 CoCo 的立場是「讓主機**看不到** guest」:主機被列為 untrusted,連記憶體明文都不給。
+本課沒有直接取得 guest 內的 SNP report 原文，沒有部署上游 Trustee/KBS，也沒有量測機密 Pod 的啟動成本與金鑰釋出延遲。Day 6 驗證 Cilium 加一般 Kata，Day 7–8 則使用另一組預設 AKS 網路；Cilium 加 kata-cc 並未在同一配置完成驗證。
 
-**兩半對「主機該不該看得到工作負載」的立場正好相反。** 這是把服務網格與機密運算放進同一個 sprint 的回報——它們是同一個問題「基礎設施跟工作負載的信任關係」的兩個極端。而 Day 8 那個「改一個 env 就拿不到金鑰」的實測,是「不靠信任、靠硬體證明」這件事最具體的樣子。
+這些缺口決定後續驗證順序：先選定要使用的實際部署組合，再重做必要的允許與拒絕測試、故障處理和容量測試。不要把不同環境各自成功的片段直接拼成「整套已驗證」。
 
-## 帶得走的東西
+## 想一想
 
-- **AKS kata-cc 與上游 CoCo 同名不同物。** 一個走 MAA/SKR,一個走 Trustee/KBS;元件對得上但不一樣。看到「Confidential Containers」要先問是哪一套。
-- **可逆性的斷點在叢集層與節點層之間。** 移除節點池,RuntimeClass 留在 etcd——跟 Sprint 3 的 shim 一樣。真的清乾淨要動叢集層物件。
-- **可見性是能力也是風險——這一季給了兩個相反的極端。** eBPF 把治理建立在看得清楚,CoCo 把安全建立在看不到。哪個對,看你防的是誰。
+1. 移除 kata-cc 節點池後仍看得到 RuntimeClass，這個物件證明的是什麼？沒有證明的是什麼？
+2. 你要使用 Cilium 加 kata-cc，能否直接引用 Day 6 與 Day 8 宣稱整合完成？還缺哪個測試？
+3. 政策升級後雜湊改變，但新版本仍應取得金鑰，團隊需要一起管理哪兩份政策？
 
-## 誠實的差距
+## 小結
 
-- **上游 CoCo(Trustee/KBS)純講解,未實機。** 決策表對它的陳述是查證與對照,不是實測。
-- **peer-pods 未做**(計畫既定,成本模型危險)。
-- **guest 內部 SNP report 未取**(靠 MAA token 的 claim 間接證明),符合計畫不押 `/dev/sev-guest`。
-- **Part 1 的 BYOCNI × kata-cc(X0)沒在同一座叢集完整驗**——Kata 半邊 Day 6 驗過,kata-cc 因東京無 `_cc_v5` 換到西歐另建叢集(用預設網路),兩者沒疊在同一座上。
+本 sprint 從外部入口、服務通訊走到工作負載執行環境。每一層都要先指出保護範圍，再用對應的證據驗證；部署與移除也要區分叢集物件、節點實作及外部服務。接下來的 [Sprint 5 Day 0](sprint5-day0-game-server-concepts.md) 會換成有長時間連線與房間生命週期的遊戲伺服器，檢查一般 Deployment 為什麼不足以表達它的需求。
 
 ## 延伸閱讀
 
-想往下深挖,從這幾份開始:
+想再深入，可以從這幾份開始：
 
-- **[AKS Confidential Containers 總覽](https://learn.microsoft.com/en-us/azure/aks/confidential-containers-overview)** —— kata-cc 的完整定位、限制(只支援 AzureLinux、Service 只支援 TCP、啟動較慢、不能用 `latest` tag),決策表很多格的一手依據。
-- **[Confidential Containers 專案](https://confidentialcontainers.org/)** —— 上游 CoCo 的 Trustee/KBS 架構,對照 AKS 的 MAA/SKR。
-- **[Sprint 3 Day 8:可逆性](sprint3-day8-reversibility.md)** —— 站內連結。RuntimeClass 殘留 etcd 的形狀今天重演,兩章並讀。
-
-## 下一步
-
-Sprint 4 到這裡結束,整門課也到這裡。四個 sprint 走完:GPU 排程(Sprint 1)、eBPF 與執行期安全(Sprint 2)、WebAssembly(Sprint 3)、服務網格與機密運算(Sprint 4)。而最後這一季把一個問題攤到兩個極端——**基礎設施到底該不該看得到工作負載在做什麼**:eBPF 讓主機看得清楚工作負載,CoCo 讓主機讀不到,立場相反。知道自己站哪一邊、防的是誰,比記住任何一條 `az` 指令都有用。
-
-其餘 sprint 的入口在[課程總覽](../index.md)。
+- [AKS 機密容器總覽](https://learn.microsoft.com/en-us/azure/aks/confidential-containers-overview)：平台支援條件。
+- [CoCo 證明架構](https://confidentialcontainers.org/docs/attestation/)：上游的證明與秘密交付元件。
+- [Sprint 3 Day 8](sprint3-day8-reversibility.md)：RuntimeClass 與節點 runtime 的移除範圍。
 
 ---
 
 !!! quote ""
-    Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,此處作社群教學用途。
+    Kubernetes 標誌為 CNCF（Linux Foundation）官方資產，此處作社群教學用途。

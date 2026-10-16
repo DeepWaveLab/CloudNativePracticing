@@ -1,77 +1,41 @@
-# Day 4: WasmEdge 與 runwasi——shim 安裝、containerd 設定與 wasm 格式
+# Day 4: WasmEdge 與 runwasi——在節點上裝 shim、改 containerd 設定，以及兩種 wasm 格式
 
 ![WasmEdge 官方標誌](../assets/logos/wasmedge-icon-color.svg){ align=right width="82" }
 
-> 三條路線的第二條。[Day 2](sprint3-day2-wasmcloud.md) 的 wasmCloud 完全不碰節點(五份 diff 零差異),Day 6 的 SpinKube 會改 containerd 設定。**WasmEdge 卡在中間**——今天要量出它到底落在哪,而答案精確到「第幾步」。
+假設你手上有一支編成 wasm 的小程式，想讓它在現有的 AKS 叢集上跑，排程、log、`kubectl` 都照一般 pod 的方式用，不想像 [Day 2–3](sprint3-day2-wasmcloud.md) 的 wasmCloud 那樣另外學一套 host 和 CRD。上網找「WasmEdge Kubernetes」，會找到三種做法：AKS 的 `--workload-runtime WasmWasi`、WasmEdge 官網用 crun 的教學，以及 containerd 底下的 runwasi 專案。AKS 的 WASI node pool 已退場；crun 是另一套容器執行期，官網那份舊教學本課沒有驗證。第三種已有實測，但要你自己進到節點上，放一個執行檔、改 containerd 的設定檔、重啟 containerd。
 
-!!! abstract "你在課程的哪裡"
-    - **Day 2–3**:wasmCloud。不改節點,代價換成它自己的一整套抽象。
-    - **今天**:WasmEdge。**這條路要自己動節點**,所以每做完一步就比一次基準,要能講出「第幾步開始不一樣」。
-    - **Day 5**:三條路線的啟動成本與資源實測。今天刻意一個效能數字都不宣稱。
+這一章走第三種做法，在 AKS 節點上把 WasmEdge 接上 Kubernetes。每做完一步，就把節點的狀態和開始前比一次，找出節點是從哪一步開始改變行為的。最後拿 wasmCloud 用的那支程式交給 WasmEdge 跑，看「編成 wasm」是不是等於兩邊都能跑。
 
-動手前有一個要先驗證的前提:「WasmEdge 在 AKS 的 containerd 版本上有沒有可用的整合路徑?」如果沒有,今天要降級成「在單一 pod 內跑 WasmEdge」。**結論是有,不用降級**,但找到它的過程本身就是三顆地雷。
+讀完之後，一顆指定 WasmEdge 的 pod 起不來時，你能分辨是節點還沒接上 shim、映像沒有被解開，還是 wasm 檔本身是另一種格式。
 
-## 今天要走的路
+## WasmEdge 要怎麼接上 Kubernetes
 
-| 步驟 | 做什麼 | 節點變了嗎 |
-|---|---|---|
-| 1 | 先確認整合路徑存在:三層證據 | — |
-| 2 | 把 shim 放上節點 | **沒有** |
-| 3 | 改 containerd 設定 + 重啟 | **從這裡開始不一樣** |
-| 4 | 建 RuntimeClass | 沒有(只動 API server) |
-| 5 | 讓映像解得開 | 有 |
-| 6 | 驗收:兩個執行期互換 | — |
+WasmEdge 是一個 wasm 執行期：它讀進一個 `.wasm` 檔，然後執行裡面的程式。Kubernetes 不會直接呼叫它。[Day 1](sprint3-day1-three-generations.md#step-4) 追過那條鏈：kubelet 把 pod 交給 containerd，containerd 依 pod 指定的 handler 找到設定檔裡對應的一段，再啟動一個 **shim**（每個容器各一個、負責實際啟動與看管容器的小程式）。一般容器用的是節點內建的 `containerd-shim-runc-v2`。
 
-## 步驟 1: 整合路徑存在嗎——三層證據
+**runwasi** 是 containerd 底下的專案，它把 wasm 執行期包成 containerd 認得的 shim。今天用的是它發佈的 `containerd-shim-wasmedge-v1` v0.6.1，需要的 WasmEdge 程式庫也一起編進這個執行檔，稱為靜態連結。Day 1 那條鏈換成 WasmEdge 版，長這樣：
 
-Day 3 建立的方法:**判定「這條路走不通」要查三層**,不是試兩下沒成功就下結論。
-
-### 第一層:宣告面說了什麼
-
-**Azure 自己那條路,兩層宣告面都說有:**
-
-```console
-$ az aks nodepool add --help
-    --workload-runtime : Allowed values: KataCcIsolation, KataMshvVmIsolation,
-                         KataVmIsolation, OCIContainer, WasmWasi.
-
-$ az feature register --namespace microsoft.ContainerService --name WasmNodePoolPreview
-{ "properties": { "state": "Registered" } }        ← 立刻就 Registered
+```text
+RuntimeClass.handler → 節點 config.toml 的 runtimes.<name> → runtime_type 指到的 shim 二進位檔
 ```
 
-**第三層才說沒有:**
+把這條鏈畫成圖，上半部存在叢集（etcd）裡，下半部在每一台節點的磁碟上。圖上的「步驟 1–3」是本章依序要加上去的東西：
 
-```console
-$ az aks nodepool add … --workload-runtime WasmWasi
-ERROR: (InvalidWorkloadRuntimeSettingError) The agent pool wasi1 has a deprecated workload runtime
-WasmWasi. WebAssembly System Interface (WASI) node pools (preview) are no longer supported on AKS.
-                                     送出到回覆 8 秒,未產生任何資源
-```
+![本章要接起來的鏈：叢集側的 Pod 寫 runtimeClassName: wasmedge，指到 RuntimeClass wasmedge（步驟 3）；它的 handler 名稱要逐字對應節點 config.toml 裡的 runtimes.wasmedge（步驟 2，以橘色強調），那一段的 runtime_type 決定 containerd 去找哪個 shim；shim 是 /usr/local/bin/containerd-shim-wasmedge-v1（步驟 1），由它執行 .wasm](../assets/diagrams/s3d4-chain.svg)
 
-這顆是[地雷 1](#mine-1)。而**它建議的替代品是 SpinKube,那是 Day 6–7 的主題,不是 WasmEdge**——AKS 當年那條路裝的也是 Spin／slight 的 shim。**這裡的「不通」指 Azure 那條受管路線,不是 WasmEdge 本身。**
+我們可以從圖上看到兩件事：
 
-**WasmEdge 官方文件有兩條路,一條過期、一條轉介:**
+1. 下半部的兩樣東西（shim 執行檔、config.toml 的那一段）都在節點上，每一台要跑 wasm 的節點都得各做一次。上半部的 RuntimeClass 只要在叢集建一次。
+2. 中間那段設定是唯一會讓 containerd 改變行為的地方。後面每一步都會比對節點，看這件事是不是真的。
 
-| 文件 | 內容 | 判定 |
-|---|---|---|
-| `…/kubernetes/kubernetes-containerd-crun` | 步驟寫 `go1.17.1`、`git checkout v1.22.2`、`./hack/local-up-cluster.sh` | **Kubernetes 1.22 世代**,本叢集是 1.35.6 |
-| `…/cri-runtime/containerd` | 只說「containerd-shim `runwasi` 專案支援 WasmEdge」 | **轉介到 containerd/runwasi**,這才是活的那條 |
+### 另外兩種做法為什麼不用
 
-**而 runwasi 自己內部就有版本矛盾:**
+AKS 自己的 WASI node pool 已經退役，Day 1 對它下過指令，拿到的是 `InvalidWorkloadRuntimeSettingError`。`az` 的 `--help` 和訂閱層的 feature flag 到現在都還列著它，不能拿來判斷這個功能還在不在，見[疑難排解：`--help` 和 feature flag 都說有](#mine-1)。
 
-```toml
-# runwasi 的文件(quickstart.md)——containerd 2.x 的路徑
-[plugins."io.containerd.cri.v1.runtime".containerd.runtimes.wasm]
-```
+WasmEdge 官網有兩份相關文件。用 crun 的那份（`…/kubernetes/kubernetes-containerd-crun`）步驟寫的是 `go1.17.1`、`git checkout v1.22.2`、`./hack/local-up-cluster.sh`，是 Kubernetes 1.22 時代的做法，本課的叢集是 1.35.6，這條路本課沒有實測。另一份 containerd 整合頁（`…/cri-runtime/containerd`）只說「containerd-shim `runwasi` 專案支援 WasmEdge」，就轉介到 runwasi。所以接下來照 runwasi 走。
 
-```dockerfile
-# 同一個 tag 裡,runwasi 自己的 CI(test/k8s/Dockerfile,kind v1.29.1)——1.x 的路徑
-[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.wasm]
-```
+### 節點上原本有什麼
 
-**同一份原始碼樹,文件與 CI 用兩個不同的 plugin 路徑。** 這直接決定了步驟 3 要先做離線驗證,見[地雷 2](#mine-2)。
-
-### 第二層:節點上實際載入了什麼
+動手之前先確認 AKS 的節點上沒有任何 wasm 執行期，免得裝了兩份互相干擾。下面是節點檢查的結果節錄，`逐一 command -v` 是摘要；實際可逐一輸入 `command -v crun` 等命令。進節點的方式沿用 Day 1 的 `node-shell`：
 
 ```console
 $ containerd --version
@@ -88,32 +52,72 @@ $ find /usr/bin /usr/local/bin -maxdepth 1 -type f | wc -l
 947                                               ← 證明 find 有在工作,上面那個 1 是真的
 ```
 
-**AKS 的節點映像上沒有任何 wasm 執行期。** 那第二行 `wc -l` 是 Day 3 學到的紀律:**拿零命中當證據,要同時證明輸入非空。**
+所有 wasm 相關的執行檔都是 `NOT FOUND`，搜尋範圍內只找到一個 MIME 類型定義檔。第二個 `find` 是 Day 3 用過的做法：拿「找不到」當結論之前，先證明搜尋本身有看到東西（947 個檔案）。
 
-### 第三層:綁定粒度
+再看 `/etc/containerd/` 底下：只有 `config.toml` 與 `kubenet_template.conf`，沒有放額外設定檔的子目錄，`config.toml` 裡也沒有 `imports`。所以要加 handler，就只能直接改 `config.toml` 這一個檔。
 
-```text
-RuntimeClass.handler → 節點 config.toml 的 runtimes.<name> → runtime_type 指到的 shim 二進位檔
+## 開始之前：存一份節點快照
+
+這一章要回答「節點從哪一步開始不一樣」，所以每一步前後都要取同樣的五份資料來比。Day 2 證明 wasmCloud 沒動節點，用的也是這五份：
+
+| 快照 | 看什麼 |
+|---|---|
+| `config.toml` | 節點上的 containerd 設定檔原文 |
+| config dump | 目前設定檔經 containerd 解析、展開的內容 |
+| runtimeHandlers | kubelet 回報這台節點有哪些 handler |
+| shim 清單 | 磁碟上有哪些 runtime 與 shim 執行檔 |
+| RuntimeClass | 叢集裡有哪些 RuntimeClass |
+
+第二份要特別說明。`containerd config dump` 讀取目前設定檔並補上預設值，不會向執行中的服務查詢。它能用來檢查設定是否可被解析；要確認服務已載入，還要在重啟後檢查 `runtimeHandlers` 與實際 Pod。
+
+本章假設叢集只有 system pool 的一台節點，`.items[0]` 都指它。`node-shell` 是 Day 1 建的 DaemonSet；先確認目前節點上的 Pod 已就緒，並依 Day 1 查出 `NODE_SHELL_POD`。下面這個函式取一次五份快照，參數是檔名前綴：
+
+```bash
+nodesh() { kubectl -n wasmlab exec "$NODE_SHELL_POD" -- nsenter -t 1 -m -- "$@"; }
+snap() {
+  nodesh cat /etc/containerd/config.toml > "$1-containerd-config.toml"
+  nodesh containerd config dump          > "$1-containerd-config-dump.toml"
+  kubectl get node -o jsonpath='{.items[0].status.runtimeHandlers}' \
+    | python3 -m json.tool            > "$1-node-runtimehandlers.json"
+  nodesh sh -c 'ls -l /usr/bin/runc /usr/bin/crun /usr/bin/containerd-shim-runc-v2 \
+    /usr/bin/containerd-shim-wasmedge-v1 /usr/bin/containerd-shim-wasmtime-v1 \
+    /usr/local/bin/containerd-shim-wasmedge-v1 /usr/local/bin/crun 2>/dev/null || true' \
+    | tr -s ' '                       > "$1-shim-binaries.txt"
+  kubectl get runtimeclass -o custom-columns='NAME:.metadata.name,HANDLER:.handler' \
+    --no-headers | sort | tr -s ' '   > "$1-runtimeclasses.txt"
+}
+snap s0-baseline
 ```
 
-`/etc/containerd/` 底下只有 `config.toml` 與 `kubenet_template.conf`,**沒有 drop-in 目錄、`config.toml` 裡沒有 `imports`**。要改就是改那一個檔,而且改完只有 `systemctl restart` 有用。
+`ls -l` 只列寫死的完整路徑，不用 `grep runc` 這類模糊比對，Day 3 遇過 `grep runc` 連 `runcon`、`truncate` 都抓進來。之後每一步做完就 `snap s1-…`、`snap s2-…`，再用 `diff` 逐份比對前一次。
 
-### 裁決
+## 步驟 1：把 shim 放上節點 {#install-shim}
 
-!!! success "可用路徑存在,不需要降級"
-    是 containerd/runwasi 的 `containerd-shim-wasmedge-v1` v0.6.1(2026-06-12 發佈)。
+先在自己的電腦上下載 release，確認雜湊值和 release 附的 `SHA256SUMS` 相同：
 
-    但三件事要一起講:**(1)** AKS 內建的 WasmWasi node pool 已退役,而 az CLI 與 feature flag 兩層還在誤導;**(2)** WasmEdge 官方的 crun 教學是 Kubernetes 1.22 世代的東西,照做會浪費一整天;**(3)** 這條路要自己動節點——**這正是它在三條路線裡的位置**。
-
-## 步驟 2: 把 shim 放上節點——零差異
-
-先在本機驗雜湊,再讓節點自己抓:
+```bash
+V=https://github.com/containerd/runwasi/releases/download/containerd-shim-wasmedge/v0.6.1
+curl -sLO $V/containerd-shim-wasmedge-x86_64-linux-musl.tar.gz
+shasum -a 256 containerd-shim-wasmedge-x86_64-linux-musl.tar.gz
+curl -sL $V/SHA256SUMS
+```
 
 ```console
 $ shasum -a 256 containerd-shim-wasmedge-x86_64-linux-musl.tar.gz
 99f7f56c64a0524ea1ec3922cd095b108825a513d0212db75a5dfb08ba196cce
 $ curl -sL …/SHA256SUMS
 99f7f56c64a0524ea1ec3922cd095b108825a513d0212db75a5dfb08ba196cce  …    ← 相符
+```
+
+兩邊的值相同，再讓節點自己下載同一個檔案。進到節點的 shell，在一個暫存目錄裡下載、解開，把執行檔裝進 `/usr/local/bin`：
+
+```bash
+kubectl -n wasmlab exec -it "$NODE_SHELL_POD" -- nsenter -t 1 -m -- bash
+# inside the node
+cd "$(mktemp -d)"
+V=https://github.com/containerd/runwasi/releases/download/containerd-shim-wasmedge/v0.6.1
+curl -sLO $V/containerd-shim-wasmedge-x86_64-linux-musl.tar.gz
+tar -xzf containerd-shim-wasmedge-x86_64-linux-musl.tar.gz
 ```
 
 ```console
@@ -124,9 +128,9 @@ $ /usr/local/bin/containerd-shim-wasmedge-v1 -v
   Runtime: wasmedge    Version: 0.6.1    Revision: 5a8fc8e9ee0df28
 ```
 
-**壓縮檔 37.3 MiB,解開 109 MiB。** 對照節點原有的 `containerd-shim-runc-v2` 是 8.4 MiB——**整個 WasmEdge 執行期靜態連結在裡面,13 倍大。**
+壓縮檔 37.3 MiB，解開後是 109 MiB。節點原有的 `containerd-shim-runc-v2` 是 8.4 MiB，這一個大了 13 倍，因為整個 WasmEdge 執行期都靜態連結在裡面。
 
-**第一次比對:**
+回到定義 `snap` 的本機終端機，取第二次快照（`snap s1-shim-installed`），和開始前比：
 
 ```console
 containerd-config.toml           IDENTICAL
@@ -137,13 +141,51 @@ shim-binaries.txt                DIFFERS
       > -rwxr-xr-x 1 root root 114524904 /usr/local/bin/containerd-shim-wasmedge-v1
 ```
 
-**放一個 109 MiB 的執行期上去,containerd 一無所知。** 檔案系統多一個檔案,這是全部。
+五份裡只有 shim 清單多了一行。containerd 的設定、kubelet 回報的 handler 都沒變：磁碟上多了一個執行檔，但還沒有任何設定指向它，containerd 不會去用它。
 
-## 步驟 3: 改 containerd 設定——節點從這一步開始不一樣
+## 步驟 2：在 containerd 設定裡加一個 handler {#configure-handler}
 
-### 先在副本上離線驗證,不拿節點賭
+要讓 containerd 用這個 shim，就要在 `config.toml` 加一段 `runtimes.wasmedge`，這段的名字 `wasmedge` 就是之後 RuntimeClass 要寫的 handler。
 
-步驟 1 已經知道 runwasi 的文件與 CI 用兩個不同路徑。`containerd -c <file> config dump` 只解析不啟動,**零風險**:
+### 先決定 plugin 路徑
+
+Day 1 比較過新舊 plugin 路徑。containerd 2.x 能遷移完整的 version 2 設定，但本課 AKS 檔案已使用新 plugin 名稱，額外加入舊路徑時未得到預期 handler，見 Day 1 的[設定路徑檢查](sprint3-day1-three-generations.md#mine-1)。這台節點是 containerd 2.3.3，照理該用 2.x 路徑。麻煩的是 runwasi 自己的資料就有兩種寫法。它的 quickstart 文件寫的是 2.x 路徑：
+
+```toml
+# runwasi 的文件(quickstart.md)——containerd 2.x 的路徑
+[plugins."io.containerd.cri.v1.runtime".containerd.runtimes.wasm]
+```
+
+同一個 tag 裡，它自己的 CI 用的 kind 節點映像是 Kubernetes v1.29.1，寫的是 1.x 路徑：
+
+```dockerfile
+# 同一個 tag 裡,runwasi 自己的 CI(test/k8s/Dockerfile,kind v1.29.1)——1.x 的路徑
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.wasm]
+```
+
+網路上的範例兩種都有。與其改了節點、重啟之後才知道對不對，不如先在副本上確認。`containerd -c <檔案> config dump` 會讀指定的設定檔、印出有效設定，但不啟動任何東西，不影響正在跑的 containerd。在節點上把 `config.toml` 複製兩份，各加上一種寫法：
+
+```bash
+# inside the node, in a scratch directory
+cp /etc/containerd/config.toml cfg-1x.toml
+cat >> cfg-1x.toml <<'EOF'
+
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.wasmedge]
+  runtime_type = "io.containerd.wasmedge.v1"
+EOF
+
+cp /etc/containerd/config.toml cfg-2x.toml
+cat >> cfg-2x.toml <<'EOF'
+
+[plugins."io.containerd.cri.v1.runtime".containerd.runtimes.wasmedge]
+  runtime_type = "io.containerd.wasmedge.v1"
+EOF
+
+containerd -c cfg-1x.toml config dump | grep -n wasmedge
+containerd -c cfg-2x.toml config dump | grep -n wasmedge
+```
+
+再把兩份的有效設定行數、命中行，以及和沒加任何東西的基準比對的結果整理在一起（下面輸出裡副本放在 `/tmp/`，檔名是自己取的）：
 
 ```console
 $ containerd -c /tmp/cfg-1x.toml config dump      # io.containerd.grpc.v1.cri…runtimes.wasmedge
@@ -157,11 +199,15 @@ $ containerd -c /tmp/cfg-2x.toml config dump      # io.containerd.cri.v1.runtime
     112:    runtime_type = 'io.containerd.wasmedge.v1'
 ```
 
-**1.x 路徑那一段整個被丟掉,而且沒有任何錯誤或警告。** 這裡的零命中有兩重證明:`grep -c` 是 0,**同時** dump 有 308 行且與基準逐字相同——不是指令失敗。
+1.x 寫法那一段整個不見了，containerd 沒印任何錯誤或警告。這裡的「零命中」可以信，因為同一份輸出有 308 行，而且和基準逐字相同，表示指令本身有正常執行。2.x 寫法則出現在有效設定的第 111–112 行。
 
-**改節點之前先在副本上 dump,是這條路線最划算的一個習慣。** 詳見[地雷 2](#mine-2)。
+更容易誤判的是，1.x 路徑裡的 `io.containerd.grpc.v1.cri` 這個名字在 2.3.3 的有效設定裡還找得到，所以 grep 這個鍵不能證明舊教學適用，見[疑難排解：1.x 路徑被靜默丟棄](#mine-2)。
 
-### 套用、重啟,以及重啟的實際代價
+### 套用設定，讓 containerd 重新讀取
+
+確定用 2.x 路徑之後，先把節點的 `config.toml` 複製一份備份，再把 `cfg-2x.toml` 裡加的那三行（一行空白、兩行設定）附加到 `/etc/containerd/config.toml` 結尾。
+
+containerd 要重新讀設定才會生效。三種常見的做法，只有一種有用：
 
 ```console
 $ systemctl reload containerd
@@ -176,7 +222,9 @@ $ kubectl get node -o jsonpath='{…runtimeHandlers}'
 ['', 'runc', 'untrusted', 'wasmedge']           ← 生效
 ```
 
-**只有 `systemctl restart` 有用。** 而重啟的代價量出來是零:
+`reload` 直接被 systemd 拒絕；送 `SIGHUP` 不會報錯，但 handler 清單沒變；`systemctl restart` 之後，kubelet 回報的清單才多了 `wasmedge`。
+
+重啟 containerd 聽起來會影響節點上所有的容器。實際比對重啟前後全叢集 pod 的 `RESTARTS`，再看節點的 `Ready` 狀態：
 
 ```console
 $ diff pods-pre-restart.txt pods-post-restart.txt
@@ -186,9 +234,11 @@ $ kubectl get node -o jsonpath='{…conditions[?(@.type=="Ready")]}'
 True  lastTransition=07:17:03Z       ← 早於 07:24:37 的重啟,節點沒掉出 Ready
 ```
 
-**containerd 重啟不會殺掉既有容器**(shim 是獨立行程,unit 檔是 `KillMode=process`),節點也沒有掉出 `Ready`。**這是這條路線比想像中溫和的地方。**
+沒有任何 pod 重啟，`Ready` 最後一次變化的時間也在重啟之前。原因是每個容器都由自己的 shim 行程看管，shim 不是 containerd 的子行程，而 containerd 的 systemd unit 設定的是 `KillMode=process`，重啟時只停掉 containerd 主行程本身。
 
-### 第二次比對:節點從這裡開始不一樣
+### 第二次比對
+
+取快照 `snap s2-containerd-configured`，和上一次比：
 
 ```console
 containerd-config.toml           DIFFERS
@@ -202,9 +252,13 @@ shim-binaries.txt                IDENTICAL
 runtimeclasses.txt               IDENTICAL
 ```
 
-**新 handler 的 `recursiveReadOnlyMounts` 與 `userNamespaces` 都是 `false`,而 `runc` 兩個都是 `true`。** 這是 kubelet 從 shim 問出來的能力回報——**Day 8 談「wasm 工作負載拿不到哪些 Pod 功能」時,第一手依據就是它。**
+這次設定檔、有效設定、handler 清單三份都變了。設定檔只加兩行，有效設定卻多 15 行，是 containerd 把這個 runtime 的所有預設欄位都展開了。
 
-## 步驟 4: RuntimeClass——只動 API server
+看 handler 那兩個 `features`：它們是 kubelet 向 runtime 問來的能力，分別表示這個 handler 支不支援遞迴的唯讀掛載、支不支援 Pod 的 user namespace。`runc` 兩項都是 `true`，`wasmedge` 兩項都是 `false`。Day 8 整理 wasm 工作負載用不到哪些 Pod 功能時，會再回到這裡。
+
+## 步驟 3：建 RuntimeClass
+
+最後一塊在叢集這一側。`handler` 要逐字等於上一步 `config.toml` 裡 `runtimes.` 後面的名字，不是 `runtime_type`：
 
 ```bash
 cat > runtimeclass-wasmedge.yaml <<'EOF'
@@ -216,11 +270,33 @@ handler: wasmedge      # must match runtimes.<name> in config.toml, NOT runtime_
 EOF
 ```
 
-**第三次比對:只有 `runtimeclasses.txt` 變了,節點四份全部 IDENTICAL。** 這一步完全在 etcd 裡——正是 [Day 1](sprint3-day1-three-generations.md) 七層對照表裡「叢集物件」那一列。
+```console
+$ kubectl apply -f runtimeclass-wasmedge.yaml
+```
 
-## 步驟 5: 跑起來之前還缺一塊
+第三次快照（`snap s3-runtimeclass`）只有 RuntimeClass 清單多一行，節點上的四份都和上一次相同。RuntimeClass 存在 etcd 裡，建它不會動到節點，也就是 Day 1 那條鏈的叢集側。
 
-第一次部署 runwasi 的示範映像:
+## 步驟 4：跑第一顆 wasm pod {#run-images}
+
+用 runwasi 提供的範例映像 `wasi-demo-app`。這個映像的進入點已經是 `/wasi-demo-app.wasm`，`args` 只要給它的子命令與參數：
+
+```bash
+cat > pod-runwasi-demo.yaml <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: wasmedge-runwasi-demo
+  namespace: wasmlab
+spec:
+  runtimeClassName: wasmedge
+  restartPolicy: Never
+  containers:
+    - name: demo
+      image: ghcr.io/containerd/runwasi/wasi-demo-app:latest
+      args: ["echo", "hello-from-wasmedge"]
+EOF
+kubectl apply -f pod-runwasi-demo.yaml
+```
 
 ```console
 $ kubectl -n wasmlab get pod wasmedge-runwasi-demo
@@ -233,7 +309,9 @@ Events:
                     parent snapshot sha256:5e274030… does not exist: not found
 ```
 
-**映像拉成功、shim 有了、handler 有了,卡在 snapshot。** 追下去:
+映像拉成功了，shim 和 handler 也都在，卻停在 `CreateContainerError`，訊息說某個 **snapshot** 不存在。snapshot 是 containerd 把映像的一層層 layer 解開之後的檔案系統，容器啟動時就以它當根目錄。訊息的意思是：這個映像的 layer 沒有被解開。
+
+用 `ctr` 直接問節點上的 containerd：
 
 ```console
 $ ctr -n k8s.io images ls | grep wasi-demo-app
@@ -245,7 +323,11 @@ $ ctr -n k8s.io snapshots ls | grep 5e274030
 （無輸出——265 個 snapshot 裡沒有這一個,layer 從來沒有被解開）
 ```
 
-**映像的平台是 `wasip1/wasm`,節點的 snapshotter 只處理 `linux/amd64`。** containerd 把 blob 收進 content store,但不解壓縮成 snapshot。這是[地雷 3](#mine-3),而它的修法前面有一段很自然會走進去的岔路:
+看 `PLATFORMS` 欄。每個映像都會標明它是給哪個**平台**（作業系統與 CPU 架構的組合）用的，一般容器映像是 `linux/amd64`，這個映像標的是 `wasip1/wasm`。節點的 containerd 只替符合本機平台 `linux/amd64` 的映像解開 layer，其他平台的映像，下載下來的內容存著，但不會解開成 snapshot。所以 shim 要去 rootfs 裡讀 `.wasm`，讀不到。錯誤訊息只說 snapshot 不存在，完全沒提平台，要自己看 `PLATFORMS` 欄才知道。
+
+### 讓 containerd 解開 wasm 平台的映像
+
+containerd 的映像設定裡有一個 `runtime_platforms`，名字看起來就是為這件事設計的。只加它的結果是這樣：
 
 ```console
 # 岔路:runtime_platforms,名字看起來完全就是為這件事準備的
@@ -254,7 +336,7 @@ $ ctr -n k8s.io snapshots ls | grep 5e274030
                                        套用、重啟、重拉,行為一模一樣
 ```
 
-真正有效的是同一段設定的另一個欄位:
+設定有進到有效設定裡，但 pod 還是同一個錯誤。要再加同一段設定裡的另一個欄位：
 
 ```toml
 [plugins."io.containerd.cri.v1.images"]
@@ -262,20 +344,43 @@ $ ctr -n k8s.io snapshots ls | grep 5e274030
                                     # service, which ignores runtime_platforms
 ```
 
+這個欄位預設是 `false`，此時 Kubernetes 要求拉映像時，containerd 把工作交給另一個負責下載的元件（transfer service），而那個元件不看 `runtime_platforms`。改成 `true` 之後，拉映像改由 Kubernetes 介面（CRI）這一側自己處理，`runtime_platforms` 才有作用。
+
+要注意寫的位置：`config.toml` 裡已經有 `[plugins."io.containerd.cri.v1.images"]` 這一段，`use_local_image_pull = true` 要加在這一段的標題底下，不要在檔尾再寫一次同樣的段落標題。`runtime_platforms` 那一段則附加在檔尾：
+
+```toml
+[plugins."io.containerd.cri.v1.images".runtime_platforms.wasmedge]
+  platform = "wasip1/wasm"
+  snapshotter = "overlayfs"
+```
+
+改完之後，在節點 shell 執行 `systemctl restart containerd`。回本機刪除 `wasmlab` 裡的 `wasmedge-runwasi-demo` Pod；再到節點 shell 用 `ctr -n k8s.io images rm ghcr.io/containerd/runwasi/wasi-demo-app:latest` 移除這個測試映像的快取。最後回本機重新執行 `kubectl apply -f pod-runwasi-demo.yaml`，讓 kubelet 重拉映像並建 Pod。成功後查看 Pod log：
+
 ```console
 $ kubectl -n wasmlab logs wasmedge-runwasi-demo
 hello-from-wasmedge
 exiting
 ```
 
-**WasmEdge 在 AKS 上跑起來了。**
+pod 跑完、狀態是 `Completed`，log 是預期的兩行。WasmEdge 在 AKS 上跑起來了。
 
-!!! warning "`use_local_image_pull` 是一個影響整台節點的開關"
-    它把 CRI 的拉取路徑從 transfer service 換回本地實作,**對一般容器映像的拉取行為、效能、registry 鏡像設定有沒有影響,沒有測。**
+本課驗證過能跑的設定是 `use_local_image_pull` 和 `runtime_platforms` 兩段都加，照這份做就好。「只加 `use_local_image_pull` 夠不夠」本課沒有拆開驗證；想精簡設定，先在測試節點拿掉 `runtime_platforms` 試一次。這個問題的完整整理見[疑難排解：pod 停在 `parent snapshot … does not exist`](#mine-3)。
 
-    另外「只留 `use_local_image_pull`、拿掉 `runtime_platforms` 還通不通」也沒拆開驗——**所以最小必要設定是哪幾行,今天答不出來。**
+!!! warning "`use_local_image_pull` 會影響整台節點"
+    它改的是這台節點上所有映像的拉取路徑，不只 wasm 映像。對一般容器映像的拉取行為、速度、registry 鏡像設定有沒有影響，本課沒有測。要用在正式環境的節點上，先在測試節點觀察一般映像的拉取。
 
-### 累計侵入度
+## 節點從哪一步開始不一樣
+
+把四個步驟各自造成的變化放在一起（步驟 4 的快照是 `snap s4-image-pull-fixed`）。每一列是一個步驟，每一欄是一份快照，「變了」表示這一步做完之後，那份和前一次不同：
+
+![四個步驟對五份快照的影響：步驟 1 放上 shim 執行檔只改了 shim 清單；步驟 2 改 containerd 設定並重啟，config.toml、有效設定、kubelet handler 三份都變了，這一列以橘色強調；步驟 3 建 RuntimeClass 只改 RuntimeClass；步驟 4 補映像拉取設定並重啟，改了 config.toml 與有效設定](../assets/diagrams/s3d4-node-diff.svg)
+
+照著圖由上往下看：
+
+1. 步驟 1 雖然在節點上放了 109 MiB 的執行期，containerd 的設定和 kubelet 看到的 handler 都沒變。評估風險時，「複製一個檔案」和「改變節點行為」要分開看。
+2. 節點的行為從步驟 2 開始改變，也就是改 `config.toml` 並重啟 containerd 的那一步。
+
+和 Day 1 的節點基準相比，全部做完之後節點累計多了這些東西：
 
 | 項目 | 相對 Day 1 基準的變化 |
 |---|---|
@@ -286,15 +391,15 @@ exiting
 | RuntimeClass | 多一個(在 etcd,不在節點) |
 | containerd 重啟 | **2 次,pod 零重啟、節點沒掉出 Ready** |
 
-**「第幾步開始節點就不一樣了」的答案是第 3 步。前兩步(含把 109 MiB 的執行期放上去)containerd 完全無感。**
+對照另外兩條路：Day 2 的 wasmCloud 五份快照完全沒變；WasmEdge 要在每台節點加 8 行設定和一個 shim 執行檔；Day 6 的 SpinKube 會改用 operator 替你做類似的事。
 
-三條路線的位置到這裡確定了:**wasmCloud 零改動 → WasmEdge 8 行設定 + 一個 shim → SpinKube(Day 6)還沒量**。「由低到高」的排序成立。
+## 同一支 wasm 程式，兩邊都能跑嗎 {#gate}
 
-## 驗收:原訂的「同一支 wasm 程式」不存在 {#gate}
+到這裡，叢集上同時有 Day 2–3 的 wasmCloud 和今天的 WasmEdge。直覺上，程式編成 wasm 之後，交給哪個 wasm 執行期都能跑。下面拿兩邊現成的映像來試。
 
-原訂驗收是「同一支 wasm 程式在 WasmEdge 與 wasmCloud 上各跑一次」。**這個共同變因不存在。**
+### 三份映像的打包方式
 
-### 三份打包,實際查 registry
+先看映像在 registry 上怎麼打包。每個 OCI 映像都有一份 manifest，列出一份設定（config）和幾層內容（layer），各自用 **mediaType** 標明是什麼格式。下面是三份映像的 manifest 內容，第一份是 Day 2 用的 wasmCloud 範例，後兩份是 runwasi 的範例：
 
 ```console
 --- wasmcloud/components/hello-world:0.1.0
@@ -308,7 +413,9 @@ exiting
   layer[0].mediaType = application/vnd.bytecodealliance.wasm.component.layer.v0+wasm  (2262850 B)
 ```
 
-**而後兩份裡的 wasm 是同一份位元組:**
+三份的打包都不一樣。wasmCloud 的設定是 wasm 專用的格式，layer 直接就是一個 `.wasm` 檔；`wasi-demo-app` 是標準的容器映像，layer 是一個 tar 包；`wasi-demo-oci` 用標準的容器設定，layer 卻直接放 `.wasm`。
+
+把後兩份裡的 `.wasm` 取出來比雜湊值：
 
 ```console
 $ shasum -a 256 wasi-demo-app.wasm demo-oci.wasm
@@ -316,9 +423,11 @@ $ shasum -a 256 wasi-demo-app.wasm demo-oci.wasm
 245c955714067729ab7b3fdd26681caa8bbc5d09ba054a846aa7f5bd9a393f45  demo-oci.wasm
 ```
 
-**同一支程式、兩種打包**——這一組把「打包格式」與「wasm 格式」兩個變因分開了。
+兩份是同一支程式，只是打包方式不同。步驟 4 已經跑過 `wasi-demo-app`；`wasi-demo-oci` 用同一份 pod 寫法，只把 `image` 換掉、拿掉 `args`，pod 名稱改成 `wasmedge-runwasi-oci`，也跑得起來，log 是一首重複的歌詞。這一組說明：對 WasmEdge 來說，這兩種打包方式都能用。
 
-### 差異在第 5 個位元組上
+### 前 8 個位元組
+
+再看檔案本身。三個 `.wasm` 的前 8 個位元組：
 
 ```console
 $ xxd -l 8 -g 1 <各檔>
@@ -327,11 +436,40 @@ $ xxd -l 8 -g 1 <各檔>
   wasi-demo-oci.wasm    00 61 73 6d 01 00 00 00    同上
 ```
 
-前四個位元組 `\0asm` 三者相同。**第 5 到第 8 個位元組就分家了。**
+把兩種開頭並排畫出來：
+
+![兩種 wasm 檔的前 8 個位元組：wasi-demo-app.wasm 是 00 61 73 6d 01 00 00 00，為 core module；hello-world.wasm 是 00 61 73 6d 0d 00 01 00，為 component。前四個位元組 \0asm 兩者相同，從 offset 0x04 開始不同；箭頭指向 hello-world 的第 5 個位元組，標示 WasmEdge 的錯誤訊息 Bytecode offset: 0x00000004。wasmCloud 只載入 component，runwasi 的 wasmedge shim 只載入 core module](../assets/diagrams/s3d4-wasm-header.svg)
+
+前四個位元組 `00 61 73 6d` 是所有 wasm 檔共用的開頭（`\0asm`）。後四個位元組標示版本與種類，兩種檔案從這裡開始不同：
+
+- **core module**：`01 00 00 00`，最原始的 wasm 格式，也就是 WASI 0.1（`wasip1`）程式編出來的樣子。
+- **component**：`0d 00 01 00`，Day 0 介紹的 Component Model 格式，用 WIT 描述對外的介面，WASI 0.2（`wasip2`）的程式是這種。
+
+wasmCloud 的 `hello-world` 是 component，runwasi 的兩個範例是 core module。
 
 ### 把 wasmCloud 的元件交給 WasmEdge
 
-不給 `command` 時失敗在打包層(`no command specified`——那份 config JSON 裡沒有 `Entrypoint`,那個位置放的是 `component.exports/imports`)。補上 `command` 之後,失敗前進到格式層:
+把 `hello-world:0.1.0` 寫進一顆 `runtimeClassName: wasmedge` 的 pod。只寫 `image` 時，pod 停在 `no command specified`：wasmCloud 的映像設定裡沒有 `Entrypoint`，CRI 不知道要執行什麼。補上 `command` 之後，容器真的啟動了，接著失敗：
+
+??? example "pod-wasmcloud-component-cmd.yaml"
+
+    ```bash
+    cat > pod-wasmcloud-component-cmd.yaml <<'EOF'
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      name: wasmedge-wasmcloud-cmd
+      namespace: wasmlab
+    spec:
+      runtimeClassName: wasmedge
+      restartPolicy: Never
+      containers:
+        - name: hello
+          image: ghcr.io/wasmcloud/components/hello-world:0.1.0
+          command: ["/hello-world.wasm"]
+    EOF
+    kubectl apply -f pod-wasmcloud-component-cmd.yaml
+    ```
 
 ```console
 $ kubectl -n wasmlab logs wasmedge-wasmcloud-cmd
@@ -341,11 +479,37 @@ $ kubectl -n wasmlab logs wasmedge-wasmcloud-cmd
 [error]     At AST node: component
 ```
 
-**`Bytecode offset: 0x00000004`——WasmEdge 讀到第 5 個位元組就停了,跟上面的 hexdump 完全對得起來。**
+`Bytecode offset: 0x00000004` 就是圖上箭頭指的位置：WasmEdge 讀完 `\0asm`，看到第 5 個位元組是 component 的版本號，就停下來了。第二行訊息也直接說出原因：要開啟 Component Model 才能載入。這兩種失敗的分辨方式，見[疑難排解：同一個映像兩種失敗](#mine-4)。
 
-那能不能叫它開啟 component model?**不能,而且沒有任何外部開關**,見[地雷 5](#mine-5)。
+WasmEdge 執行期本身支援 Component Model，但 runwasi 的 wasmedge shim 沒有把它打開，也沒有任何 pod annotation、環境變數或 containerd 設定可以打開。同一個 repo 的 wasmtime shim 有 Component Model 相關實作，可作為下一個驗證選項；本章沒有驗證它能執行這份 wasmCloud 映像與所需介面。原始碼的證據見[疑難排解：shim 沒有開 component model](#mine-5)。
 
-### 反方向:把 core module 交給 wasmCloud
+### 反方向：把 core module 交給 wasmCloud
+
+再把 `wasi-demo-app` 寫成 wasmCloud 的 `WorkloadDeployment`，交給 Day 2–3 的 host：
+
+??? example "wasmcloud-runwasi-core-module.yaml"
+
+    ```bash
+    cat > wasmcloud-runwasi-core-module.yaml <<'EOF'
+    apiVersion: runtime.wasmcloud.dev/v1alpha1
+    kind: WorkloadDeployment
+    metadata:
+      name: runwasi-core-module
+      namespace: wasmcloud
+    spec:
+      replicas: 1
+      template:
+        spec:
+          hostSelector:
+            hostgroup: default
+          components:
+            - name: runwasi-demo
+              image: ghcr.io/containerd/runwasi/wasi-demo-app:latest
+    EOF
+    kubectl apply -f wasmcloud-runwasi-core-module.yaml
+    ```
+
+    另一份 `runwasi-oci-artifact` 寫法相同，名稱與 component 名改掉，`image` 換成 `wasi-demo-oci:latest`，結果一樣。
 
 ```console
 $ kubectl -n wasmcloud get workload runwasi-core-module-… -o jsonpath='{.status}'
@@ -358,24 +522,21 @@ $ kubectl -n wasmcloud get workload runwasi-core-module-… -o jsonpath='{.statu
   對照:同一批 log 裡 blobby / hello-world 的 'Starting workload' = 1 / 2 / 2
 ```
 
-**八行拉取 WARN、零行 `Starting workload`、零行錯誤,然後每 60 秒換一顆 host 無限重試。** 見[地雷 6](#mine-6)。
+`Workload` 一直不就緒，三顆 host 的 log 裡只有拉取映像的 WARN，沒有任何錯誤，也沒有 `Starting workload`。Day 3 說過，拉取的 WARN 本身不代表失敗，要看下一行有沒有 `Starting workload`（Day 3 的[「每次拉元件都會噴一行像認證失敗的 WARN」](sprint3-day3-wasmcloud-distributed.md#mine-7)）。這次還要合看 Workload 未就緒、反覆重試、正常元件的對照，以及前面確認的 core module 格式。單憑缺少這一行 log，不能判定其他映像也是格式不相容。
 
-**Day 3 的[地雷 7](sprint3-day3-wasmcloud-distributed.md#mine-7) 在這裡從噪音變成診斷工具**:那顆的判斷準則是「看下一行有沒有 `Starting workload`」——今天下一行沒有,這就是唯一的訊號。
+這兩個 `WorkloadDeployment` 會每 60 秒換一顆 host 重拉映像，看完結果就刪掉：
 
-### 判定
+```console
+$ kubectl -n wasmcloud delete workloaddeployment runwasi-core-module runwasi-oci-artifact
+```
 
-| | 判定 | 支撐證據 |
-|---|---|---|
-| **原訂驗收**:同一支程式兩邊各跑一次 | **已改寫** | 「同一支 wasm 程式」在這兩個執行期之間**不存在**;已發佈的成品裡沒有一支兩邊都吃得下 |
-| **(A)** 同一支 core module、兩種打包各跑一次 | **過** | 兩份映像裡的 wasm **SHA256 相同**,兩顆 pod 分別 `Completed` 與 `Running` 並輸出預期文字 |
-| **(B)** 雙向互換,失敗點定位到位元組／原始碼 | **過** | 正向 `illegal opcode` @ `offset 0x00000004`,與 hexdump 對得起來;反向三顆 host `Starting workload` 全 0、log 非空、無限重試無錯誤 |
-| **(C)** 兩邊各自跑自己的程式 | **過** | wasmCloud 回 `200` + `Hello from wasmCloud!`;WasmEdge 回 `hello-from-wasmedge / exiting` |
+細節見[疑難排解：wasmCloud 收到 core module 時只會重試](#mine-6)。
 
-**原本要驗什麼**:一支程式、兩個執行期,藉此把「執行期差異」孤立出來。
-**為什麼表達不出來**:這兩個執行期要的不是同一種 wasm,那個共同變因不存在。
-**改成驗什麼**:把兩個變因拆開各驗一次。**結論反而比原訂的更明確——擋住互通的是 wasm 格式,不是打包。**
+### 三種打包的差異
 
-### 三種打包格式對照表
+rootfs 是容器啟動後看見的根檔案系統；OCI manifest 與 config 則記錄映像層及執行設定。
+
+三份映像的差異整理如下：
 
 | | wasmCloud `hello-world` | runwasi `wasi-demo-app` | runwasi `wasi-demo-oci` |
 |---|---|---|---|
@@ -386,34 +547,49 @@ $ kubectl -n wasmcloud get workload runwasi-core-module-… -o jsonpath='{.statu
 | rootfs | **沒有這個欄位** | `diff_ids` 有 1 個 | `diff_ids` **是空的** |
 | 進入點 | **沒有**,改成 `component.exports/imports` 列 WIT 介面 | `Entrypoint` | `Entrypoint` + `containerd.runwasi.layers` label |
 | wasm 二進位 | **component** | **core module** | 同左,**SHA256 與左欄相同** |
-| 誰讀得懂 | 只有 wasmCloud | WasmEdge | WasmEdge |
+| 本章成功載入的執行方式 | wasmCloud | wasmedge shim | wasmedge shim |
 
-**同一份原始碼要不要重編?要。** `wasip2` 的 component 與 `wasip1` 的 core module 是兩個編譯目標(`wasm32-wasip2` vs `wasm32-wasip1`),而且 component 那一側還要 `wasm-tools component` 的加工與一份 WIT 世界定義。**這不是「換個容器打包」,是換編譯目標。**
+結果是：兩種打包方式 WasmEdge 都能讀，擋住互通的是 wasm 格式。同一份原始碼要給兩邊跑，就要編兩次：給 WasmEdge 編 `wasm32-wasip1` 的 core module，給 wasmCloud 編 `wasm32-wasip2`，Rust 會直接產出 component，不需要固定再做一次 component 轉換。格式符合之後，仍要核對 host 支援的匯入、匯出介面。這個結論是從格式差異推出來的，本章沒有拿同一份原始碼實際編兩次；[Day 5](sprint3-day5-cost-measurement.md) 量成本時會自己編。
 
-## 誠實的差距
+## WasmEdge 這條路適合誰
 
-- **`runtime_platforms` 到底有沒有用,沒有單獨拆開驗。** 量測順序是先加它(無效)、再加 `use_local_image_pull`(有效),兩個一起留著。**所以「最小必要設定是哪幾行」答不出來。**
-- **`use_local_image_pull = true` 的副作用沒評估。** 這是一個影響整台節點所有工作負載的開關,對一般容器映像的拉取行為、效能、registry 鏡像設定有沒有影響,今天沒測。
-- **crun 那條路完全沒有實測。** 判定它不可行靠的是文件過期加上節點沒有 crun 二進位檔。**沒有真的裝一個帶 WasmEdge 的 crun 試。** 兩條路都通的話,侵入度與效能可能不一樣。
-- **啟動時間與記憶體一個數字都沒量。** 只有非控制條件下的映像拉取時間,沒有對照組。**不作任何比較宣稱**,那是 Day 5 的事。
-- **109 MiB 的 shim 對節點的實際負擔沒量。** 只知道檔案大小,沒看它跑起來常駐多少記憶體、每個 wasm 容器多開一個 shim 行程的成本。
-- **「同一份原始碼編兩次」沒有做。** 打包差異表是拿三個現成的已發佈成品比出來的。「要重編」這個結論是從格式差異推出來的,**推理成立但沒有正面實測。**
-- **沒有測 WasmEdge 這條路的多副本／服務化。** 只跑了一次性 pod 與一顆長跑 pod,沒有 Deployment + Service。**兩邊的對照因此不對稱。**
-- **節點改動的可逆性今天沒驗。** 推論是「`stop`/`start` 換新 VM,改動自動消失」,依據是連續四次換 VM 加上今天的基準與 Day 1 逐字相同。**但沒有真的 stop 完再 start 確認**,Day 5 開頭會補上這一步。
+用 [Day 0 的方法](sprint3-day0-wasm-concepts.md#health-method)查這兩個專案時（Day 9 整理成表），WasmEdge 本體很活躍：近 13 週有 291 個 commit，作者分布是本課查過的專案裡最平均的（最近 100 筆裡最多的單一作者占 35 筆，共 12 位）。但讓它接上 Kubernetes 的是 runwasi，情況不同：default branch 最近 8 週沒有任何 commit，最近 100 筆 commit 有一半是 dependabot 的相依套件升級，release notes 裡也還沒有 WASI 0.3。這是課程 2026-08 查核時的歷史活動紀錄。規劃部署時，還要重新確認 runwasi 與選用 shim 版本的維護情況。
 
-## 地雷記錄
+所以這條路適合用來學 RuntimeClass、handler、shim 這條執行鏈，每一步都要自己做，每一步的結果也都看得到。既有的程式是 core module、短期不打算改成 component 的話，WasmEdge 的相容性也是優點。若要用於正式環境，這份手動操作還不夠：節點的安裝、設定與移除都要自己寫腳本維護，每換一台節點就要重做一次。
 
-### 地雷 1:AKS 預覽功能不能靠 `--help` 或 `az feature list` 判斷存不存在 {#mine-1}
+## 疑難排解
 
-**症狀**:`--help` 把某個 workload runtime 列在 `Allowed values`、`az feature register` 也回 `Registered`,真正下指令卻是 `InvalidWorkloadRuntimeSettingError`——功能已退役,但退役只做在 RP 的驗證層,CLI 參數列舉與 `Microsoft.Features` 旗標定義沒跟著下架。
+### `--help` 和 feature flag 都說 WasmWasi 還在 {#mine-1}
 
-**判斷準則**:**AKS 預覽功能只能實際送一次請求才知道在不在。** 好消息是這種請求失敗得很快(8 秒)又不產生資源,**成本是零——「試一下」在這裡是合理的偵察,不是浪費。**
+**症狀**：`az aks nodepool add --help` 把 `WasmWasi` 列在 `--workload-runtime` 的合法值裡，`az feature register` 註冊 `WasmNodePoolPreview` 也立刻回 `Registered`：
 
-### 地雷 2:1.x 的 plugin 路徑被靜默丟棄,而那個鍵還活著所以 grep 得到 {#mine-2}
+```console
+$ az aks nodepool add --help
+    --workload-runtime : Allowed values: KataCcIsolation, KataMshvVmIsolation,
+                         KataVmIsolation, OCIContainer, WasmWasi.
 
-**症狀**:照多數教學(以及 runwasi 自己的 CI)寫 `[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.wasmedge]`,containerd 收下、不報錯、有效設定裡完全沒有這一段。
+$ az feature register --namespace microsoft.ContainerService --name WasmNodePoolPreview
+{ "properties": { "state": "Registered" } }        ← 立刻就 Registered
+```
 
-**根因**:containerd 2.x 把 CRI 的 runtime 設定搬走了。**但 `io.containerd.grpc.v1.cri` 沒有消失**——它仍是有效設定裡的一個 plugin,只剩 streaming server 的五個欄位:
+真正建立 node pool 時卻被拒絕：
+
+```console
+$ az aks nodepool add … --workload-runtime WasmWasi
+ERROR: (InvalidWorkloadRuntimeSettingError) The agent pool wasi1 has a deprecated workload runtime
+WasmWasi. WebAssembly System Interface (WASI) node pools (preview) are no longer supported on AKS.
+                                     送出到回覆 8 秒,未產生任何資源
+```
+
+**原因**：這個功能已經退役，但退役只做在 Azure 處理請求的那一端。CLI 的參數清單和訂閱層的 feature flag 定義都沒有跟著拿掉。
+
+**修法**：先查官方退役公告，不要把 `--help` 或 feature flag 的狀態當成服務仍可用的證明。本次建立請求被拒絕且沒有建立 node pool，這個結果不能推廣成所有預覽功能請求都不會產生資源。錯誤訊息建議改用 SpinKube，那是本 sprint Day 6–7 的另一條路，不是 WasmEdge 的替代方案。另外，註冊 feature flag 是訂閱層級的變更（Day 1 說明過為什麼不建議），確認用完要 `az feature unregister`。
+
+### 1.x 的 plugin 路徑被靜默丟棄，而那個鍵還 grep 得到 {#mine-2}
+
+**症狀**：照多數教學（以及 runwasi 自己的 CI）寫 `[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.wasmedge]`，containerd 不報錯，但有效設定裡沒有這一段，handler 不會出現。
+
+**原因**：containerd 2.x 把 runtime 設定搬到 `io.containerd.cri.v1.runtime` 底下，見步驟 2。容易誤判的地方是 `io.containerd.grpc.v1.cri` 這個 plugin 在 2.3.3 的有效設定裡還在，只剩 streaming server 的五個欄位：
 
 ```console
   [plugins.'io.containerd.grpc.v1.cri']
@@ -422,40 +598,31 @@ $ kubectl -n wasmcloud get workload runwasi-core-module-… -o jsonpath='{.statu
     …                                    ← runtimes 已經搬走了
 ```
 
-**所以「grep 得到這個鍵」不能當成「這篇教學適用」的證據。** `containerd config migrate` 也救不了:輸出 308 行、`wasmedge` 零命中,`version` 從 2 升到 4,那一段就是消失。
+所以 grep 得到這個鍵，不代表那篇教學適用。`containerd config migrate` 也轉不過來：輸出 308 行、`wasmedge` 零命中，`version` 從 2 升到 4，那一段直接消失。
 
-**這顆是 [Day 1 地雷 1](sprint3-day1-three-generations.md#mine-1) 的續集**,但更難察覺——那一顆是「路徑錯了」,這一顆是「路徑錯了而且錯的那個鍵還在」。
+**修法**：改節點之前，先在副本上跑 `containerd -c <副本> config dump`，確認那一段出現在有效設定裡（步驟 2）。改完要 `systemctl restart containerd`，`reload` 與 `SIGHUP` 都不會讓新 handler 生效。
 
-**修法／追查順序**:**改節點之前先在副本上 `containerd -c <file> config dump`**,零風險、不用重啟。順帶:`systemctl reload` 回 `Job type reload is not applicable`,`kill -HUP` 送得出去但新 runtime 不會生效,**只有 `systemctl restart` 有用**。
+### pod 停在 `parent snapshot … does not exist` {#mine-3}
 
-### 地雷 3:shim 裝好、handler 也有了,pod 還是起不來 {#mine-3}
+**症狀**：shim 裝好、kubelet 也回報了 `wasmedge` handler，pod 卻是 `CreateContainerError`，訊息是 `parent snapshot sha256:… does not exist: not found`，而事件顯示映像拉成功了。
 
-**症狀**:`CreateContainerError`,訊息是 `parent snapshot sha256:… does not exist: not found`。而映像明明拉成功。
+**原因**：映像的平台是 `wasip1/wasm`，containerd 預設的拉取路徑不會替非本機平台的映像解開 layer，見步驟 4。錯誤訊息完全沒提到平台。
 
-**根因**:映像的平台是 `wasip1/wasm`,節點的 snapshotter 是 `overlayfs`／`linux/amd64`。containerd 把 blob 收進 content store 但**不解壓縮成 snapshot**,shim 要讀 rootfs 裡的 `.wasm` 就讀不到。**錯誤訊息只講 snapshot 不存在,一個字都沒提平台不合。**
+**修法**：在 `[plugins."io.containerd.cri.v1.images"]` 加 `use_local_image_pull = true`，並加上 `runtime_platforms.wasmedge`，重啟 containerd、刪掉沒解開的映像再重建 pod。只加 `runtime_platforms` 沒有效果。追查順序：`ctr -n k8s.io images ls` 看 `PLATFORMS` 欄 → `ctr -n k8s.io snapshots ls | grep <digest>` 確認沒有解開 → `containerd config dump` 看 `use_local_image_pull`。
 
-**修法**:`use_local_image_pull = true`。預設 `false` 時 CRI 把拉取交給 transfer service,那條路徑不看 CRI 的 `runtime_platforms`。
+### 同一個映像出現兩種不同的失敗 {#mine-4}
 
-**容易走進的岔路**:先加了 `runtime_platforms.wasmedge`——**名字看起來完全就是為這件事準備的,設定也確實進了有效設定,但行為一模一樣。**
+**症狀**：把 wasmCloud 的元件交給 WasmEdge，不寫 `command` 時是 `failed to generate spec: no command specified`；補上 `command` 之後，容器啟動了，log 卻是 `illegal opcode … Bytecode offset: 0x00000004`。
 
-**追查順序**:`ctr -n k8s.io images ls` 看 `PLATFORMS` 欄 → `ctr snapshots ls | grep <digest>` 確認沒解開 → `containerd config dump` 找 `use_local_image_pull`。
+**原因**：第一種是打包層的問題，wasmCloud 映像的設定裡沒有 `Entrypoint` 也沒有 `Cmd`，CRI 產生不出容器規格。第二種才是根本原因：wasm 檔是 component，不是 core module。
 
-### 地雷 4:同一個映像會有兩種失敗,而只有第二種說得出原因 {#mine-4}
+**修法**：看到 `no command specified` 不要停在「參數沒給對」，補上 `command` 讓它往下走，才看得到真正的原因。`no command specified` 是打包層，`Bytecode offset: 0x00000004` 是格式層。
 
-**症狀 A**(不給 command):`failed to generate spec: no command specified`。
-**症狀 B**(補上 command):容器起來了,然後 `Error`,log 是 `illegal opcode … Bytecode offset: 0x00000004`。
+### runwasi 的 wasmedge shim 沒有開 component model {#mine-5}
 
-**根因**:A 是打包層——wasmCloud 的 config JSON 裡沒有 `Entrypoint` 也沒有 `Cmd`,CRI 生不出 OCI spec。B 才是真的:**wasm 二進位檔是 component 不是 core module**。
+**症狀**：想讓 WasmEdge 載入 component，找不到任何 pod annotation、環境變數或 containerd `options` 可以打開。
 
-**為什麼要記**:**症狀 A 會讓人以為「只是參數沒給對」而放棄追下去。** 補一個 `command` 不是修好,而是**讓失敗前進到說得出原因的那一層**。
-
-**判斷準則**:`no command specified` 是打包層的問題,`Bytecode offset: 0x00000004` 是格式層的問題。
-
-### 地雷 5:runwasi 的 wasmedge shim 沒開 component model,而同 repo 的 wasmtime shim 有 {#mine-5}
-
-**症狀**:想讓 WasmEdge 吃 component,找不到任何 pod annotation、環境變數或 containerd `options` 可以開。
-
-**根因**三層:`containerd-shim-wasmedge` 用的是 `wasmedge_sdk::{Module, Store, Vm}` 與 `Module::from_bytes`——**core module 的 API**;`Config` 在 `Default` 裡寫死,沒有任何 proposal 開關;而
+**原因**：`containerd-shim-wasmedge` 用的是 `wasmedge_sdk` 的 `Module`、`Module::from_bytes` 這組載入 core module 的 API，設定物件在程式裡寫死成預設值，沒有任何開關。同一個 repo 裡搜尋 component model 相關的設定：
 
 ```console
 $ grep -rniE "component_model|ComponentModel|enable_component" crates/
@@ -465,56 +632,39 @@ containerd-shim-wasmtime/src/tests.rs:333:     config.wasm_component_model(true)
 命中 3 行;crates 下共 92 個 .rs 檔(證明輸入非空)
 ```
 
-**同一個 repo,wasmtime 的 shim 明確開了,wasmedge 的沒有。**
+三行全部在 wasmtime 的 shim 裡，wasmedge 的 shim 一行都沒有。
 
-**為什麼要記**:**「WasmEdge 支援 component model」跟「runwasi 的 wasmedge shim 支援 component model」是兩回事。** 前者是執行期的能力,後者是 shim 有沒有把它打開。**要 component + Kubernetes,今天可用的組合是 wasmtime 的 shim。**
+**修法**：WasmEdge 執行期支援 Component Model，不等於 runwasi 的 wasmedge shim 有打開它。runwasi 的 wasmtime shim 有相關實作，但仍要驗證目標映像的打包與匯入介面，本章沒有跑過這項替代方案。這和 Day 3 的[「沒有可抽換的 capability provider」](sprint3-day3-wasmcloud-distributed.md#mine-1)是同一類問題：功能在原始碼裡，但你實際跑的那個執行檔沒有啟用它。判斷一個能力能不能用，要看你手上的執行檔，不是看 repo 的功能清單。
 
-這跟 [Day 3 地雷 1](sprint3-day3-wasmcloud-distributed.md#mine-1) 是同一種情況:**功能在原始碼裡,但沒有編進你實際跑的那個二進位檔。**
+### wasmCloud 收到 core module 時沒有錯誤，只會一直重試 {#mine-6}
 
-### 地雷 6:wasmCloud 收到不是 component 的映像時完全靜默,只會無限重試 {#mine-6}
+**症狀**：`WorkloadDeployment` 的 `READY` 停在 `Unknown`，`Workload` 的 `Sync` 是 `False`，訊息只有 `WORKLOAD_STATE_NOT_FOUND`。三顆 host 的 log 只有拉取映像的 WARN，沒有錯誤，也沒有 `Starting workload`，每 60 秒換一顆 host 重來一次。
 
-**症狀**:`READY: Unknown`,`Sync: False`,訊息只有 `WORKLOAD_STATE_NOT_FOUND`。三顆 host 的 log 共 10／14／12 行,**只有拉取 WARN、`Starting workload` 零行、錯誤零行**。每 60 秒換一顆 host 重來。
+**原因**：host 拉得到映像，但裡面不是它能載入的 component，而這條路徑不會回報任何錯誤。同一批 log 裡，`blobby`、`hello-world` 的 `Starting workload` 有出現，證明這行 log 沒有被過濾掉。
 
-**根因**:host 拉得到映像、認不得裡面的東西,而這條路徑沒有任何錯誤回報。對照組同一批 log 裡 `blobby`／`hello-world` 的 `Starting workload` 是 1／2／2,**證明那行 log 本來就會出現,不是被過濾掉了。**
+**修法**：把沒有 `Starting workload` 視為追查線索，再比對 Workload 狀態、映像格式與能正常啟動的對照元件；這一行缺席本身不能唯一定位原因。重試會每 60 秒重新拉一次映像，持續產生流量與 log，實驗完用 `kubectl -n wasmcloud delete workloaddeployment <名稱>` 刪掉。
 
-**判斷準則**:**[Day 3 地雷 7](sprint3-day3-wasmcloud-distributed.md#mine-7) 的規則在這裡從噪音處理升級成唯一的診斷工具**——沒有下一行 `Starting workload`,就是這個映像 wasmCloud 吃不下。
+## 想一想
 
-**副作用**:這個重試迴圈**每 60 秒重拉一次映像**,會持續產生流量與 log。實驗結束時記得把 `WorkloadDeployment` 刪掉。
+- 同事在另一座 AKS 叢集照一篇部落格加了 WasmEdge 的 handler，重啟 containerd 之後，`kubectl get node -o jsonpath='{.items[0].status.runtimeHandlers}'` 裡還是沒有 `wasmedge`，pod 停在 `no runtime for "wasmedge" is configured`。在節點上你會先檢查哪兩件事？
+- 一顆 `runtimeClassName: wasmedge` 的 pod 停在 `CreateContainerError`，訊息是 `parent snapshot … does not exist`。另一顆換了映像的 pod 則是容器啟動後 `Error`，log 有 `Bytecode offset: 0x00000004`。這兩顆分別卡在哪一層？各自該怎麼處理？
+- 團隊想讓同一份 Rust 程式同時部署到 wasmCloud 和 WasmEdge，有人提議「編一次，打包成兩種映像就好」。依本章的結果，這個做法可行嗎？要怎麼改？
 
-## 帶得走的東西
+## 小結
 
-- **「第幾步開始節點不一樣」是一個值得每次都問的問題。** 把 109 MiB 的執行期放上節點,containerd 完全無感;真正的分水嶺是那 8 行設定加一次重啟。**分不清這兩件事,就會把「複製檔案」和「改變節點行為」當成同一件事來評估風險。**
-- **containerd 重啟比想像中溫和,但要自己量。** 21 個 pod 的 `RESTARTS` 逐行 diff 相同、節點沒掉出 `Ready`——因為 shim 是獨立行程、unit 檔是 `KillMode=process`。**這是可以量的,不要用猜的。**
-- **改節點之前先在副本上 `config dump`。** 零風險、不用重啟,而且會當場告訴你那段設定會不會被靜默丟掉。這條路線上這個習慣直接省下一次「改完重啟才發現沒生效」。
-- **失敗訊息會分層,而第一層通常在說謊。** `no command specified` 聽起來像參數沒給對,補上之後才看得到真正的 `Bytecode offset: 0x00000004`。**把失敗往前推一層,比在第一層猜原因有效。**
-- **「這個專案支援 X」跟「你正在跑的那個二進位檔支援 X」是兩回事。** 今天的 wasmedge shim 與 Day 3 的 wasmCloud provider 是同一種情況:功能在原始碼裡,沒編進成品。**判斷一個能力能不能用,要看你手上那個檔案,不是看 repo。**
-- **wasm 不是一種格式,是兩種。** core module 與 component 差在第 5 個位元組,而生態系目前是照這條線分裂的。**「把它編成 wasm」不是一個明確的指令**,要先問編給誰。
+WasmEdge 透過 runwasi 的 shim 接上 Kubernetes，要做三件事：把 shim 執行檔放上每一台節點、在 containerd 的 `config.toml` 用 2.x 路徑加一個 handler 並重啟 containerd、在叢集建一個 handler 名稱相同的 RuntimeClass。節點的行為從改設定那一步開始改變，放執行檔本身不會。設定寫錯路徑時 containerd 不會報錯，所以改節點前先在副本上看有效設定。之後遇到 WasmEdge 的 pod 起不來，依序問三個問題：kubelet 的 `runtimeHandlers` 裡有沒有這個 handler；映像的平台是不是 `wasip1/wasm`、layer 有沒有被解開；wasm 檔的第 5 個位元組是 core module 還是 component。
 
 ## 延伸閱讀
 
-想往下深挖,從這幾份開始:
+想再深入，可以從這幾份開始：
 
-- **[containerd/runwasi](https://github.com/containerd/runwasi)** —— 今天用的 shim。值得對照著看的是 `docs/src/getting-started/quickstart.md`(containerd 2.x 路徑)與 `test/k8s/Dockerfile`(1.x 路徑)——**同一個 tag 裡兩種寫法**,地雷 2 的成因。
-- **[containerd 的 CRI 設定文件](https://github.com/containerd/containerd/blob/main/docs/cri/config.md)** —— `use_local_image_pull` 與 `runtime_platforms` 都在這裡。地雷 3 走的那段岔路,讀這一份可以少走。
-- **[WasmEdge 的 containerd 整合頁](https://wasmedge.org/docs/develop/deploy/cri-runtime/containerd)** —— 值得看的是它**沒有**寫什麼:全文只說「runwasi 支援 WasmEdge」就轉介出去,而站上另一份 crun 教學還停在 Kubernetes 1.22 世代。
-
-## 這條路線收尾:WasmEdge + runwasi 適合誰
-
-今天的實測配上 [Day 0 那五條](sprint3-day0-wasm-concepts.md#health-method)的查證(2026-08-11):
-
-**體質要拆成兩半看**。WasmEdge 本體健康——近 13 週 291 個 commit、作者分布最均勻(最高單一作者 35/100、12 位)。**但上 Kubernetes 的那一段是 runwasi**,而 runwasi 是另一回事:default branch 靜止 8 週、最近 100 筆 commit 一半是 dependabot。它是這條路線唯一的自動化入口,而它幾乎只剩機器人在動。標準層也落後:release notes 沒有 WASI 0.3 字樣,上一代的完成度還掛著 open 追蹤 issue。
-
-**適合**:想搞懂 RuntimeClass → handler → shim 這條原生執行鏈——每一步手做、看得見,教學價值三條最高。既有程式碼是 core module 且短期不搬 component 的話,相容性也是優勢。
-
-**不適合**:上線。佈建與拆除全手動、沒有自動化、要自己維護腳本,而唯一能自動化它的元件正在停滯。
+- **[containerd/runwasi](https://github.com/containerd/runwasi)** —— 本章用的 shim。可以對照看 `docs/src/getting-started/quickstart.md`（containerd 2.x 路徑）與 `test/k8s/Dockerfile`（1.x 路徑），也就是步驟 2 那兩種寫法的出處。
+- **[containerd 的 CRI 設定文件](https://github.com/containerd/containerd/blob/main/docs/cri/config.md)** —— `use_local_image_pull` 與 `runtime_platforms` 的說明都在這裡，對應步驟 4。
+- **[WasmEdge 的 containerd 整合頁](https://wasmedge.org/docs/develop/deploy/cri-runtime/containerd)** —— WasmEdge 官方對 containerd 整合的說明，內容轉介到 runwasi。
 
 ## 下一步
 
-三條路線的前兩條走完了,侵入度的位置也量出來了:**wasmCloud 零改動,WasmEdge 8 行設定加一個 109 MiB 的 shim。** Day 6 的 SpinKube 是最後一條,也是唯一一條會派 operator 去替你改節點的。
-
-但在那之前,**[Day 5](sprint3-day5-cost-measurement.md) 要把成本量出來**。Day 2、Day 3、Day 4 各自留了量測陷阱:記憶體不會歸還、元件不同不能比、啟動時間各只跑一次、109 MiB 的 shim 常駐成本未知。那一天要先做方法學試跑,確認雜訊小於效果,再開始量。
-
-另外,節點上這些改動不必急著拆:「VM 汰換會抹掉節點層改動」這個性質,Day 5 開頭會直接驗證——**Day 8 的可逆性驗收要靠它**。
+wasmCloud 和 WasmEdge 兩條路都走過了：wasmCloud 不改節點，WasmEdge 在每台節點加 8 行設定和一個 109 MiB 的 shim。這兩天都還沒量過啟動時間與記憶體，109 MiB 的 shim 跑起來佔多少資源也不知道。[Day 5](sprint3-day5-cost-measurement.md) 先確認叢集停機再啟動、節點換成新 VM 之後，今天的節點改動是不是自動消失，再把兩條路的成本量出來。
 
 ---
 

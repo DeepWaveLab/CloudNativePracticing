@@ -1,123 +1,92 @@
-# Day 9: Sprint 3 總結——三條 wasm 路線的決策表
+# Day 9: Sprint 3 總結——依需求選擇 wasm 的執行方式
 
 ![WebAssembly 官方標誌](../assets/logos/webassembly-icon-color.svg){ align=right width="95" }
 
-> Sprint 3 的最後一章。三條路線的判定都已經在各自收尾那天給了——wasmCloud 在 [Day 3](sprint3-day3-wasmcloud-distributed.md)、WasmEdge 在 [Day 4](sprint3-day4-wasmedge.md)、SpinKube 在 [Day 8](sprint3-day8-reversibility.md)。今天不揭曉任何新東西,只把它們收成一張可以直接拿去用的表,連同這個 sprint 的地雷與驗收改寫回顧。
+平台團隊想讓客戶上傳自己的規則程式；另一個團隊想縮短短任務的啟動時間；還有人希望 wasm 服務能沿用現有的 Deployment 和 Service。三個需求都提到 wasm，需要確認的事情卻不同。
 
-!!! abstract "你在課程的哪裡"
-    - **Day 0**:三個問題與判斷方法出發。
-    - **Day 1–8**:三條路線實測,各自收尾那天下判定。
-    - **今天**:把判定收成決策表、回顧地雷與驗收改寫、收尾。
+走過 Day 1–8，你已經看過 wasmCloud、WasmEdge 與 SpinKube 怎麼執行程式，也實際追過安裝、設定失效和拆除。這一章回到需求本身：哪種執行方式符合你的管理方式，哪些效能結論有量測支持，以及導入前還有哪些事情要驗證。
 
-## 這張表怎麼讀
+## 先看程式在哪裡執行
 
-每一格後面掛著 `【類型|出處】`:
+把三條路線畫在同一張圖上，上半部是 Kubernetes 管理的物件，下半部是需要寫進節點的設定與執行檔。
 
-- **實測**=Day 1–8 在叢集上量到的;**查證**=2026-08-11 從一手來源取回(健康度、治理、上游 issue 現況);**推論**=從前兩者導出、未經驗證。`D<n>` 指第 n 天的章節。
-- **類型標記不可以省。** 三條路線的實測厚度不對稱——wasmCloud 只有兩天,另外兩條各三天——混在一起,你就不知道哪一格站得比較穩。
+![wasmCloud 的元件在一般 host Pod 裡執行；WasmEdge 與 SpinKube 則透過 RuntimeClass 選擇節點上的 handler 與 shim，安裝時會修改節點。](../assets/diagrams/s3d9-routes.svg)
 
-## 表 A:三個入口問題
+wasmCloud 的 host 是一般容器，wasm 元件在 host 裡執行。新增元件時，增加的是 `Workload` 等自訂資源，不一定增加 Pod。Day 2、3 的節點快照沒有出現 containerd 設定或 shim 檔案的變動；你要學的是 wasmCloud 自己的部署、能力設定和排程方式。
 
-[Day 0 給的三題](sprint3-day0-wasm-concepts.md#three-questions),答完通常只剩一條或零條:
+WasmEdge 與 SpinKube 的路線則讓 Pod 指定 `runtimeClassName`。Kubernetes 透過 RuntimeClass 選出 handler，節點上的 containerd 再啟動對應的 shim。[Day 1](sprint3-day1-three-generations.md) 已經看過：API 裡有 RuntimeClass，和節點真的能執行它，是兩件事。
 
-| 問題 | 答「是」 | 答「否」 |
-|---|---|---|
-| **一、wasm 工作負載要不要用一般 Kubernetes 物件管理?** | 只剩 **SpinKube**。原生 Deployment + `runtimeClassName` 直接跑,不需要 operator【實測|D7 驗收 (B):21 秒到 HTTP 200;對照組刪掉那一行得 `RunContainerError`】 | **wasmCloud** 進入候選。元件是 CRD 不是 Pod,`kubectl get pod` 的數量不隨元件增減【實測|D2】 |
-| **二、主要動機是冷啟動或部署密度嗎?** | **走 containerd 的兩條不該選**;wasmCloud 這格沒有資料,不能給答案【實測|D5】【缺口|D5 wasmCloud 那一側】 | 繼續往下 |
-| **三、能不能接受「節點池標籤讓換 VM 後自動重佈建」尚未被驗證?** | rcm 路線可評估 | rcm 路線降級為「先自己驗過再說」【實測|D7 手貼標籤不會自動重佈建】【查證|上游 issue #222 是文字,不是量測】 |
+這個差別也決定你要維護哪一層。wasmCloud 需要管理 host 與自訂資源；另兩條路線還需要管理節點上的 handler 設定與 shim。
 
-第一題的範圍限定:驗到的是 Deployment、Service、`kubectl logs`、Pod 層資源限制;**HPA、PDB、NetworkPolicy 沒有實測**,「它們也能用」是從「它是一顆普通 Pod」導出的推論。
+## 想沿用 Deployment 和 Service 時
 
-## 表 B:三條路線橫向對照
+如果需求是把 wasm HTTP 服務放進現有的 Kubernetes 部署流程，可以先回看 [Day 7](sprint3-day7-spinkube-operator.md)。那裡驗證了兩種入口：用 SpinApp 讓 operator 建立資源，以及直接建立帶有 `runtimeClassName` 的 Deployment。後者不需要 spin-operator 參與。
 
-| 面向 | wasmCloud(D2–D3) | WasmEdge + runwasi(D4–D5) | SpinKube(D6–D8) |
-|---|---|---|---|
-| 治理階段 | CNCF **Incubating**【查證】 | Sandbox;runwasi 是 containerd 子專案【查證】 | Sandbox【查證】 |
-| 近 13 週 commits | 384【查證】 | WasmEdge 291;**runwasi 69,最近 8 週全 0**【查證】 | shim 16/rcm 65/operator 4,**三者最近 7–8 週全 0**【查證】 |
-| bus factor | **最差**:74/100 同一人【查證】 | 最均勻:35/100,12 位作者【查證】 | operator 33%,另 33% 是機器人【查證】 |
-| WASI 0.3 | v2.5.0 起**預設開啟**【查證】 | release notes 無此字樣,0.2 完成度仍掛 open issue【查證】 | Spin 端 opt-in;shim 側無此字樣【查證】 |
-| 節點侵入 | **0**【實測|D2 五份 diff 零行,D3 兩顆節點皆同】 | shim 109.2 MiB + 設定區塊,手動寫入【實測|D4】 | shim 83.9 MiB + 6 行設定 + `/opt/rcm/` + 兩個標籤【實測|D6/D8】 |
-| 在 AKS 開箱可用 | **是**【實測|D2】 | 否,要加 `use_local_image_pull`【實測|D4】 | 否,要手改 plugin domain【實測|D6,D7/D8 各重現一次】 |
-| 換 VM 之後 | 自己回來【實測|D3 驗收 (B)】 | 全沒了,重跑腳本【實測|D5】 | 全沒了,重貼標籤【實測|D5/D7】 |
-| 主動解除安裝 | `helm uninstall`,節點不動——**未實測**【推論|由 D2/D3 零侵入導出】 | 沒有【D4 收尾:全手動,無自動化】 | 有,但四個條件缺一不可,**能用的狀態下必失效**【實測|D8】 |
-| 拆完的殘留 | 未拆(CRD + namespace + pod 留著,本課未實際拆除)【缺口|未實測】 | `RuntimeClass wasmedge` 名字在、實作不在【實測|D5】 | etcd 0、節點 0,**加五步手動收尾之後**【實測|D8】 |
+因此，評估 SpinKube 時可以分開問：是否需要 Spin 的執行環境，以及是否需要 operator 幫你產生 Deployment、Service。負責節點安裝的 runtime-class-manager（rcm）又是另一項選擇；沒有它時，節點設定與 shim 的安裝需要另外管理。
 
-## 表 C:什麼情境選哪一條
+WasmEdge 的手動路線同樣經過 Pod、RuntimeClass 與 shim，不能只因為要用 Kubernetes 物件就把它排除。它在這門課的用途是讓你直接看到每一層的設定，並執行 core module。若應用需要 component 格式，先回看 [Day 4 的格式差異](sprint3-day4-wasmedge.md)，確認程式產物能被選定的執行期接受。
 
-| 情境 | 建議 | 出處 |
-|---|---|---|
-| 既有 K8s 平台上讓 wasm 與容器並存,用同一套工作負載模型管 | **SpinKube,但只用 RuntimeClass + shim 兩層**;rcm 與 operator 視為可選便利層 | 【實測|D7 不經 operator 跑得起來;D8 拆 operator 時節點七份快照全同】 |
-| 組跨雲/跨邊緣的 wasm 元件應用,接受自成一套執行模型 | **wasmCloud** | 【查證|2026-08-11】【實測|D3 跨節點排程與共享提供者】 |
-| 只是要理解 RuntimeClass → handler → shim 這條鏈 | **WasmEdge 手動路線**,當學習路徑 | 【實測|D4 全手動流程,D1 七層對照】 |
-| 既有程式碼是 core module,短期不搬 component | **WasmEdge**,接受標準層距離會拉開 | 【實測|D4】【推論|遷移成本未驗】 |
-| 只需要 shim 那一層 | **不裝 rcm、不裝 operator**。執行層是 containerd(Graduated)+ shim,那兩個是便利層 | 【實測|D7/D8】 |
-| 要讓 rcm 幫忙管節點 | 一律帶 `--set rcm.nodeInstallerJob.ttl=<秒>` | 【查證|2026-08-11】**未實測** |
-| 平台是 AKS,打算跟著官方文件走 | **不要跟著那份文件走**——它教你裝已封存的 KWasm | 【查證|2026-08-11】該路徑未實測 |
+Day 7 的驗證涵蓋 Deployment、Service 與日誌；產出的 `resources` 是空的，沒有實測 CPU／記憶體限制。正式環境還會用到的 HPA、PDB、NetworkPolicy，這門課沒有逐項實測，導入時需要連同你的服務一起驗證。
 
-## 表 D:什麼情境三條都不該選
+## 想用 wasmCloud 組合元件時
 
-| 情境 | 理由 | 出處 |
-|---|---|---|
-| 目標是降低冷啟動延遲 | wasmedge 與 runc 的差異落在雜訊邊緣、不能排名;兩者都比地板慢約 150 ms,那是容器管線本身。涵蓋走 containerd 的兩條;wasmCloud 沒有可比數字 | 【實測|D5,n=50×2,兩批 CI 判定不一致】 |
-| 目標是同一批節點跑更多工作負載 | 節點層記憶體 wasm 較重:shim 常駐 38.8 MiB、每容器 +9.3 MiB/4 行程,對 runc 的 0.1/+4.5/1 | 【實測|D5】【缺口|wasmCloud 每元件記憶體沒拿到】 |
-| 沒有人能負責節點層的 runbook 與收尾 | 兩條落在節點上的路線在 AKS 都不是開箱可用,而解除安裝的收尾沒有任何上游或雲廠商文件寫過 | 【實測|D4/D6/D8】 |
-| 多節點、有既存流量的正式環境佈建與拆除 | 多節點行為、拆除對執行中 pod 的影響,全部沒驗 | 【缺口|D7/D8 誠實的差距】 |
-| 依賴 Docker Desktop 當本機開發環境 | Wasm 工作負載已標 deprecated | 【查證|2026-08-11】 |
+如果希望由平台提供 HTTP、儲存等能力，元件只使用獲准的介面，可以從 [Day 2](sprint3-day2-wasmcloud.md) 的 host 模型開始評估。接著用 [Day 3](sprint3-day3-wasmcloud-distributed.md) 的例子檢查能力設定與部署位置：一個元件被放到另一顆 host 之後，是否仍然能讀到相同資料。
 
-## 表 E:外推邊界——引用上面任何一格都要帶著
+這條路線要接受 wasmCloud 的管理方式。你會查看 Workload 與 host 日誌，不能只用 Pod 數量判斷元件有沒有啟動。網路文章若使用 provider 與 link definition，也要先確認它描述的世代；本課使用的 2.6.1 以 `hostInterfaces` 設定能力，不能把舊版教學的操作直接套上。
 
-- 環境:AKS japaneast、Kubernetes 1.35.6、containerd 2.3.3、**單節點** `Standard_D2as_v5`。
-- payload 是印一行字的程式;容器對照組是 scratch 靜態 musl,**容器側的最佳情況**。
-- 冷啟動量在 `ctr` 層,端到端 pod 啟動時間沒有量;**映像大小整欄沒有數據**(Day 5 唯一未達成的一項)。
-- **「三條路線的效能排名」不能寫**——只有兩條有數字,而那兩條量不出差異。
-- 跨雲、跨規格、多節點、真實工作負載一律沒有資料;健康度數字查證於 2026-08-11,時點觀察不是趨勢。
+Day 3 驗證了跨節點的 host 與共享儲存，尚未驗證跨雲部署、跨邊緣網路故障或完整的租戶隔離。這些需求可以成為下一個實驗的題目，不能從「元件能移到另一顆 host」直接推得已經符合。
 
-## Sprint 3 回顧
+## 想改善冷啟動或記憶體用量時
 
-| 項目 | 數字 |
-|---|---|
-| 章節 | 10 章(Day 0–9) |
-| 地雷 | **41 顆**(#118–#158),全部帶錨點 |
-| 驗收改寫 | 2 次(Day 3、Day 4——原要驗的能力在當時版本上不存在,改驗實際支援的事);另有 1 次驗收設計變更(Day 5 的發現讓 Day 8 加上「同一 VM 生命週期內完成」的規則) |
+先問量的是什麼。[Day 5](sprint3-day5-cost-measurement.md) 使用同一份原始碼編譯出不同目標，在單節點上以 `ctr` 比較 WasmEdge 與 runc。程式只印一行字，原生容器的對照組使用 scratch 映像。計時到 `ctr run --rm` 返回為止，包含程式執行、退出與資源清理；它不是單獨量測啟動，也不是正式服務從送出 Deployment 到開始接流量的時間。
 
-## 誠實的差距
+兩批各 50 次取樣沒有得到一致的速度差異判定。因此，這組資料不足以支持「換成 WasmEdge 就會明顯縮短啟動時間」。它也沒有直接量測 SpinKube 的同等工作負載，不能把 WasmEdge 的數字當成 SpinKube 的效能結論。
 
-- 決策表 44 格裡,帶事實宣稱的 39 格中**實測 19、查證 15、推論 2、缺口 3**——理想上每一格都該是實測,但治理階段與 commit 節奏這類事實在叢集上量不出來,所以守的線是「每格標明類型、三者不混」。
-- 組表的紀律:**宣稱範圍不得大於證據範圍**——例如「三條路線都不開箱可用」就是超出證據的寫法,wasmCloud 實測是可用的。
-- wasmCloud 的「主動解除安裝乾淨」始終是推論,直到有人真的拆一次。
-- 這張表的半衰期由第三題決定:**健康度那幾欄過一季就該重測**,方法在 [Day 0 的檢查清單](sprint3-day0-wasm-concepts.md#health-method)。
+記憶體也要看節點總量。Day 5 由 1–3 個並行容器的 PSS 樣本推估，WasmEdge 的固定項約 38.8 MiB，每增加一個容器約增加 9.3 MiB；runc 對照組約為 0.1 MiB 與 4.5 MiB。PSS 是依共享比例分攤的實體記憶體；這些固定項是從樣本推估，不是零容器時直接量到的常駐用量。在這組小程式與版本組合裡，wasm 沒有呈現比較省記憶體的結果。應用本身變大、執行時間改變，結果是否不同，要用實際工作負載重新量。
 
-## 驗收 checkpoint
+wasmCloud 沒有可與上述測試直接比較的冷啟動與每元件記憶體資料，映像大小也沒有完成一致的比較。三條路線的效能排名，這門課給不出來。
 
-| 驗證 | 判準 |
-|---|---|
-| 每一格可追溯 | 44 格,0 格無出處;39 格帶事實宣稱者全部標明實測/查證/推論 |
-| 全 sprint 紀錄的一致性 | 44 格出處逐筆與各日章節核對,數字與出處吻合 |
-| 地雷數可重算 | 41 顆地雷與 2 次驗收改寫,皆可從各日章節逐筆核對 |
+## 節點更換之後，設定要怎麼回來
 
-## 帶得走的東西
+安裝成功之外，還要看節點更換之後能否恢復。下圖比較 Day 5、7 觀察到的情況：Kubernetes API 物件仍在，新節點卻沒有舊節點上的手動修改。
 
-- **決策表的價值不在結論,在出處欄。** 結論半年就過期;「每一格是怎麼知道的」讓你自己能重新量一次。
-- **實測、查證、推論分開標,是對讀者最基本的誠實。** 三種證據的保存期限不同:實測綁環境、查證綁日期、推論綁前提。
-- **一個 sprint 的驗收被改寫兩次,不是規劃失敗。** 兩次都是「原訂要驗的東西在當前版本上不存在」——發現這件事本身就是實測的產出,硬湊一個通過才是失敗。
+![節點替換後，RuntimeClass 與自訂資源仍存在於叢集；舊節點上手動安裝的 shim、containerd 設定與臨時節點標籤需要重新建立。](../assets/diagrams/s3d9-vm-replace.svg)
+
+圖中最容易誤判的是 RuntimeClass：名字仍在，並不表示 handler 已經恢復。Day 7 手動貼上的節點標籤也沒有自動出現在替換後的節點。若要靠節點池設定保留標籤並觸發重新安裝，需要另外驗證整個流程；本課沒有完成這項測試。
+
+這裡描述的是課程實際觀察到的節點替換，不是說所有 VM 重新開機都會清除磁碟。檢查安裝能否恢復時，應確認節點與磁碟的生命週期，不能只看「服務已重啟」。
+
+拆除則回到 [Day 8](sprint3-day8-reversibility.md)：先刪除 Shim CR、保留 rcm 找節點所需的標籤，讓解除安裝 Job 有機會執行，再檢查節點檔案。課程使用的 rcm 無法直接清除手動修正過 plugin domain 的設定，因此最後還需要手動還原。驗證這個過程時必須使用同一台 VM；若中途換過節點，就無法用最後的空白差異證明是解除安裝清乾淨的。
+
+## 後續還要確認的事情
+
+如果選定節點層的路線，下一個實驗應包含節點輪替、安裝失敗後的恢復，以及有執行中工作負載時的拆除。Day 8 完成的是單節點的拆除比對，多節點部署和對既有流量的影響仍需驗證。wasmCloud 的完整解除安裝也沒有實測，節點設定沒有變動不等於叢集資源一定會被清除。
+
+專案維護狀態則要另查。這門課在 2026 年 8 月留下的 commit 數、作者分布與 release 觀察，只代表當時的狀況。評估新版本時，除了發版日期，也要看它依賴哪一種介面：管理 Kubernetes 資源的 operator，與修改 containerd 設定的工具，面對的版本相容問題並不相同。[Day 0](sprint3-day0-wasm-concepts.md#health-method) 說明了查核方法。
+
+## 想一想
+
+1. 同事認為「RuntimeClass 還在，所以節點換過也不必重裝」。你會從哪一層找出反例？
+2. 一份測試只比較 WasmEdge 與 runc 的小程式，能否據此決定把 HTTP 服務搬到 SpinKube？還缺什麼資料？
+3. 團隊接受 wasmCloud 的元件模型，卻需要跨雲故障切換。Day 3 的跨節點測試足以證明這個需求嗎？
+
+## 小結
+
+選 wasm 的執行方式時，先確認程式由誰管理、能力在哪裡設定，以及節點更換或移除時要還原什麼。效能則回到量測範圍：一個版本的小程式測試只能回答那個測試的問題。這些判斷能幫你決定下一步要驗哪個需求，而不是只因為一條路線安裝成功就把它用在正式環境。
 
 ## 延伸閱讀
 
-想往下深挖,從這幾份開始:
+想再深入，可以從這幾份開始：
 
-- **[Kubernetes RuntimeClass 文件](https://kubernetes.io/docs/concepts/containers/runtime-class/)** —— 整個 sprint 的機制原點。走完整個 sprint 再回來讀它,`handler`、`scheduling`、`overhead` 三個欄位各自對應到哪一天的哪顆雷,會自己浮出來。
-- **[containerd 的 CRI 設定文件](https://github.com/containerd/containerd/blob/main/docs/cri/config.md)** —— 節點側的一手規格。plugin 路徑、`use_local_image_pull`、runtime 區塊,三條雷的正解都在裡面。
-- **[WASI v0.3.0 release](https://github.com/WebAssembly/WASI/releases/tag/v0.3.0)** —— 標準層現況的起點。決策表的健康度欄過期之後,重驗就從標準層開始。
+- **[Kubernetes RuntimeClass 文件](https://kubernetes.io/docs/concepts/containers/runtime-class/)**：說明 RuntimeClass、handler 與節點排程的關係，適合用來核對叢集與節點各自需要的設定。
+- **[containerd 的 CRI 設定文件](https://github.com/containerd/containerd/blob/main/docs/cri/config.md)**：查看不同版本的 runtime 設定位置；實際安裝時應對照節點使用的版本。
+- **[WASI 0.3.0 發行說明](https://github.com/WebAssembly/WASI/releases/tag/v0.3.0)**：從標準定義核對介面能力，再確認選定的執行期支援哪些部分。
 
 ## 下一步
 
-Sprint 3 到此完結:三條路線、41 顆地雷、兩次驗收改寫。Day 0 的那句主題,現在可以補完:
-
-**Kubernetes 從來沒有規定工作負載必須是 Linux 容器——但沒有規定,不代表生態已經準備好讓你反悔。**
-
-下一個 sprint 的方向在[課程總覽](../index.md)。
+下一個 Sprint 轉向服務之間的流量：從 [Sprint 4 介紹](../sprints/sprint4.md) 看服務網格如何處理請求路由、身分與流量觀察。
 
 ---
 
 !!! quote ""
-    WebAssembly 標誌為 WebAssembly 專案之官方資產(CC0 1.0),此處作社群教學用途。
+    WebAssembly 標誌為 WebAssembly 專案之官方資產（CC0 1.0），此處作社群教學用途。

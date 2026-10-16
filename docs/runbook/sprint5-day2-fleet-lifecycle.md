@@ -1,29 +1,22 @@
-# Day 2: Fleet 生命週期——replicas、狀態機、自動補位
+# Day 2：刪除一個 GameServer 後，Fleet 如何補足副本？
 
 ![Agones 官方標誌](../assets/logos/agones-icon-color.svg){ align=right width="90" }
 
-> 真實平台不能靠單顆 server 等玩家，要常備一批 Ready server，少一顆就補一顆。今天用 `Fleet` 把 `simple-game-server` 擴成兩顆，觀察 `Scheduled` 到 `Ready` 的狀態機，最後刪掉其中一顆，確認 Fleet controller 會補出新的 server。
+平台準備了兩台空閒遊戲伺服器，其中一台被刪除後，如果沒有人補建，下一組玩家就少了一個可用選擇。這章會用 Fleet 宣告兩個副本，再比較刪除前後的名稱、狀態與埠，判斷控制器補出的是新實例，還是原實例重新啟動。
 
-!!! abstract "你在課程的哪裡"
-    - **Day 1**：Agones 已安裝完成，第一顆 `GameServer` 取得 node 公網 IP 與 hostPort，外部 UDP echo 已驗證。
-    - **今天**：把單顆 server 變成 `Fleet`。驗收：`replicas: 2` 維持 2 顆 Ready；刪掉其中一顆後 Fleet 自動補一顆新的，另一顆不受影響。
-    - **Day 3**：用 `GameServerAllocation` 從 Ready pool 裡挑一顆轉成 `Allocated`，再用 `FleetAutoscaler` 補回 buffer。
+## Fleet 維持副本，Ready 表示是否能分配
 
-## Fleet 控制的是可用容量
+**Fleet** 管理一組使用相同規格的 GameServer。你宣告 `replicas: 2`，控制器便持續把實際伺服器數量調整到目標；它還會依 GameServer 的生命週期處理更新與縮容。
 
-`Fleet` 是 Agones 裡「一組同規格 `GameServer`」的物件。對照 Kubernetes 既有概念，它有點像 Deployment 加 ReplicaSet：你宣告想要幾個副本，controller 負責把實際數量維持回來。差別在於 Deployment 管的是一般 pod，`Fleet` 管的是可以被分配出去的 game server；它看的是 `GameServer` 在 Agones 生命週期裡的狀態，pod 是否 Running 只是其中一步。
+新伺服器需要排程、取得映像、啟動遊戲程式並回報 Ready。預先準備可以減少玩家等待，但 Fleet 的固定 replicas 是總副本目標，並不自動代表固定的空閒容量。這章尚未分配任何伺服器，所以兩個副本最後都是 Ready；下一章配置一個之後，就會看出總數與可用數的差異。
 
-遊戲平台通常不等玩家來了才臨時開 server。新 pod 要排程、拉映像、啟動程序、通過 SDK `Ready()`，中間任何一步慢了，玩家就在配對完成後乾等。沒有 `Fleet`，平台就得在玩家上門時才開 server；有了它，平台常備一批 `Ready` server，少一顆補一顆，後端或 matchmaker 隨時有容量可以拿。
+在 `Fleet` 裡，`Scheduled` 表示 Agones 已經替 `GameServer` 建立 pod 並安排到節點；`Ready` 表示遊戲程式已透過 SDK 告訴 Agones 可以接玩家；`Allocated` 表示已被 allocation 分配；本課的一場對戰一台伺服器模式不會再把它作為 Ready 候選；`Shutdown` 則是遊戲結束或控制面收掉時的狀態。
 
-在 `Fleet` 裡，`Scheduled` 表示 Agones 已經替 `GameServer` 建立 pod 並安排到節點；`Ready` 表示遊戲程式已透過 SDK 告訴 Agones 可以接玩家；`Allocated` 表示這顆 server 已經被一次 allocation 拿走，不能再分給下一組玩家；`Shutdown` 則是遊戲結束或控制面收掉時的狀態。
+下面先列出要觀察的變化。刪除後應該有一個新名稱，而未刪除的實例保持原樣；稍後會用實際輸出核對。
 
-```mermaid
-flowchart TB
-    F["Fleet<br/>replicas: 2"] --> GS1["要刪掉的 GameServer<br/>Ready"]
-    F --> GS2["保留的 GameServer<br/>Ready"]
-    DEL["kubectl delete"] --> GS1
-    F --> NEW["新建的 GameServer<br/>Scheduled → Ready"]
-```
+![刪除一個實例後，Fleet 新建替代實例](../assets/diagrams/s5d2-fleet-replacement.svg)
+
+圖中的 A、B、C 代表不同實例，不是 GameServer 的狀態名稱。
 
 ## 步驟 1:建立 replicas 為 2 的 Fleet
 
@@ -56,7 +49,7 @@ spec:
                 limits: {memory: 64Mi, cpu: 20m}
 ```
 
-套用後，Fleet 立刻回報 desired、current 與 ready 都是 2：
+將上述設定存成 `fleet.yaml` 並套用。等待新伺服器完成準備後，驗證中看到 desired、current 與 ready 都是 2：
 
 ```console
 $ kubectl apply -f fleet.yaml
@@ -66,7 +59,7 @@ NAME                 SCHEDULING   DESIRED   CURRENT   ALLOCATED   READY   AGE
 simple-game-server   Packed       2         2         0           2       4s
 ```
 
-`SCHEDULING` 是 `Packed`，代表 Agones 以 packed strategy 放置 game server，盡量把 server 集中在少數節點上。
+`SCHEDULING` 是 **Packed**，表示優先將伺服器集中到較少節點的排程方式。它是排程偏好，仍受節點可用資源與其他排程條件影響。
 
 ## 步驟 2:確認兩顆 GameServer 都 Ready
 
@@ -82,14 +75,14 @@ simple-game-server-ql5ws-fbkn4   Ready   7040
 
 ## 步驟 3:刪掉一顆 GameServer
 
-直接刪掉 `cmk28`：
+先確認要刪的是未配置給玩家的 Ready 實例。下面保留驗證時的名稱，實作時請換成你清單中選定的 GameServer：
 
 ```console
 $ kubectl delete gameserver simple-game-server-ql5ws-cmk28
 gameserver "...cmk28" deleted
 ```
 
-幾秒後再查：
+接著再次查看 GameServer；這是新實例尚在準備中的一次觀測：
 
 ```console
 $ kubectl get gameserver
@@ -97,37 +90,31 @@ simple-game-server-ql5ws-fbkn4   Ready       7040    ← 沒被刪的那顆
 simple-game-server-ql5ws-qdsfl   Scheduled   7358    ← Fleet 新建的，正在轉 Ready
 ```
 
-被刪的 `cmk28` 消失；沒被刪的 `fbkn4` 名稱與 port 都沒變；Fleet controller 建立一顆新的 `qdsfl` 補回 desired replicas，它先進 `Scheduled`，再轉成 `Ready`。Fleet 不會重啟被刪的那顆。
+被刪的 `cmk28` 消失；沒被刪的 `fbkn4` 名稱與 port 都沒變；Fleet controller 建立一顆新的 `qdsfl` 補回 desired replicas，它先進 `Scheduled`，再轉成 `Ready`。這次建立的是新的 GameServer，並沒有復原被刪除實例中的遊戲記憶體狀態。
 
-Fleet 維持的是副本數，補回來的實例會換一個新名稱；沒被刪的 server 也不會因為補位而被重建。後者對遊戲平台很重要：玩家已經連上的 server，不能因為 Fleet 在補別的 server 就受到影響。
+Fleet 維持的是副本數，補回來的實例會換一個新名稱；沒被刪的 server 也不會因為補位而被重建。這組測試觀察到另一個 Ready 實例沒有被替換；它沒有測試活躍對戰的連線不中斷，也不能推廣成任意更新與故障下都不受影響。
 
 要精準量補位時間時，不要只看一次 `kubectl wait --for=jsonpath readyReplicas=2` 的結果。刪除的瞬間，終止中的那顆可能還算在 ready 數裡，所以 wait 會短暫命中 2，接著才掉到 1，再由新 server 補回。改用連續取樣。
 
-## 自我檢查
+最後再次確認兩個實例都 Ready，且 Fleet 的 current 回到 2。只看到一筆 Scheduled，還沒有完成補足可用容量的檢查。驗證紀錄確認新實例後續轉為 Ready；上面的輸出則保留了中間狀態。
 
-- `kubectl get fleet simple-game-server`：`DESIRED`、`CURRENT`、`READY` 都是 2，`ALLOCATED` 是 0。
-- `kubectl get gameserver`：兩顆都是 `Ready`，名稱都以 `simple-game-server-` 開頭，後面接隨機尾碼。
-- 刪掉其中一顆後再查：被刪的那顆消失，出現一顆名稱不同的新 GameServer，由 `Scheduled` 轉成 `Ready`。
-- 沒被刪的那顆，名稱與 port 都跟刪除前一樣。
+## 想一想
 
-## 帶得走的東西
+1. Fleet 的 current 已是 2，但其中一台還是 Scheduled，可以說有兩台可立刻分配嗎？
+2. 新 GameServer 有不同名稱與埠，是否表示原對戰的記憶體狀態已恢復？
+3. `replicas: 2` 的 Fleet 有一台 Allocated，還能否期待自動維持兩台 Ready？下一章需要增加哪類機制？
 
-- `Fleet` 維持的是 Ready 容量，不綁定某一顆 server 的名稱。
-- `Scheduled → Ready` 是 Agones 自己的 `GameServer` 狀態機，不等同於 pod phase。
-- 刪掉一顆 server 後，Fleet 會補出新 server；沒被刪的 server 不會一起重建。
-- 量補位時間要連續取樣，單次 `kubectl wait` 可能在舊 pod 終止中時提早命中。
+## 小結
+
+Fleet 依目標副本數補建伺服器，GameServer 狀態則說明它是否已可分配。刪除後要同時核對名稱、狀態與總數，才能區分新建替代與既有實例；固定 replicas 也不等同固定 Ready buffer。[Day 3](sprint5-day3-allocation-autoscaler.md) 會先分配一台，再用 FleetAutoscaler 維持預留容量。
 
 ## 延伸閱讀
 
-想往下深挖，從這幾份開始：
+想再深入，可以從這幾份開始：
 
 - **[Fleet Specification](https://agones.dev/site/docs/reference/fleet/)** —— `Fleet` 的完整欄位，包括 `replicas`、`scheduling` 與更新策略。
 - **[Quickstart: Create a Game Server Fleet](https://agones.dev/site/docs/getting-started/create-fleet/)** —— 官方的 Fleet 操作範例，可以對照本章的建立與補位流程。
 - **[Agones GameServer reference](https://agones.dev/site/docs/reference/gameserver/)** —— 查 `Scheduled`、`Ready`、`Allocated`、`Shutdown` 各狀態的定義。
-
-## 下一步
-
-[Day 3](sprint5-day3-allocation-autoscaler.md) 送出 `GameServerAllocation`，從 Ready pool 挑一顆轉成 `Allocated`，再讓 `FleetAutoscaler` 補回 2 顆 Ready buffer。
 
 ---
 

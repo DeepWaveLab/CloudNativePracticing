@@ -1,56 +1,28 @@
-# Day 5: Nakama 與 PostgreSQL——migrate、REST auth、storage
+# Day 5: 玩家離開對戰後，資料存在哪裡？
 
 ![Nakama 官方標誌](../assets/logos/nakama-icon-color.png){ align=right width="72" }
 
-> UDP 封包怎麼進到正確的 `GameServer`，Day 4 已經處理完。今天補上遊戲後端：Nakama 負責帳號、session 與 storage，PostgreSQL 負責資料庫。部署完成後要確認：Nakama 能完成 migration、REST device auth 能拿到 session token、storage 寫入後能讀回同一筆內容。
+玩家完成一場對戰，GameServer 隨後結束。隔天重新登入時，他還應該看得到自己的進度。前幾天建立的 Fleet 與 UDP 路由能讓玩家進入對戰；這份需要跨越對戰生命週期的資料，該由誰保存？
 
-!!! abstract "你在課程的哪裡"
-    - **Day 4**：Quilkin proxy pool 已能用 token routing 把正確封包送到 allocated `GameServer`，錯 token 無回應。
-    - **今天**：在 AKS 上部署單副本 PostgreSQL 與 Nakama 3.40.0。驗收：`migrate up` 套用 19 個 migration，HTTP healthcheck 200，REST auth 與 storage roundtrip 成功。
-    - **Day 6**：把 Nakama matchmaker 接到 Agones allocation，讓兩個 realtime client 配到同一顆 `GameServer`。
+本章用 Nakama 接收玩家的登入與資料讀寫請求，再由 PostgreSQL 保存資料。你會先確認資料庫結構準備完成，再登入、寫入一筆內容並讀回。做完後，遇到「Pod 已經 Running，但玩家仍讀不到資料」，就能分開檢查啟動、身分驗證與資料讀寫三個階段。
 
-## Nakama 是什麼，為什麼需要 PostgreSQL
+## 先分清楚對戰與玩家資料的生命週期
 
-Nakama 是 Heroic Labs 維護的開源遊戲後端伺服器，常見能力包含帳號、session、storage、好友、排行榜、即時訊息與 matchmaker。它跟前幾天的 Agones game server 分工不同：Nakama 管玩家身分、社交關係、長期狀態與配對入口；`GameServer` 管一場正在進行的對戰。玩家先登入 Nakama、排隊等配對，配對成立後再拿到 Agones 分配的遊戲伺服器 endpoint（對應 [Day 0](sprint5-day0-game-server-concepts.md) 玩家端連線的 ① 與 ②）。
+Agones 的 `GameServer` 負責一場正在進行的遊戲；**Nakama** 是遊戲後端伺服器，本章讓它負責辨認玩家與處理持久資料。Nakama 提供的資料讀寫 API 稱為 **storage**；實際資料放在 PostgreSQL，而不是只留在 Nakama Pod 的記憶體。
 
-這些後端資料不能只放在 pod 記憶體裡。帳號、session、storage object、好友與排行榜都需要可靠儲存，所以 Nakama 啟動時必須連到 PostgreSQL 或 CockroachDB。單節點部署用 PostgreSQL 最簡單；CockroachDB 適合需要多區域寫入的情況。
+Nakama 不能在空資料庫裡直接讀寫自己的資料表。啟動前要先執行 **migration**，也就是依版本建立或更新資料庫結構。這裡把 `migrate up` 放進 Kubernetes 的 **initContainer**：它成功結束後，主容器才開始執行。請沿著圖中的順序看，資料庫可連線與 HTTP API 可連線是兩個不同的檢查點。
 
-### Nakama 對 client 開哪些介面
+![PostgreSQL 可連線後先執行 migration，再啟動 Nakama API](../assets/diagrams/s5d5-startup.svg)
 
-Nakama 啟動後會聽四個 port，client 會用到的只有前兩個：
+因此，Nakama 主容器尚未啟動時，要先看 migration 的 log；API 已啟動卻不能存資料時，才繼續檢查登入憑證與 storage 回應。`Running` 本身不足以證明整條流程成功。
 
-| port | 介面 | 給誰用 |
-|---|---|---|
-| 7350 | HTTP API gateway：REST（`/v2/...`）與 realtime WebSocket（`/ws`） | 遊戲 client |
-| 7349 | gRPC API，內容與 7350 的 REST 相同 | 遊戲 client 或其他後端服務 |
-| 7351 | 管理介面（console）的 HTTP gateway | 營運人員 |
-| 7348 | 管理介面的 gRPC | 營運人員 |
+## 準備檔案與資料庫密碼
 
-同一個 7350 上有兩種用法。REST 與 gRPC 是一來一回的 request/response，適合登入、讀寫 storage、查好友這類「client 問、server 答」的操作。realtime WebSocket 是長連線，server 可以隨時主動把訊息推給 client，配對結果、聊天訊息、通知都走這條。配對必須開 WebSocket，因為 Nakama 的 matchmaker 只接受 socket 連著的玩家，socket 一斷，排隊中的配對請求也會一起取消。
+延續前幾天的 Kubernetes 叢集，本章使用單副本 PostgreSQL 16 與 Nakama 3.40.0。叢集需要能配置 4Gi PVC 的預設 StorageClass；本機需要 `kubectl`、`openssl` 與 `curl`。這是理解串接方式的配置，尚未涵蓋資料庫高可用、備份還原或多使用者權限測試。
 
-內建 API 不夠用時，遊戲後端的自訂邏輯用 **RPC** 對外開放。開發者在 server runtime（Lua、Go 或 TypeScript）裡用 `register_rpc` 註冊一個函式，client 就能用 REST（`POST /v2/rpc/<函式名稱>`）、gRPC 或 realtime socket 呼叫它，例如「領取每日獎勵」「查詢自訂排行榜」。RPC 在 Nakama 裡指的是「client 主動呼叫 server 端自訂函式」；Day 6 用的 hook 則相反，是 server 在特定事件（例如配對成立）發生時自動執行的函式，client 不會直接呼叫它。
+操作使用課程儲存庫的 `labs/sprint5/day5/` 目錄，請先在終端機切換到這個目錄。下面的 YAML 是閱讀用節錄；實際套用的是目錄內完整的 `postgres.yaml` 與 `nakama.yaml`，不能只把節錄存成檔案部署。
 
-manifest 裡的 Service 開了 7349、7350、7351，但類型是 `ClusterIP`，都沒有對外。驗證時用 `kubectl port-forward` 把 7350 接到本機。
-
-### 為什麼要先跑 migrate
-
-`migrate up` 是 Nakama 提供的資料庫 schema migration 指令，官方文件的說明是 Creates and updates the database schema to the latest version required by Nakama。如果 schema 還沒準備好就直接啟動 server，pod 就算 Running，auth 與 storage API 也可能因為缺少資料表而失敗。官方 Docker Compose 範例會先跑 `nakama migrate up`，再啟動 Nakama server；在 Kubernetes 裡用 initContainer 表達同一件事。
-
-migrate 與 server 都用 `--database.address` 指定資料庫，格式是 `username:password@address:port/dbname`。這個格式要特別注意：它看起來像一般字串，但中間包含帳號與密碼；密碼若含 `/`、`+`、`=` 等字元，又沒有 URL encoding，就可能被錯誤解析（見[地雷 1](#mine-1)）。
-
-```mermaid
-flowchart TB
-    S["Secret<br/>postgres-password"] --> PG["PostgreSQL<br/>StatefulSet"]
-    PG --> M["Nakama migrate<br/>19 migrations"]
-    M --> N["Nakama API<br/>7350"]
-    C["REST client"] -->|"device auth"| N
-    C -->|"storage write/read"| N
-    N --> PG
-```
-
-## 步驟 1:建立 namespace 與 DB Secret
-
-Secret 建立方式如下。密碼只放在 Kubernetes Secret，不寫進 manifest。
+建立 `nakama` namespace，並將資料庫密碼存進 Secret：
 
 ```bash
 kubectl create namespace nakama
@@ -58,11 +30,11 @@ kubectl -n nakama create secret generic nakama-db \
   --from-literal=postgres-password="$(openssl rand -hex 24)"
 ```
 
-這裡刻意用 `-hex 24`，讓密碼只含十六進位字元，避開 `database.address` 的 URL-like 解析風險。完整症狀與修法見[地雷 1](#mine-1)。
+密碼使用十六進位字元，是因為稍後要把它放進 `username:password@host:port/database` 格式的連線字串。這樣可以避開本次實作曾遇到的特殊字元疑慮；故障的證據與限制放在[疑難排解](#mine-1)。
 
-## 步驟 2:部署單副本 PostgreSQL
+## 先讓 PostgreSQL 可以保存資料
 
-PostgreSQL manifest 使用 `StatefulSet`、`ClusterIP Service` 與 4Gi PVC。下面是節錄，完整檔案（含 Namespace、ServiceAccount 與 Service）見 [`postgres.yaml`](https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day5/postgres.yaml)：
+完整的 [`postgres.yaml`](https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day5/postgres.yaml) 包含 StatefulSet、Service 與 PVC。閱讀節錄時，先找三個地方：資料庫名稱 `nakama`、密碼取自哪個 Secret，以及資料目錄掛到哪個 volume。
 
 ```yaml
 apiVersion: apps/v1
@@ -100,9 +72,7 @@ spec:
             storage: 4Gi
 ```
 
-用 `kubectl apply -f postgres.yaml` 部署。因為步驟 1 已經用 `kubectl create` 建過 namespace，這時會印出 `resource namespaces/nakama is missing the kubectl.kubernetes.io/last-applied-configuration annotation` 的警告；這只是提示，不影響部署。想避開的話，步驟 1 改用 `kubectl create namespace nakama --save-config`。
-
-部署後，PostgreSQL 與 PVC 狀態如下：
+在上述目錄執行 `kubectl apply -f postgres.yaml`。已用 `kubectl create` 建立的 namespace 可能出現缺少 `last-applied-configuration` annotation 的警告；它不代表資料庫部署失敗。接著讀實際狀態：
 
 ```text
 $ kubectl -n nakama get pods,sts,svc,pvc -o wide
@@ -119,9 +89,11 @@ NAME                                    STATUS   VOLUME                         
 persistentvolumeclaim/data-postgres-0   Bound    pvc-<pvc-uuid>   4Gi        RWO            default        <unset>                 2m38s   Filesystem
 ```
 
-## 步驟 3:部署 Nakama 3.40.0 並跑 migrate
+這裡 PostgreSQL 是 `1/1 Running`、PVC 是 `Bound`，表示容器已就緒且儲存空間已配置。`postgres` Service 的 5432 port 則是下一個步驟使用的資料庫入口。輸出中的節點名與 IP 是範例環境的結果，不需要在自己的環境照填。
 
-Nakama Deployment 有一個 `migrate` initContainer 與一個 `nakama` 主容器，兩者使用同一個 DB address。下面節錄兩個容器的啟動指令，完整檔案（含 ServiceAccount、Service 與 Secret 的引用）見 [`nakama.yaml`](https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day5/nakama.yaml)：
+## 用 migration 與啟動 log 判斷 Nakama 是否就緒
+
+完整的 [`nakama.yaml`](https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day5/nakama.yaml) 讓 migration 與主容器使用同一組資料庫連線設定。看下面兩行執行指令的差別：第一個只更新 schema，第二個才啟動服務。
 
 ```yaml
 initContainers:
@@ -146,7 +118,7 @@ containers:
         exec /nakama/nakama --name nakama-0 --database.address "$DB_ADDR" --logger.level INFO --session.token_expiry_sec 7200
 ```
 
-用 `kubectl apply -f nakama.yaml` 部署。migrate log 顯示 schema 套用完成，重點是 `Successfully applied migration` 與 `count`：
+執行 `kubectl apply -f nakama.yaml` 後，先讀 `migrate` 容器的 log：
 
 ```text
 $ kubectl -n nakama logs deployment/nakama -c migrate --tail=200
@@ -155,7 +127,9 @@ $ kubectl -n nakama logs deployment/nakama -c migrate --tail=200
 {"level":"info","ts":"2026-09-02T02:30:14.476Z","caller":"migrate/migrate.go:116","msg":"Successfully applied migration","count":19}
 ```
 
-主容器接著啟動 HTTP API，看到 `Startup done` 就可以連線：
+`Successfully applied migration` 表示這次初始化成功套用 19 個 migration。這是新資料庫的實測結果；已有資料庫再次執行時，不應把「一定要新增 19 個」當成成功條件。
+
+接著讀主容器的 log，確認它連上相同資料庫，並啟動 HTTP API：
 
 ```text
 $ kubectl -n nakama logs deployment/nakama -c nakama --tail=120
@@ -165,7 +139,7 @@ $ kubectl -n nakama logs deployment/nakama -c nakama --tail=120
 {"level":"info","ts":"2026-09-02T02:30:15.580Z","caller":"main.go:243","msg":"Startup done"}
 ```
 
-確認 Nakama pod 是 Ready，Service 開出 7349、7350、7351：
+`Starting API server gateway` 指向 7350，`Startup done` 表示啟動完成。再對照 Pod 與 Service：
 
 ```text
 NAME                          READY   STATUS    RESTARTS   AGE     IP            NODE                              NOMINATED NODE   READINESS GATES
@@ -175,9 +149,11 @@ NAME               TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)              
 service/nakama     ClusterIP   10.0.174.16   <none>        7349/TCP,7350/TCP,7351/TCP   2m16s   app.kubernetes.io/name=nakama
 ```
 
-## 步驟 4:用 port-forward 驗 HTTP API
+Service 是 `ClusterIP`，沒有對外 IP。今天只使用 7350 的 REST API；它也提供下一章配對需要的 WebSocket 入口。表中的 7349 與 7351 分別供 gRPC API 與管理介面使用，今天不需要連線。
 
-用 port-forward 把 7350 接到本機，打 healthcheck：
+## 從本機確認 API 入口
+
+在一個終端機保留 port-forward 執行，再開第二個終端機執行 `curl`。兩行指令不會在同一個前景終端機連續完成：
 
 ```text
 $ kubectl -n nakama port-forward service/nakama 7350:7350
@@ -196,11 +172,15 @@ Content-Length: 2
 {}
 ```
 
-HTTP 200 表示 API gateway 已經可以從本機經 port-forward 連到。
+這個 HTTP 200 證明本機能透過 port-forward 連到 Nakama；它還沒有證明某位玩家可以寫入並讀回自己的資料。下一步才會檢查這件事。
 
-## 步驟 5:REST device auth 與 storage roundtrip
+## 登入後，帶同一位玩家的憑證讀寫資料
 
-先用 server key 走 Basic auth，建立 device account 並取得 session token。`defaultkey` 是 Nakama 預設的 server key；device id 可以是任何唯一字串：
+**Device authentication** 用裝置識別字串辨認玩家。本章以它建立測試帳號，Nakama 回傳的 **session token** 是後續 API 請求的登入憑證。先看圖中的兩種憑證：建立登入時使用 server key；登入成功後，資料請求改帶玩家自己的 session token。
+
+![先以 server key 登入取得 session token，再帶 token 讀寫玩家資料](../assets/diagrams/s5d5-requests.svg)
+
+`defaultkey` 是這份練習設定的預設 server key。執行範例時，把 `<device-uuid>` 換成自己這次測試的唯一識別字串；後續 `Bearer <redacted>` 要換成登入回應的 `token`，不是 `refresh_token`。`<redacted>` 是紀錄遮蔽值，不能照貼當作憑證。
 
 ```text
 $ curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
@@ -231,7 +211,9 @@ $ curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
 HTTP_STATUS:200
 ```
 
-接著寫入一筆 storage object：
+`created: true` 表示建立了帳號；接著 `/v2/account` 回傳的 `user.id`，就是稍後讀取 storage 所需的 `<user-id>`。請記下自己回應中的值，且保持使用同一位玩家的 token。
+
+一筆 **storage object** 用 collection、key 與擁有者識別；本例是玩家自己的 `day5` collection 裡的 `gate`。`value` 存放 JSON 內容，`permission_read: 1` 與 `permission_write: 1` 允許擁有者讀寫。把 `<nonce>` 換成這次測試的識別字串，稍後便能確認讀回的是這一次寫入的資料。
 
 ```text
 $ curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
@@ -265,7 +247,7 @@ $ curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
 HTTP_STATUS:200
 ```
 
-再用同一個 user id 讀回：
+寫入回應的 `acks` 是確認訊息；其中 `version` 是這個物件版本的識別值。還要用同一位玩家的 token，以及上一步取得的 `<user-id>` 讀回內容：
 
 ```text
 $ curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
@@ -300,53 +282,37 @@ $ curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
 HTTP_STATUS:200
 ```
 
-讀回的 `value` 欄位順序與空白都和寫入時不同，不能直接比字串。比對時先把寫入與讀回的 `value` 都解析成 JSON，再比內容；兩邊相同，才算 storage 真的存進去又讀得回來，這比只看 `HTTP_STATUS:200` 可靠。
+比較 `value` 時，先解析成 JSON 再比欄位內容：回應改變了欄位順序與空白，字串不同不代表資料不同。這裡相同的 collection、key、user id、version 與內容，一起支持「這位玩家剛寫入的資料可以讀回」。單看 HTTP 200 只能證明請求成功回應。
 
-## 自我檢查
+## 疑難排解
 
-- `kubectl -n nakama get pods,pvc`：`postgres-0` 與 Nakama pod 都是 `1/1 Running`，PVC 是 `Bound`。
-- `kubectl -n nakama logs deployment/nakama -c migrate`：出現 `Successfully applied migration`。
-- port-forward 後 `curl -i http://127.0.0.1:7350/healthcheck`：回 `HTTP/1.1 200 OK`。
-- device auth 回 `HTTP_STATUS:200` 並帶 `token`；用這個 token 寫入一筆 storage 後讀回，解析後的內容與寫入時相同。
+### migration 沒有 log，先檢查資料庫連線設定 {#mine-1}
 
-## 地雷記錄
+曾出現 PostgreSQL 已 Ready、Service endpoint 存在，但 `migrate` initContainer 長時間 Running 且沒有 log；PostgreSQL 的 `pg_stat_activity` 也看不到 Nakama 連線。當時使用 base64 密碼，可能含有連線字串需要額外處理的特殊字元。
 
-### 地雷 1:base64 密碼放進 `database.address` 會有解析風險 {#mine-1}
+這次紀錄只證明：重新建立練習環境並改用 hex 密碼後，migration 成功；「特殊字元造成解析失敗」仍是推測，沒有逐字元對照測試。新建環境可沿用前面的 hex 密碼做法。已有資料的環境應先核對 Secret 與資料庫實際密碼是否一致，再查連線字串的處理方式；不要把直接更換 Secret 當成資料庫已同步改密碼。URL encoding 的修法未在本次紀錄中驗證。
 
-**症狀**：PostgreSQL 已 Ready，Service endpoint 也存在，但 Nakama `migrate` initContainer 長時間停在 Running、沒有任何 log；PostgreSQL `pg_stat_activity` 看不到 Nakama 連線。
+## 想一想
 
-**根因**：推定是密碼字元集的問題。用 `openssl rand -base64 24` 產生的 DB 密碼可能含 `/`、`+`、`=`；Nakama `database.address` 是 `username:password@address:port/dbname` 形式，未做 URL encoding 時，特殊字元可能讓連線字串解析失敗。
+1. healthcheck 回 HTTP 200，卻沒有測 storage，還缺少哪一段證據？
+2. migration 成功後，主容器仍連不上資料庫，為什麼要先比對兩者的連線設定？
+3. 寫入與讀回的 JSON 欄位順序不同，應如何判斷是不是同一份資料？
 
-**修法**：Secret 用 `openssl rand -hex 24` 產生，或對密碼做 URL encoding。已經用含特殊字元的密碼部署過的話，可以保留原密碼、在 `database.address` 裡改用 URL encoding 後的密碼，再重啟 Nakama；練習環境也可以直接刪掉 `nakama` namespace 重建（PVC 裡的資料會一起刪掉）。改完後看 migrate log 是否出現 `Successfully applied migration`。凡是密碼要塞進 URL-like 字串，都要先確認字元集或明確做 encoding。
+## 小結
 
-## 帶得走的東西
-
-- Nakama 在 Kubernetes 裡可以用 initContainer 表達「先 migrate，再啟 server」。
-- `database.address` 是 URL 形式的連線字串；密碼字元集會影響它能不能被正確解析。
-- Nakama 的 7350 同時提供 REST 與 realtime WebSocket；一來一回的操作走 REST，需要 server 主動推播的走 WebSocket，自訂邏輯用 RPC 開給 client。
-- `ClusterIP` 加 port-forward 就能驗 REST API，不必先把 Nakama 對外開放。
-- 驗 storage 要比對讀回內容與寫入內容，只看 HTTP 200 不夠。
-
-## 正式環境還要補的
-
-正式環境要規劃 PostgreSQL 的高可用、備份還原與升級流程；Nakama 預設的 `socket.server_key`、session key 與 console key 要換掉（server log 會警告這些是 insecure default）；還要用 NetworkPolicy 限制誰能連 PostgreSQL，並設好對外入口與 TLS。
-
-多個 client 同時寫同一筆 storage object 時，還要處理 version conflict，並確認 `permission_read`、`permission_write` 的權限行為符合預期。
+玩家資料跨越單場對戰的生命週期，所以本章用 Nakama 接收 API 請求、PostgreSQL 保存資料。追查問題時依序區分資料庫與 migration、API 入口、玩家憑證及 storage 內容；每一步都有自己的成功證據。正式服務還需要另外規劃資料庫備份與高可用、更換預設金鑰、設定對外入口與 TLS，並測試權限拒絕與並行寫入衝突，這些都不能由本章單一玩家的成功讀寫推論。
 
 ## 延伸閱讀
 
-想往下深挖，從這幾份開始：
+想再深入，可以從這幾份開始：
 
-- **[Nakama Docker install](https://heroiclabs.com/docs/nakama/getting-started/install/docker/)** —— 官方 Docker Compose 範例展示 PostgreSQL、`migrate up` 與 healthcheck 的啟動順序。
-- **[Nakama commands](https://heroiclabs.com/docs/nakama/getting-started/commands/)** —— 查 `migrate up` 與 `database.address` 的 CLI 語意。
-- **[Nakama storage collections](https://heroiclabs.com/docs/nakama/concepts/storage/collections/)** —— 對照本章 storage write/read 的 collection、key、value 模型。
-- **[Nakama storage permissions](https://heroiclabs.com/docs/nakama/concepts/storage/permissions/)** —— 查 `permission_read` 與 `permission_write` 欄位的權限語意。
-- **[Nakama server framework](https://heroiclabs.com/docs/nakama/server-framework/introduction/)** —— 查 `register_rpc` 的註冊方式，以及 RPC 透過 REST、gRPC、realtime socket 呼叫的路徑。
-- **[Nakama v3.40.0 release](https://github.com/heroiclabs/nakama/releases/tag/v3.40.0)** —— 本章使用的 Nakama server 版本來源。
+- [Nakama commands](https://heroiclabs.com/docs/nakama/getting-started/commands/)：查 `migrate up` 與資料庫連線參數。
+- [Storage collections](https://heroiclabs.com/docs/nakama/concepts/storage/collections/)：查 collection、key 與物件的識別方式。
+- [Storage permissions](https://heroiclabs.com/docs/nakama/concepts/storage/permissions/)：對照讀寫權限數值。
 
 ## 下一步
 
-Nakama 已能登入與存資料，下一章把它接回 Agones。[Day 6](sprint5-day6-matchmaking.md) 會用 Nakama 內建 matchmaker 湊兩個 realtime client，並在 `matchmaker_matched` hook 裡建立 `GameServerAllocation`。
+玩家能登入與保存資料後，還需要知道去哪一台 GameServer。[Day 6](sprint5-day6-matchmaking.md) 會把兩位玩家的配對結果接到 Agones allocation，並讓他們收到同一組遊戲伺服器位置。
 
 ---
 

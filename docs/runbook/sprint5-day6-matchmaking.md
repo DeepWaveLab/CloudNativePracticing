@@ -1,42 +1,41 @@
-# Day 6: Matchmaking 串接——Lua runtime、GameServerAllocation、realtime client
+# Day 6: 兩位玩家配對後，如何進入同一台 GameServer？
 
 ![Nakama 官方標誌](../assets/logos/nakama-icon-color.png){ align=right width="72" }
 
-> 到 Day 5 為止，玩家能登入 Nakama、能存資料，但還沒有人把玩家送到遊戲伺服器。今天補上這段：兩個 client 進同一個 matchmaker pool，Nakama 在配對成立時執行 `matchmaker_matched` hook，hook 向 Kubernetes API 建立 `GameServerAllocation`，再把同一組 endpoint 推給兩個 client。
+兩位玩家都已登入，也按下「開始配對」。其中一人拿到伺服器位置，另一人卻一直等待；或者兩人各自進入不同伺服器。這時只確認登入成功，無法回答問題：誰決定這兩個人是一組，又由誰替這一組保留同一台遊戲伺服器？
 
-!!! abstract "你在課程的哪裡"
-    - **Day 5**：Nakama 3.40.0 與 PostgreSQL 已部署完成，REST device auth 與 storage 讀寫通過。
-    - **今天**：新增 Lua runtime module 與 RBAC，讓 Nakama hook 呼叫 Agones allocation。驗收：兩個 realtime client 都收到 `matchmaker_matched` 與 allocation 通知，通知裡的 endpoint 相同，而且 Fleet 裡有一顆 server 從 Ready 轉成 Allocated。
-    - **Day 7**：用一支 Python client 把登入、配對、RPC 與 UDP 經 Quilkin 連進 GameServer 從頭走一次。
+本章把這兩個決定接起來。你會讀 Nakama 的配對事件、Agones 的分配回應，再對照兩位 client 收到的位置。判斷成功的依據是「同一組玩家收到同一次 allocation 的結果」，而不只是某個 API 回應成功。
 
 ## Matchmaking 與 allocation 是兩件事
 
-Nakama 內建的 matchmaker 負責湊人：把符合條件的玩家湊成一組，讓每個 client 都收到同一場配對成立的事件。Agones 負責分配 server：從 Ready pool 裡挑一顆 `GameServer`，把它轉成 `Allocated`，並回傳玩家可以連線的 address:port。只完成湊人，玩家還不知道要連去哪裡；只做 allocation，平台也不知道這顆 server 要交給哪一組玩家。兩者中間要有一段程式把它們接起來。
+先看玩家名單。Nakama 內建的 **matchmaker** 負責配對：把符合條件的玩家湊成一組，讓每個 client 都收到同一場配對成立的事件。Agones 負責分配 server：從 Ready pool 裡挑一顆 `GameServer`，把它轉成 `Allocated`，並回傳玩家可以連線的 address:port。只完成湊人，玩家還不知道要連去哪裡；只做 allocation，平台也不知道這顆 server 要交給哪一組玩家。兩者中間要有一段程式把它們接起來。
 
-Nakama server runtime 就是放這段程式的地方。它是跑在 Nakama 裡的自訂後端邏輯，可以用 Lua、Go 或 JavaScript/TypeScript 寫；module 在 Nakama 啟動時載入，用 hook 掛到特定事件上。`matchmaker_matched` hook 剛好是接 Agones 的位置：Nakama 已經決定哪些玩家湊成同一組，但 client 還需要同一組遊戲伺服器 endpoint。
+配對一成立就要執行分配，所以需要能在 Nakama 裡執行的自訂程式，稱為 **server runtime module**。它是跑在 Nakama 裡的自訂後端邏輯，可以用 Lua、Go 或 JavaScript/TypeScript 寫；module 在 Nakama 啟動時載入，用 **hook** 註冊事件發生時要執行的函式。`matchmaker_matched` hook 剛好是接 Agones 的位置：Nakama 已經決定哪些玩家湊成同一組，但 client 還需要同一組遊戲伺服器 endpoint。
 
-hook 要建立 `GameServerAllocation`，就是呼叫 Kubernetes API。Kubernetes API 不會因為請求來自叢集內就自動信任它；Nakama pod 必須帶著 ServiceAccount token，並且透過 RBAC 被授權在 Agones Fleet 所在 namespace 建立 `gameserverallocations`。這裡的 RBAC 只開 create allocation，hook 能請求分配 server，但不能列出或修改 `GameServer`。
+hook 要建立 `GameServerAllocation`，就是呼叫 Kubernetes API。Kubernetes API 不會因為請求來自叢集內就自動信任它；Nakama Pod 用 **ServiceAccount token** 證明它代表哪個工作負載，再透過 **RBAC** 規則取得權限，才被允許在 Agones Fleet 所在 namespace 建立 `gameserverallocations`。本章新增的 Role 只授予 create allocation；它本身不授予列出或修改 `GameServer` 的權限。實際有效權限仍會包含同一身分的其他 RoleBinding。
 
-```mermaid
-flowchart TB
-    C["realtime clients<br/>matchmaker_add"] --> N["Nakama<br/>matchmaker"]
-    N --> H["Lua hook<br/>matchmaker_matched"]
-    H --> K["Kubernetes API<br/>GameServerAllocation"]
-    K --> G["Agones GameServer<br/>Allocated"]
-    H --> R["notifications<br/>endpoint"]
-    R --> C
-```
+先順著圖看伺服器端的兩個決定，再看結果如何回到同一組玩家。圖中的 endpoint 就是可以連線的位址與 port。
+
+![Nakama 先配對玩家，hook 再向 Agones 分配伺服器，結果通知同組玩家](../assets/diagrams/s5d6-allocation.svg)
+
+分配只做一次，通知卻要送給每位玩家。若兩邊各自呼叫 allocation，就可能拿到不同 GameServer；把分配放在同一次配對的 hook 裡，才能共用結果。
 
 ### 配對結果怎麼回到 client
 
-client 在這一章只做兩件事：開 realtime WebSocket、送 `matchmaker_add`。之後不再主動發問，而是在同一條 socket 上等 server 推訊息下來。它會收到兩則訊息：
+client 完成 Day 5 的登入後，先開 realtime WebSocket，再送 `matchmaker_add`。這是持續連線的介面，Nakama 可以在配對成立時主動傳回訊息。之後不再主動發問，而是在同一條 socket 上等 server 推訊息下來。它會收到兩則訊息：
 
 - **`matchmaker_matched`**：Nakama 內建的配對成立事件，列出同組有哪些玩家。
 - **code `6006` 的 notification**：本章 Lua hook 自己送出的通知，內容是 Agones 分配到的 `address`、`port` 與 `GameServer` 名稱。`6006` 是本章自訂的通知代碼，client 靠它分辨「這是 server endpoint」。
 
-把 endpoint 送回 client 還有另一種做法：client 收到 `matchmaker_matched` 後，主動呼叫一支自訂 RPC 去問「我該連哪裡」。這裡選 notification，因為配對成立的時間點由 server 決定，由 server 主動推比 client 事後來問少一次來回；notification 標成 persistent 時也會存進資料庫，client 斷線重連後還能用 list notifications API 補拿。
+把 endpoint 送回 client 還有另一種做法：client 收到 `matchmaker_matched` 後，主動呼叫一支自訂 RPC 去問「我該連哪裡」。這裡選 notification，因為配對成立的時間點由 server 決定，由 server 主動推比 client 事後來問少一次來回；notification 標成 persistent 時會保存，官方也提供列出通知的 API；本章只測即時接收，尚未測重連後補取。
 
 `matchmaker_matched` 裡也有一個 `token` 欄位，但它和 Day 4 的 Quilkin routing token 無關。這個 token 是給 Nakama 自己的多人對戰（client relayed match）用的，client 拿它呼叫 match join，就能加入一場由 Nakama 轉送訊息的對戰。對戰跑在 Agones 的 dedicated game server 上時，不走 Nakama match，這個 token 用不到，client 真正要用的是 notification 裡的 address:port。
+
+## 先確認部署位置與既有資源
+
+本章沿用 Day 5 的 `nakama` namespace、PostgreSQL 與 Nakama Service，以及 `default` namespace 裡的 `simple-game-server` Fleet。至少要有一顆 Ready GameServer，配對成功後才有伺服器可分配。若仍沿用 Day 3 的 buffer autoscaler，分配後會補足 Ready 容量；固定 replicas 的 Fleet 不會因 allocation 自動擴大。
+
+請在課程儲存庫的 `labs/sprint5/day6/` 目錄操作，使用其中完整的 `rbac.yaml`、`nakama-module-configmap.yaml`、`nakama-deployment.yaml` 與 `mm_client.py`。以下程式與 Deployment YAML 是重點節錄，不是完整可部署檔案。本機需有 Python 3 與 `websockets` 套件；client 連到本機 7350，由 port-forward 接到 Nakama。
 
 ## 步驟 1:授權 Nakama 建立 GameServerAllocation
 
@@ -71,14 +70,14 @@ subjects:
     namespace: nakama
 ```
 
-套用後用 `kubectl auth can-i` 驗授權：
+用前章的 `kubectl apply -f` 方式套用完整 `rbac.yaml` 後，再以 `kubectl auth can-i` 確認這個 ServiceAccount 能否建立 allocation：
 
 ```text
 $ kubectl auth can-i create gameserverallocations.allocation.agones.dev --as=system:serviceaccount:nakama:nakama -n default
 yes
 ```
 
-這個權限只夠 hook 請求分配，改不了 Agones 的其他物件。
+`yes` 回答的是這次詢問的 create 權限；它沒有檢查網路連線，也沒有證明 Pod 已掛載 token。下一步補上這兩者之間的程式。
 
 ## 步驟 2:掛入 Lua runtime module
 
@@ -174,7 +173,9 @@ spec:
           readOnly: true
 ```
 
-`automountServiceAccountToken: true` 要寫在 pod spec，因為 Day 5 的 ServiceAccount 關掉了自動掛載；漏掉會撞到[地雷 1](#mine-1)。用 `subPath` 是為了避免 Nakama 掃到 ConfigMap 投影目錄裡的同一份 Lua 檔兩次，見[地雷 2](#mine-2)。
+`automountServiceAccountToken: true` 要寫在 pod spec，因為 Day 5 的 ServiceAccount 關掉了自動掛載；漏掉會撞到[token 掛載失敗](#mine-1)。用 `subPath` 是為了避免 Nakama 掃到 ConfigMap 投影目錄裡的同一份 Lua 檔兩次，見[module 重複載入](#mine-2)。
+
+先套用完整 `nakama-module-configmap.yaml`，再套用 `nakama-deployment.yaml`，讓新的 Pod 掛到 module。這份 Deployment 已包含 module revision annotation；之後若只修改 ConfigMap，還要觸發新的 Pod，不能期待 `subPath` 掛載的檔案自動更新。
 
 ## 步驟 3:確認 Nakama 載入 module 並註冊 hook
 
@@ -191,13 +192,13 @@ $ kubectl -n nakama logs deployment/nakama -c nakama --tail=120
 {"level":"info","ts":"2026-09-05T05:18:33.313Z","caller":"main.go:243","msg":"Startup done"}
 ```
 
-要看的是 `count=1`。若顯示 `count=2` 並載入兩次同名 module，通常是整個 ConfigMap 目錄被掛進 runtime path。Nakama rollout 之後，先前開著的 port-forward 會失效，重開一次再測 client，見[地雷 3](#mine-3)。
+要看的是 `count=1`。若顯示 `count=2` 並載入兩次同名 module，通常是整個 ConfigMap 目錄被掛進 runtime path。Nakama rollout 之後，先前的 port-forward 可能還指向已刪除的 Pod。請在另一個終端機重新執行 `kubectl -n nakama port-forward svc/nakama 7350:7350` 並保持它開著，再測 client；原因見[rollout 後的連線失效](#mine-3)。
 
 ## 步驟 4:送兩個 realtime client 進 matchmaker
 
 配對成立時 hook 要分配一顆 server，所以 `simple-game-server` Fleet 至少要有 1 顆 Ready。
 
-測試 client（[mm_client.py](https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day6/mm_client.py)）做三件事：REST device auth、WebSocket 送 `matchmaker_add`、等待 `matchmaker_matched` 與 code `6006` notification。它用 Python 的 `websockets` 套件開 realtime socket（`pip install websockets`），下面只列等待訊息的迴圈。結束條件要兩者都滿足：
+測試 client（[mm_client.py](https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day6/mm_client.py)）做三件事：REST device auth、WebSocket 送 `matchmaker_add`、等待 `matchmaker_matched` 與 code `6006` notification。它用 Python 的 `websockets` 套件開 realtime socket（沿用已安裝 `websockets` 的 Python 環境），下面只列等待訊息的迴圈。結束條件要兩者都滿足：
 
 ```python
 while time.monotonic() < deadline and (endpoint is None or matched is None):
@@ -215,7 +216,7 @@ while time.monotonic() < deadline and (endpoint is None or matched is None):
             endpoint = content
 ```
 
-只等 notification 就離線的話，會漏掉配對事件，見[地雷 4](#mine-4)。
+只等 notification 就離線的話，會漏掉配對事件，見[等待兩種訊息](#mine-4)。
 
 Nakama hook 收到配對事件後建立 allocation：
 
@@ -244,19 +245,11 @@ SUMMARY {"endpoint": "<NODE-IP>:7170", "results": [{"allocation": {"address": "<
 
 注意 notification 比 `matchmaker_matched` 先到：hook 在 Nakama 送出 matched 事件之前執行，所以 client 不能假設先後順序。
 
-跑完後用 `kubectl get gs -o wide` 確認：通知裡那顆 `GameServer` 已從 Ready 轉成 Allocated，address:port 與 client 收到的一致，Fleet 也補出一顆新的 Ready。
+跑完後用 `kubectl get gs -o wide` 對照通知中的 GameServer 名稱。這次實測裡，它從 Ready 轉成 Allocated，位址與 port 也和兩個 client 收到的一致；沿用的 buffer autoscaler 另外補出一顆 Ready。這些證據分別回答「分給誰」與「容量是否補足」。
 
-## 自我檢查
+## 疑難排解
 
-- `kubectl auth can-i create gameserverallocations.allocation.agones.dev --as=system:serviceaccount:nakama:nakama -n default`：回 `yes`。
-- Nakama 啟動 log：`Found runtime modules` 的 `count` 是 1，且有 `Registered Lua runtime Matchmaker Matched function invocation`。
-- 兩個 client 的輸出：各自都有 `matchmaker_matched` 與 code `6006` 的 notification，summary 是 `same_endpoint: true`。
-- Nakama log 過濾 `sprint5-day6`：有一行 `allocation response`，`state` 是 `Allocated`。
-- client 跑完後 `kubectl get gs`：通知裡那顆 `GameServer` 從 Ready 轉成 Allocated，address:port 與通知相同；Fleet 補出一顆新的 Ready。
-
-## 地雷記錄
-
-### 地雷 1:ServiceAccount 關閉 automount 時 pod 內沒有 token 檔 {#mine-1}
+### ServiceAccount 關閉 automount 時 pod 內沒有 token 檔 {#mine-1}
 
 **症狀**：改完 Deployment 後 Nakama pod 進入 `CrashLoopBackOff`；container log 只有 `cat: /var/run/secrets/kubernetes.io/serviceaccount/token: No such file or directory`。
 
@@ -264,7 +257,7 @@ SUMMARY {"endpoint": "<NODE-IP>:7170", "results": [{"allocation": {"address": "<
 
 **修法**：保留 ServiceAccount 本身較安全的預設，在 Nakama 的 pod spec 明確加上 `automountServiceAccountToken: true`。只有需要 in-cluster API 呼叫的 workload 才開 token mount。
 
-### 地雷 2:ConfigMap 整個目錄掛 runtime path 會讓 Lua 載入兩次 {#mine-2}
+### ConfigMap 整個目錄掛 runtime path 會讓 Lua 載入兩次 {#mine-2}
 
 **症狀**：Nakama 可啟動，但 log 出現兩次 `sprint5-day6 Agones matchmaker module loaded`；`Found runtime modules` 顯示 `count=2`，包含 ConfigMap timestamp 目錄下的 `main.lua`。
 
@@ -272,7 +265,7 @@ SUMMARY {"endpoint": "<NODE-IP>:7170", "results": [{"allocation": {"address": "<
 
 **修法**：用 `subPath` 將 ConfigMap 的 `main.lua` 掛成單一檔案到 `/nakama/data/modules/main.lua`，並用 Deployment annotation 變更觸發 rollout。凡是 runtime 會掃整個目錄的系統，都要小心 ConfigMap 投影目錄。
 
-### 地雷 3:rollout 後舊 port-forward 會綁到已關閉的 pod {#mine-3}
+### rollout 後舊 port-forward 會綁到已關閉的 pod {#mine-3}
 
 **症狀**：client REST device auth 失敗，錯誤為 `Remote end closed connection without response`；port-forward log 顯示 `network namespace ... is closed`。
 
@@ -280,7 +273,7 @@ SUMMARY {"endpoint": "<NODE-IP>:7170", "results": [{"allocation": {"address": "<
 
 **修法**：每次 Nakama rollout 後重開 `kubectl -n nakama port-forward svc/nakama 7350:7350`。client 失敗時先看 port-forward session，再追 Nakama API。
 
-### 地雷 4:client 只等 notification 會漏掉配對事件 {#mine-4}
+### client 只等 notification 會漏掉配對事件 {#mine-4}
 
 **症狀**：兩個 client 都印出 allocation 通知，輸出裡卻沒有 `matchmaker_matched` 事件。
 
@@ -288,20 +281,23 @@ SUMMARY {"endpoint": "<NODE-IP>:7170", "results": [{"allocation": {"address": "<
 
 **修法**：client 的結束條件改成同時收到 `matchmaker_matched` 與 code `6006` 通知才結束，不依賴兩者的先後順序。
 
-## 帶得走的東西
+## 想一想
 
-- Nakama matchmaker 負責湊人，Agones allocation 負責挑 server，中間用 server runtime hook 接起來；hook 做的事就是一個帶 ServiceAccount token 的 HTTP POST。
-- in-cluster API 呼叫要同時有 pod 掛上的 ServiceAccount token、RBAC 授權與正確的 API 路徑；少一個，錯誤各不相同。
-- runtime module 載入要看 module count 與 hook registration，server 能啟動不代表 hook 有掛上。
-- 配對結果由 server 經 realtime socket 主動推給 client，而且可能比配對事件先到；`matchmaker_matched` 的 `token` 是 Nakama match 用的，連 game server 用的是通知裡的 address:port。
+1. RBAC 查詢回 `yes`，Pod 卻找不到 token 檔案，還缺少哪一項部署設定？
+2. client 只收到 code `6006` 通知便離線，為什麼不能據此認定它也收到配對事件？
+3. 兩位玩家都收到 endpoint，還要如何確認那是同一次 allocation 的結果？
+
+## 小結
+
+本章讓 Nakama 決定玩家名單，再由同一次 hook 向 Agones 取得一台 GameServer，將同一份結果送給所有 matched users。判讀時要把身分與授權、module 載入、兩種 client 訊息及 GameServer 狀態接起來看。拿到 endpoint 仍不代表 UDP 已送達；這是下一章要補的證據。
 
 ## 正式環境還要補的
 
-這裡的 hook 呼叫 Kubernetes API 時略過了 TLS 驗證（`insecure=true`），正式環境要改成驗證叢集 CA。allocation 失敗時也只會在 Nakama log 留下錯誤，client 收不到任何通知；上線前要補重試，以及把失敗回報給 client 的機制。
+這裡的 hook 呼叫 Kubernetes API 時略過了 TLS 驗證（`insecure=true`），正式環境要改成驗證叢集 CA。allocation 失敗時也只會在 Nakama log 留下錯誤，client 收不到 allocation 通知；後續需設計失敗回報，以及能避免重複分配的重試策略。ServiceAccount token 在本例啟動時讀取一次，也沒有實作長時間執行時的憑證更新。
 
 ## 延伸閱讀
 
-想往下深挖，從這幾份開始：
+想再深入，可以從這幾份開始：
 
 - **[Nakama Lua runtime](https://heroiclabs.com/docs/nakama/server-framework/lua-runtime/)** —— 查 Lua module 載入、runtime API 與 hook 寫法。
 - **[Nakama configuration](https://heroiclabs.com/docs/nakama/getting-started/configuration/)** —— 對照本章用 `--runtime.env` 把 Kubernetes token 傳入 Lua context 的做法。

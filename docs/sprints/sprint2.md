@@ -1,6 +1,6 @@
 # Sprint 2 · eBPF 與執行期安全
 
-eBPF 讓程式可以安全地在 Linux 核心裡執行，許多觀測、安全與網路工具都建立在它上面。這個 sprint 從 eBPF 的基本概念開始，在 AKS 上依序操作 **bpftrace**、**Falco**、**Tetragon**、**Cilium 與 Hubble**，學會每一套看得到什麼、看不到什麼，最後一章整理四套工具的分工。
+某顆 Pod 突然對外連線，你想知道是誰開了連線、執行了什麼程式，以及能不能在節點上阻止它。這個 sprint 從 eBPF 開始，先用 bpftrace 觀察，再用 Falco 與 Tetragon 判讀、過濾事件，最後用 Cilium 與 Hubble 管理和查看網路流量。每個工具看得見的範圍不同，課程會用實際行為比較。
 
 <div style="text-align: center;" markdown>
 
@@ -85,7 +85,7 @@ Day 0 從零講起，不需要先接觸過 eBPF，也不需要 Sprint 1 的內�
 
     ---
 
-    建立 BYOCNI 叢集，自行安裝 Cilium 並開啟 kube-proxy replacement。動手前先了解 kube-proxy 負責哪些工作，完成後確認叢集裡沒有 kube-proxy、Service 仍然可用。
+    建立 BYOCNI 叢集，自行安裝 Cilium 並開啟 kube-proxy replacement。動手前先了解 kube-proxy 負責哪些工作，完成後確認受管 kube-proxy 沒有執行中的 Pod，並驗證 Service 路徑。
 
 -   ![Cilium](../assets/logos/cilium-icon-color.svg){ width="44" }
 

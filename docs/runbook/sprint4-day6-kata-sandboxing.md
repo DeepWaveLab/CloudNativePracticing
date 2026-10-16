@@ -1,33 +1,16 @@
-# Day 6: Kata Pod Sandboxing——RuntimeClass、獨立 kernel 與自管 Cilium
+# Day 6：確認 Kata Pod 使用的是哪個核心
 
 ![Kubernetes 官方標誌](../assets/logos/kubernetes-icon-color.svg){ align=right width="80" }
 
-> [Day 5](sprint4-day5-confidential-concepts.md) 把「防的是誰」講清楚了。今天動手做最基本的一層:把一個 pod 跑進**獨立 kernel 的輕量 VM**(Kata Pod Sandboxing),證明它不共用主機 kernel。這一天先不碰硬體記憶體加密——但它會讓你發現,整套機制其實就是 Sprint 3 那條 RuntimeClass → handler → containerd shim 的鏈,只是換一個 handler。順便,把 Kata 節點疊在 Part 1 的自管 Cilium 上會不會出事,今天當場驗。
+一個 Pod 已經 Running，進去查看行程時也看不到宿主機程序。這能證明它使用 Kata 的 VM 隔離嗎？一般容器的 PID namespace 也會有類似結果。這章會沿著 RuntimeClass 找到節點 runtime，再對照 guest 與實際宿主機的核心，判斷工作負載是否使用預期的執行環境。
 
-!!! abstract "你在課程的哪裡"
-    - **[Day 5](sprint4-day5-confidential-concepts.md)**:機密運算防誰、Kata↔CoCo 治理、eBPF 讓主機看清楚 guest 而 CoCo 讓主機看不到。
-    - **今天**:在 Part 1 那座 BYOCNI 上游 Cilium 叢集上加一個 Kata 節點池,跑一個 `kata-vm-isolation` 的 pod,驗它有獨立 kernel、指出 handler 對應到節點設定哪一段,並確認 Kata 節點在自管 Cilium 下網路正常。
-    - **接下來**:[Day 7](sprint4-day7-katacc.md) 同一條鏈換成 `kata-cc`,多一層 SEV-SNP 硬體記憶體加密。
+## 準備可執行 Kata 的節點
 
-## 這其實是 Sprint 3 的七層鏈
+前面已學過 RuntimeClass → handler → containerd runtime → shim 的關係。這次使用的 RuntimeClass 是 `kata-vm-isolation`，handler 是 `kata`；它會透過 Kata 建立具有自身核心的輕量 VM。
 
-Sprint 3 Day 1 建立過一條鏈:pod 的 `runtimeClassName` → RuntimeClass 的 handler → 節點 containerd 設定裡對應的 runtime 區塊 → 那個區塊指向的 shim 二進位檔。WASM 是換一個 shim,**Kata 也是換一個 shim**——沒有新的 Kubernetes 概念要學,學的是那個 shim 裡裝的東西不一樣(一台輕量 VM,不是一個容器)。
+本章採用 AKS Pod Sandboxing，節點池使用 Azure Linux 與支援巢狀虛擬化的 VM。**巢狀虛擬化**讓本身已是 VM 的 AKS 節點，仍能建立 Kata 的 guest VM。這組驗證使用 `Standard_D4s_v3`；可用 SKU 與限制應依[AKS 官方文件](https://learn.microsoft.com/en-us/azure/aks/use-pod-sandboxing)及目標區域確認。
 
-AKS 的 Pod Sandboxing 用 Kata Containers 加 Microsoft Hypervisor 與 Cloud Hypervisor,官方文件的一句話就是入口:**設了 `runtimeClassName: kata-vm-isolation` 的 pod,hypervisor 會替它開一台有自己 kernel 的輕量 VM**。
-
-有一個前置條件要先知道,否則第一步就白花錢:**Kata 節點池只支援 Azure Linux**(見[地雷 1](#mine-1))。
-
-今天走三步:
-
-| 步驟 | 做什麼 |
-|---|---|
-| 1 | 加一個 Kata(AzureLinux)節點池,並確認自管 Cilium 接得住它 |
-| 2 | 跑一個 kata pod 加一個一般 pod,比 kernel、驗網路 |
-| 3 | 指出 handler 對應到節點 containerd 設定的哪一段 |
-
-## 步驟 1: 加 Kata 節點池,並看 Cilium 接不接得住
-
-在 Part 1 那座 BYOCNI 上游 Cilium 叢集上加節點池,`--os-sku AzureLinux` 是硬需求、`--workload-runtime KataVmIsolation` 開 Kata、VM 要 gen2 且支援巢狀虛擬化(D4s_v3 合格):
+以下命令會新增一個計費節點池。`<resource-group>` 與 `<cluster>` 請使用現有練習叢集的資源群組與名稱；這裡沿用前幾章的自管 Cilium 網路。`--os-sku AzureLinux` 與 `--workload-runtime KataVmIsolation` 都是這個配置的必要設定：
 
 ```bash
 az aks nodepool add -g <resource-group> --cluster-name <cluster> \
@@ -36,7 +19,7 @@ az aks nodepool add -g <resource-group> --cluster-name <cluster> \
   --node-vm-size Standard_D4s_v3 --node-count 1
 ```
 
-Part 1 的資料平面是**自管的上游 Cilium**(不是受管的 Azure CNI)。加一個 AzureLinux 的 Kata 節點,Cilium 接不接得住?當場看:
+節點建立後，先核對節點 Ready、Cilium 是否涵蓋新節點，以及節點公布的 runtime handler。以下是觀測結果；`<kata-node>` 指新 Kata 節點，最後一個 jsonpath 以省略號表示欄位摘要，不是可直接執行的完整查詢：
 
 ```console
 $ kubectl get nodes -o wide
@@ -50,11 +33,19 @@ $ kubectl get node <kata-node> -o jsonpath='{…runtimeHandlers}'
 kata kata-cc runc untrusted   ← 注意這一行,連 kata-cc 都預先在了
 ```
 
-**Kata 節點 81 秒內 `Ready`、拿到內部 IP、Cilium 三顆都就緒。** 自管上游 Cilium 接住了 AzureLinux Kata 節點——這件事微軟沒有明文背書,值得自己驗一次。而 `runtimeHandlers` 那行有個伏筆:`kata-cc` 這個 handler 在一個**非機密**的 D4s_v3 節點上就已經存在了,[地雷 2](#mine-2) 會回來講。
+Azure Linux 與 Ubuntu 節點在同一個叢集共存，各自有不同核心與 containerd 版本。Cilium desired 與 ready 都是 3，表示 DaemonSet 已涵蓋新節點，但應用的網路是否通仍要另外測試。
 
-## 步驟 2: 比 kernel,驗網路
+`runtimeHandlers` 列出的 `kata-cc` 暫時只當作設定資訊。它不代表這台節點具備機密運算硬體，見[疑難排解：有 handler 卻沒有對應硬體](#mine-2)。
 
-放兩個 pod:一個帶 `runtimeClassName: kata-vm-isolation`(kata),一個一般 pod(釘在 Ubuntu 一般池上當對照)。最直接的證據是 `uname`:
+## 把 Pod 核心與它所在的宿主機比較
+
+接下來的檢查以 `kata-lab` 裡兩個已部署的測試 Pod 為前提：`isolated-pod` 指定 `runtimeClassName: kata-vm-isolation`，排在 Kata 節點；`normal-pod` 不指定 Kata，排在一般 Ubuntu 節點。兩者都需要包含 `uname` 與網路測試工具的映像。部署方式可依官方 Pod Sandboxing 範例，並先確認各 Pod 實際排程到哪個節點。
+
+下圖將已學過的 runtime 選擇接到 Kata VM。要驗證核心，須把圖中最右側的 guest 與承載它的 Kata 節點比較。
+
+![RuntimeClass 選擇 Kata，工作負載在具有自身核心的 guest 執行](../assets/diagrams/s4d6-runtime-kernel.svg)
+
+讀取兩個 Pod 的核心版本，得到以下結果：
 
 ```console
 $ kubectl -n kata-lab exec isolated-pod -- uname -r
@@ -64,12 +55,15 @@ $ kubectl -n kata-lab exec normal-pod -- uname -r
 6.8.0-1063-azure              ← Ubuntu 主機 kernel
 ```
 
-**兩個不同的 kernel。** kata pod 跑在自己的輕量 VM 裡,那台 VM 有它自己的核心(`.mshv1`),跟主機的 `azure` 核心是兩回事。
+一般 Pod 的 `6.8.0-1063-azure` 與 Ubuntu 節點一致。更重要的是：Kata Pod 為 `6.6.137.mshv1-1.azl3`，它實際所在的 Azure Linux 宿主機則是前一段輸出的 `6.6.137.mshv2-1.azl3`。同一個 Kata 節點上的 guest 與 host 核心不同，配合 runtime 與排程資訊，支持它使用獨立核心的判斷。
 
-!!! note "別拿「行程數」當隔離證據"
-    直覺會想「kata pod 看不到主機行程,所以隔離」。但一般容器本來就有 PID namespace,兩邊 `ps` 都只看得到自己的幾個行程——**行程數分辨不出 Kata**。真正的證據是 kernel:一般容器共用主機 kernel,kata pod 有自己的。用 `uname -r`。
+只比較位於不同 OS 節點的兩個 Pod，證據會不足：兩個一般容器若分別排在不同核心的節點，也可能得到不同的 `uname`。同樣地，行程數很少也不能區分 Kata 與一般容器。
 
-Part 1 的 Cilium 有沒有好好服務這個 kata pod?kata pod 拿到 pod IP,跨節點打一般池的 pod、查 DNS、打 API server:
+這是執行環境的檢查，尚未提供機密 VM 的遠端證明，也沒有測試宿主機無法讀取 guest 私有記憶體。
+
+## 再確認跨節點、DNS 與 Service 路徑
+
+獨立核心的 Pod 仍要與叢集其他服務通訊。以下結果分別檢查跨節點 ICMP、DNS 解析，以及 Kubernetes Service 的 HTTPS 回應：
 
 ```console
 # kata pod (10.0.2.202) → normal-pod (10.0.1.103),跨節點跨池
@@ -81,11 +75,13 @@ $ nslookup kubernetes.default.svc.cluster.local  →  10.0.0.1
 $ curl -sk https://kubernetes.default/healthz     →  http_code=401
 ```
 
-Ping 通、DNS 通、Service 的 TLS 握手完成(401 = 沒帶憑證,但路徑是通的)。**自管 Cilium 給 Kata 節點與 kata pod 的網路是正常的**——Part 1 疊 Part 2 的第一半(Kata 這一半)成立。
+Ping 兩次成功，表示選定的跨節點路徑可達；DNS 回覆 Service IP，表示名稱解析可用。最後的 401 是 API server 的未授權回應，支持「請求抵達服務」的判斷，並不代表應用取得了存取權限。
 
-## 步驟 3: handler 對應到節點的哪一段
+其中 curl 使用 `-k`，略過憑證驗證；因此不能把這筆測試當成伺服器憑證已被正確驗證。這組結果也只涵蓋選定流量，不代表所有 Cilium 政策或 Kata 網路功能都已測完。
 
-Kata 節點掛一顆特權 pod 讀它的 containerd 設定,就看得到 handler 落在哪:
+## 回到節點確認 handler 的設定
+
+最後要確認 `kata` handler 如何對應到 runtime。下列節錄是在 Kata 節點上的檢查 Pod 讀取宿主機設定；`/host` 是該檢查 Pod 掛載的宿主檔案系統。一般應用 Pod 不會自動擁有這個掛載或權限。
 
 ```console
 $ grep -nE "kata|runtime_type" /host/etc/containerd/config.toml
@@ -99,54 +95,39 @@ $ grep -nE "kata|runtime_type" /host/etc/containerd/config.toml
   [.kata-cc.options] ConfigPath = "…/configuration-clh-snp.toml"
 ```
 
-RuntimeClass `kata-vm-isolation`(handler `kata`)→ 設定裡的 `runtimes.kata` 區塊 → `io.containerd.kata.v2` shim。**這就是 Sprint 3 的七層鏈,只換了 handler 名字。** 順帶看到 `runtimes.kata-cc` 也在(指向一份 `clh-snp` 的設定)——那是 Day 7 的東西,但它在這顆非機密節點上就備好了。
+先找 `runtimes.kata`，再讀 `runtime_type = "io.containerd.kata.v2"`。**ConfigPath** 指定 Kata 使用的配置檔。這份輸出是縮寫節錄，包含省略路徑與簡寫 options 標題，不能複製回節點當成完整 TOML。
 
-## 驗收 checkpoint
+`runtimes.kata-cc` 則使用另一個 runtime type、snapshotter 與配置檔。這只代表映像準備了設定；是否能執行仍取決於節點硬體與完整配置。
 
-| 驗證 | 判準 | 本課環境的結果 |
-|---|---|---|
-| pod 有獨立 kernel | kata pod 與一般 pod 的 `uname -r` 不同 | kata `6.6.137.mshv1` vs 一般 `6.8.0-azure` |
-| handler 對得到設定 | 指出 handler 對應節點 containerd 的哪一段 | `runtimes.kata` → `io.containerd.kata.v2` |
-| 自管 Cilium 接得住 Kata 節點 | 節點 Ready、Cilium 3/3、kata pod 有 IP 且跨池連通 | 全成立(ping 2/2、DNS、Service 401) |
+## 疑難排解
 
-## 地雷記錄
+### 建立 Kata 節點池時 OS SKU 不符合要求 {#mine-1}
 
-### 地雷 1:Kata 節點只支援 AzureLinux,一般節點卻是 Ubuntu {#mine-1}
+這組 AKS Pod Sandboxing 配置要求 Azure Linux。若沿用 Ubuntu 設定而建立失敗，先核對前面的 `--os-sku AzureLinux`。節點就緒後，檢查設定應以實際節點版本為準，不能只因同屬一個叢集，就複製另一種節點的 containerd 路徑。
 
-**根因**:AKS Pod Sandboxing 的一手文件明載「**Only the Azure Linux os-sku supports this feature**」。加節點池時漏了 `--os-sku AzureLinux`、沿用叢集預設的 Ubuntu,指令會失敗。
+### 有 kata-cc handler，卻沒有對應硬體 {#mine-2}
 
-**後果**:同一座叢集因此**混兩種 OS**——一般節點池是 Ubuntu,Kata 節點池被迫是 AzureLinux。而這不只是換個發行版:兩者的 containerd 版本與設定路徑都不同(本課實測 Kata 節點是 containerd 2.2.4、走 `io.containerd.grpc.v1.cri` 這條 1.x 風格的 plugin 路徑;一般 Ubuntu 節點是 2.3.3、走 Sprint 3 量到的 2.x 路徑)。做節點層的排錯或設定比對時,要先確認自己在看哪一種節點。
+驗證中的一般 Kata 節點已列出 `kata-cc`，但 `Standard_D4s_v3` 不具備下一章需要的機密容器硬體條件。handler 清單與配置檔不能替代硬體驗證；要執行 kata-cc，必須依 [Day 7](sprint4-day7-katacc.md) 的節點要求建立環境，並檢查 RuntimeClass 與平台設定。
 
-**判斷準則**:Kata / kata-cc 節點池一律加 `--os-sku AzureLinux`;跨節點做 containerd 設定比對前,先分清 OS。
+## 想一想
 
-### 地雷 2:`kata-cc` handler 在非機密節點上就存在,但沒有 SEV-SNP 硬體 {#mine-2}
+1. 兩個一般容器分別排在不同版本核心的節點，`uname` 不同，可以據此宣稱用了 Kata 嗎？應補哪個對照？
+2. `runtimeHandlers` 已有 `kata-cc`，為什麼還不能執行機密容器？
+3. API server 回 401，這筆測試證明了什麼？它是否證明身分與憑證都驗證成功？
 
-**症狀**:一個普通的 D4s_v3(`KataVmIsolation`)Kata 節點,`runtimeHandlers` 就列出 `kata-cc`,`config.toml` 也有 `runtimes.kata-cc` 區塊(指向 `configuration-clh-snp.toml`)。看起來好像不用 Day 7 就能跑機密容器。
+## 小結
 
-**根因**:AzureLinux 的 Kata 節點映像**預先放好了** kata-cc 的 runtime 設定,但真的跑 kata-cc 需要 **SEV-SNP 機密運算硬體**(`_cc_v5` 系列 VM),D4s_v3 沒有那個硬體。
-
-**判斷準則**:**「handler 在」不等於「硬體在」。** Day 7 跟今天的差別不是設定,是 SKU 與硬體——指一個 `kata-cc-isolation` 的 pod 到今天這種節點上,起不來。
-
-## 帶得走的東西
-
-- **Kata 沒有新的 Kubernetes 概念,只有新的 shim。** RuntimeClass → handler → containerd 區塊 → shim,這條 Sprint 3 建立的鏈原封不動,換的是 shim 裡裝一台輕量 VM。
-- **獨立 kernel 是 Kata 的證據,行程數不是。** 一般容器也有 PID namespace;用 `uname -r` 看兩邊 kernel 版本不同,才證明得了「不共用主機 kernel」。
-- **自管的資料平面接不接得住新型節點,要當場驗。** BYOCNI 上游 Cilium 接住 AzureLinux Kata 節點這件事沒有官方背書,而它成立——省下退回受管 CNI 的麻煩。
-- **節點映像會預埋你今天用不到的能力。** kata-cc 的設定在非機密節點上就備好了,但沒有硬體就是跑不了。設定就緒是必要條件,不是充分條件。
+驗證 Kata 時，要把排程位置、RuntimeClass、節點 handler 與實際宿主核心連起來，再確認應用網路路徑。這章的證據支持獨立 guest 核心與選定網路路徑可用；它沒有提供記憶體機密性的保證。[Day 7](sprint4-day7-katacc.md) 會改用符合條件的機密運算節點與 kata-cc，進一步檢查機密執行路徑的平台設定。
 
 ## 延伸閱讀
 
-想往下深挖,從這幾份開始:
+想再深入，可以從這幾份開始：
 
-- **[AKS Pod Sandboxing 文件](https://learn.microsoft.com/en-us/azure/aks/use-pod-sandboxing)** —— 今天的一手配方:`--workload-runtime KataVmIsolation`、`--os-sku AzureLinux` 的硬需求、`runtimeClassName: kata-vm-isolation`,以及用 `uname -r` 驗 kernel 的官方做法。
-- **[Kata Containers 官網](https://katacontainers.io/)** —— shim 裡那台輕量 VM 的來源;它跟 gVisor、跟一般 runc 的定位差別。
-- **[Sprint 3 Day 1:RuntimeClass 七層鏈](sprint3-day1-three-generations.md)** —— 站內連結。今天這條鏈就是它,換一個 handler;兩天並讀會發現機制完全相同。
-
-## 下一步
-
-今天證明了「不共用主機 kernel」,但主機**還是讀得到** kata pod 的記憶體明文——它只是一台一般的 VM。[Day 7](sprint4-day7-katacc.md) 把 handler 換成 `kata-cc`,節點換成 SEV-SNP 的 `_cc_v5` 硬體,讓那台 VM 的記憶體**連主機都解不開**。而換硬體這件事,會在 Day 7 撞上一連串「這個區沒賣、這個組合起不來」的現實。
+- [AKS Pod Sandboxing](https://learn.microsoft.com/en-us/azure/aks/use-pod-sandboxing)：節點與 Pod 的部署前提。
+- [Kata Containers](https://katacontainers.io/)：VM 隔離的架構。
+- [Sprint 3 Day 1](sprint3-day1-three-generations.md)：RuntimeClass 與節點 runtime 的關係。
 
 ---
 
 !!! quote ""
-    Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,此處作社群教學用途。
+    Kubernetes 標誌為 CNCF（Linux Foundation）官方資產，此處作社群教學用途。

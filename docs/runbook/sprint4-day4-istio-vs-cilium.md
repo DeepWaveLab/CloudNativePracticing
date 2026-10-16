@@ -1,119 +1,99 @@
-# Day 4: Istio 與 Cilium 橫向對比——加密、身分、L7 與資源
+# Day 4：依需求比較 Istio 與 Cilium，先看證據涵蓋什麼
 
 ![Istio 官方標誌](../assets/logos/istio-icon-color.svg){ align=right width="64" }
 ![Cilium 官方標誌](../assets/logos/cilium-icon-color.svg){ align=right width="64" }
 
-> Day 2 與 Day 3 各自跑完 Istio ambient 與 Cilium mesh 的同一組驗收。今天不動手,把兩邊的實測擺成一張決策表——每一格都追溯到 Day 2、Day 3 或本日的量測。收攏的過程會浮出一件各章各自看不到的事:兩邊的強項落在不同層,選型不是「誰取代誰」,是「你要哪一軸」。
+團隊準備決定服務通訊方案，有人拿出兩組數字：「ztunnel 只用 2Mi，Cilium agent 卻用 200Mi；但 Cilium 請求又比較快，該選哪個？」問題在於兩個元件負責的工作不同，量測也沒有包含所有功能。這章會從需求回看已完成的測試，判斷候選方案與下一個必須補的驗證。
 
-!!! abstract "你在課程的哪裡"
-    - **Day 0–3**:mesh 的三層地圖、Envoy Gateway 的 north-south 入口與 HTTP/3、Istio ambient 的 east-west mTLS 與斷路、Cilium mesh 的 WireGuard 加密與 L7 policy。
-    - **今天**:不動手。把 Istio 與 Cilium 的加密/身分、L7、資源、延遲、節點侵入擺成一張決策表,每格標實測/查證/推論。為了兩邊都是實測,量 Istio 側時把 Day 3 拆掉的 ambient 暫時裝回、量完卸載還原。
-    - **接下來**:Part 1(服務網格)到此收尾;Day 5 起 Part 2 換一個威脅模型——當節點本身不可信,怎麼讓祕密只在硬體 TEE 裡解開。
+## 先列出每個實驗真正回答的問題
 
-## 走過的路(Part 1)
+[Day 1](sprint4-day1-envoy-gateway.md) 驗證外部入口，包含 hostname 路由與用戶端到 Envoy 的 HTTP/3。[Day 2](sprint4-day2-istio-ambient.md) 與 [Day 3](sprint4-day3-cilium-mesh.md) 則測試內部通訊，但它們的 HTTP 測試並不相同：Istio 測連線池限制，Cilium 測方法與路徑授權。
 
-```mermaid
-flowchart TB
-    A["Day 0 · 三層地圖<br/>north-south 入口 / east-west mesh / L7 落點"]
-    B["Day 1 · Envoy Gateway<br/>取代 Ingress,開 HTTP/3"]
-    C["Day 2 · Istio ambient<br/>ztunnel mTLS + waypoint 斷路"]
-    D["Day 3 · Cilium mesh<br/>WireGuard 加密 + L7 policy;身分 beta"]
-    E["Day 4 · 橫向對比<br/>兩軸不對稱 = 選型依據"]
-    A --> B --> C --> D --> E
-```
+比較前，先把成功結果與未完成項目放回各自的需求：
 
-Day 2 與 Day 3 刻意做同一組驗收:服務間加密、工作負載身分、一個 L7 介入。做完才發現這三件事在兩邊的成熟度不一樣——今天把差別量出來。
+| 需求 | Istio ambient 的證據 | Cilium 的證據 |
+|---|---|---|
+| 保護服務通訊 | ztunnel 紀錄呈現 HBONE 通道與兩端 SPIFFE 身分 | 跨節點 WireGuard 擷取中未見選定 Pod 流量的明文 |
+| 工作負載相互身分驗證 | client/default ServiceAccount 身分出現在連線紀錄 | SPIRE 未就緒，未完成驗證 |
+| HTTP 方法與路徑授權 | 本課未測試這組正反例 | `GET /` 成功，`GET /admin` 與 `POST /` 被拒絕 |
+| HTTP 連線池限制 | waypoint 搭配 DestinationRule，出現 overload 訊號 | 本課未測試對等設定 |
 
-## 對比在同一座叢集、同一個拓樸下量
+表中的「未測試」不代表產品沒有能力。「SPIRE 未就緒」也只描述這組環境，不能直接變成所有部署的產品結論。你能據此安排下一個測試，但不能把空白欄當成正式能力排名。
 
-延遲與資源這種數字,換個環境就不能比。所以本日兩邊都在同一座 2 節點叢集、同一組 client↔web、同一個跨節點拓樸下量。Istio 側的數字是把 ambient 疊在既有的 Cilium 上量的——也就是「Cilium 當 CNI + Istio 當 mesh」這種實際會用的疊法。
+## 比資源之前，先確定哪些元件會一起存在
 
-### 資源開銷(`kubectl top`,穩態)
+Cilium 在本課同時提供 Pod 網路。採用 Istio ambient 時，Cilium 仍然存在，再額外加入 Istio 元件。因此 **增量成本**指在既有環境上新增的用量，不能拿新增元件與整套網路直接互相比較。
 
-| | 元件(每節點一份的標 DS) | CPU | 記憶體 |
+下圖把兩種測量配置並排。下排保留上排的 Cilium，再加入 ambient；HTTP waypoint 未列在這次資源數據中。
+
+![兩組測量共用 Cilium 基底，ambient 配置另增 Istio 元件](../assets/diagrams/s4d4-comparison-scope.svg)
+
+圖中的差別提醒你：ztunnel 的用量只是新增元件之一。若需求包含 Day 2 的 HTTP 連線池限制，還得計入 waypoint，不能用 2Mi 當成完整 mesh 的預算。
+
+以下數據來自兩節點、低負載環境的 `kubectl top` 觀測。DaemonSet（表內標 DS）在每個節點各有一份；表中是元件 Pod 的觀測範圍，並非整個叢集加總。
+
+| 配置 | 元件 | CPU | 記憶體 |
 |---|---|---|---|
-| **Cilium mesh** | cilium(agent)DS | 41–280m | ~200Mi |
-| | cilium-envoy DS | 3m | 13Mi(L7 閒置) |
-| | cilium-operator | 1–8m | 27–45Mi |
-| **Istio ambient**(疊在上面) | ztunnel DS | 3–4m | **2Mi** |
-| | istio-cni DS | 2–3m | 17Mi |
-| | istiod | 21m | 41Mi |
+| Cilium | cilium agent DS | 41–280m | 約 200Mi |
+| Cilium | cilium-envoy DS | 3m | 13Mi，L7 閒置 |
+| Cilium | cilium-operator | 1–8m | 27–45Mi |
+| 新增 ambient | ztunnel DS | 3–4m | 2Mi |
+| 新增 ambient | istio-cni DS | 2–3m | 17Mi |
+| 新增 ambient | istiod | 21m | 41Mi |
 
-ztunnel 的記憶體是 **2Mi**——ambient 的資料面比一般印象輕得多(它是 Rust 寫的 L4 proxy)。Cilium agent 的 ~200Mi 要放回脈絡看:它同時是 CNI,L3/L4 資料面全包,這 200Mi 是「你本來就要付的 CNI」,不是 mesh 額外加的。
+Cilium agent 的用量包含網路管理工作，不能全算成 mesh 的額外成本；同樣地，ztunnel 的 2Mi 不能代表 ambient 所有元件。正式容量規劃還需要實際負載下的變化與高峰，這份單次觀測只能提供起始參考。
 
-### 延遲(client→web 跨節點 60 次 `time_total`)
+從維護角度看，採用 ambient 也增加了 `istio-cni`、`ztunnel` 兩個 DaemonSet，以及控制平面 istiod。團隊需要管理共存設定、升級與故障檢查，這些工作不會出現在記憶體表裡。
 
-| | 路徑 | avg | p50 | p95 |
-|---|---|---|---|---|
-| **Cilium** | eBPF L4 + WireGuard | **2.76ms** | 2.62 | 4.37 |
-| **Istio ambient** | HBONE mTLS(疊在 Cilium 上) | 3.54ms | 3.12 | 5.59 |
+## 延遲差 0.8ms，能支持多大的結論？
 
-ambient 疊上去多約 **+0.8ms**。差別在轉送層:HBONE 走使用者空間的 ztunnel,Cilium 的加密走核心 eBPF,少一趟 user-space 進出。這 +0.8ms 是「在 Cilium 上再加 Istio ambient」的增量,不是 Istio 脫離任何 CNI 的絕對值。
+兩組延遲測試使用相同的跨節點 client→web 拓樸，各發出 60 次請求。測量值是 curl 的 **time_total**，包含該請求從開始到完成的用戶端經過時間，不是單一代理函式的執行時間。
 
-### 節點侵入度(每節點裝的 DaemonSet)
+**p50** 是一半樣本不超過的值，**p95** 則是一組樣本中約 95% 不超過的值。以下所有欄位單位都是毫秒：
 
-- **Cilium**:`cilium` + `cilium-envoy`。它擁有 datapath,本身就是 CNI。
-- **Istio ambient**:`istio-cni` + `ztunnel`。istio-cni 鏈上既有的 Cilium(靠 `cni.exclusive=false`),ztunnel 攔截 pod 流量導向 HBONE。等於在既有 CNI 上再疊兩個 DaemonSet。
+| 配置 | 平均 | p50 | p95 |
+|---|---:|---:|---:|
+| Cilium L4 路徑，加上 WireGuard | 2.76 | 2.62 | 4.37 |
+| 相同 Cilium 基底，再加入 Istio HBONE | 3.54 | 3.12 | 5.59 |
 
-## 決策表
+這兩批樣本的平均差為 0.78ms，約 0.8ms。它描述的是這次兩種配置的觀測差異；Istio 組仍包含底層 WireGuard，並非兩種互斥加密方案的比較。
 
-每格標 **實測**(本課量到)/ **查證**(官方文件)/ **推論**(從前兩者推得)。實測格附證據在哪一天。
+這裡沒有多批重複測試、誤差估計或高並行測試，因此不能將 0.8ms 當成固定成本，也不能僅憑它證明差異完全來自使用者空間代理。更不能以這組 L4 路徑數字，宣稱加入 waypoint 後仍有相同結果。
 
-| 維度 | Istio(ambient) | Cilium mesh | 標註 |
-|---|---|---|---|
-| 傳輸加密 | HBONE mTLS,ztunnel 攔截 | WireGuard 透明加密,eBPF | 實測([Day 2](sprint4-day2-istio-ambient.md) / [Day 3](sprint4-day3-cilium-mesh.md) 步驟 2) |
-| 工作負載身分 | SPIFFE + ztunnel,**GA** | SPIFFE/SPIRE,**beta**;本課 SPIRE 未 ready | 實測(Day 2 / [Day 3](sprint4-day3-cilium-mesh.md) 步驟 4);成熟度 查證 |
-| L7 授權(method/path) | waypoint(Envoy) | CNP L7(per-node Envoy) | 實測(Day 2 / [Day 3](sprint4-day3-cilium-mesh.md) 步驟 3) |
-| L7 resilience(斷路/重試/切分) | waypoint + DestinationRule,**成熟** | 低階 `CiliumEnvoyConfig`,官方明示**有限** | 實測(Day 2 斷路 trip);Cilium 侷限 查證 |
-| 資料面記憶體/節點 | ztunnel 2Mi + istio-cni 17Mi | cilium ~200Mi(含 CNI)+ envoy 13Mi | 實測本日 |
-| 控制平面 | istiod 41Mi | cilium-operator 27–45Mi | 實測本日 |
-| 延遲(跨節點) | 3.54ms avg | **2.76ms avg** | 實測本日 |
-| 節點侵入度 | 疊兩個 DS 在既有 CNI 上 | 是 CNI 本身 | 實測本日 |
-| 成熟度 | ambient GA,mTLS 全域一致 | CNI+mesh 同一套、eBPF 可視性強;身分仍 beta | 查證 |
+## 把候選方案放回三種需求
 
-## 三種疊法怎麼選
+### 已經使用 Cilium，只需要跨節點加密與 HTTP 存取規則
 
-Cilium 當 CNI 是本課的固定前提(BYOCNI 上游 Cilium)。在這之上,east-west 有三種疊法:
+Day 3 已提供 WireGuard 與方法／路徑政策的正反例。可以先評估這條配置，並在自己的工作負載重做測試。若需求沒有服務身分驗證，就不要把尚未完成的 SPIRE 測試當成這個需求的必要條件；但若日後新增身分要求，必須重新評估。
 
-- **Cilium + Cilium mesh**:最輕、延遲最低、CNI 與 mesh 同一套、eBPF 可視性(Hubble)。代價是身分綁定的 mutual-auth 仍 beta、L7 resilience 只有低階 `CiliumEnvoyConfig`。**要輕、要 eBPF 觀測、而且 L7 需求止於授權**,選這條。
-- **Cilium + Istio ambient**:Cilium 當 CNI、Istio 當 mesh。ztunnel 極輕、mTLS 與身分是 GA、waypoint 給成熟的 traffic policy。代價是 +0.8ms、多兩個 DaemonSet、istio-cni 要鏈上 Cilium(`cni.exclusive=false`、別開 `bpf.masquerade`、放行 ambient 的 health-probe CIDR)。**要成熟 mTLS/身分,又要斷路/重試/流量切分**,選這條。
-- **Cilium + Istio sidecar**:每個 pod 一個 Envoy,最重、但功能最全、最成熟。**需要 sidecar-only 的能力,或處在漸進遷移期**,才走這條。(本課沒有實裝量這條的資源與延遲,決策表對它的陳述是查證與推論,已標明。)
+### 需要工作負載身分，還需要 HTTP 連線池限制
 
-## 主題:兩軸不對稱,不是誰取代誰
+Day 2 的 Istio ambient 已涵蓋這兩類功能，可作為優先驗證的候選配置。下一步要補上所需的授權政策、正式負載與 waypoint 成本。Cilium 仍提供底層網路，因此要一併維護兩套元件的相容設定。
 
-把整個 Part 1 收成一句:**eBPF(Cilium)把 L3/L4 與傳輸加密做到又輕又快,但成熟的 L7 traffic policy 與 GA 的工作負載身分,Istio 仍領先。** 這兩件事落在不同層,量出來的數字互相印證——
+### 已有 sidecar，正在考慮遷移
 
-- L4 那一軸:Cilium 延遲低 0.8ms、加密在核心、是 CNI 本身不用另外疊。**這一軸 eBPF 贏。**
-- L7 與身分那一軸:Istio 的斷路是成熟的 `DestinationRule`([Day 2](sprint4-day2-istio-ambient.md) 實測到 50 並發壓出斷路)、身分是 GA;Cilium 的斷路等價物是低階 `CiliumEnvoyConfig`、身分還在 beta([Day 3](sprint4-day3-cilium-mesh.md) 的 SPIRE 起不來)。**這一軸 Istio 贏。**
+本課沒有量測 sidecar 的資源與延遲，也沒有完整列出遷移功能差異。不能用上面的表直接決定移除 sidecar。應先盤點目前使用的功能，再依目標版本確認 ambient 是否涵蓋，最後做小範圍遷移驗證。
 
-選型的動作,是先問自己「東西向的需求落在哪一軸」,而不是找一個全面勝出的贏家——因為沒有。
+這三種情境的差別在必要能力與待補證據。先找出不能缺少的功能，再比較完整配置的成本，比從單一數字推導全面選型可靠。
 
-## 帶得走的東西
+## 想一想
 
-- **加密不等於身分。** Istio 的 mTLS 把兩者打包,Cilium 拆成 WireGuard(加密)加 SPIFFE(身分)兩層;比較時要拆開看,不然會把「有 WireGuard」誤當成「有 mTLS 式身分」。
-- **輕重要放回脈絡。** Cilium agent 的 200Mi 是它兼任 CNI 的成本,不是 mesh 的額外開銷;ztunnel 的 2Mi 才是 ambient 疊上去的真實增量。比記憶體數字前先問「這是本來就要付的,還是加上去的」。
-- **延遲差距很小、方向很清楚。** +0.8ms 對多數應用不是問題;它值得記住的不是絕對值,是「使用者空間 proxy vs 核心資料面」這個結構差別會在什麼場景放大。
-- **選型看軸不看牌。** L4 要輕選 Cilium、L7 與身分要成熟選 Istio,兩軸不對稱本身就是決策依據。
+1. 你的服務要用 waypoint 執行 HTTP 政策，能否用「每節點增加 2Mi」估算總成本？還少了哪些元件？
+2. 同事說「Cilium 不支援 HTTP 連線池限制，因為 Day 3 沒有測成功」，這個結論超出了哪一項證據？
+3. 應用有嚴格延遲要求，這 60 次低負載樣本足以決定上線嗎？你會補哪種測試？
 
-## 誠實的差距
+## 小結
 
-- **數字是單次、小負載、2 節點。** 延遲與資源是一次量測、低並發、兩個節點,給的是量級與方向,不是 SLA。高並發、長時間、更多節點下的表現沒有涵蓋。
-- **Cilium 身分綁定是 beta gap。** 決策表「工作負載身分」欄的 Cilium 格,功能面是缺口([Day 3](sprint4-day3-cilium-mesh.md) 步驟 4 的 SPIRE 起不來),此處誠實標明,不當成對等能力。
-- **sidecar 疊法沒有實裝量。** 第三種疊法(Cilium + Istio sidecar)的資源與延遲沒有實測,決策表對它以查證/推論陳述。
-- **Istio 側延遲含 Cilium WireGuard。** 那 +0.8ms 是疊在 Cilium 上量的增量,不是 Istio 獨立於任何 CNI 的絕對值。
+入口、傳輸加密、工作負載身分與 HTTP 政策各有不同的驗證方式。選型時先確認功能是否滿足，再比較同一需求下的完整部署成本；單次資源與延遲數據無法代替容量或可靠性測試。到這裡，流量傳送過程已有保護，但應用執行時仍會處理明文。[Day 5](sprint4-day5-confidential-concepts.md) 將把問題移到執行環境：當宿主機管理者不在信任範圍內，還需要什麼保護？
 
 ## 延伸閱讀
 
-想把兩邊各自的能力邊界看得更清楚,從官方的 mesh 文件入口開始:
+想再深入，可以從這幾份開始：
 
-- **[Istio — Ambient Mesh](https://istio.io/latest/docs/ambient/)** —— ztunnel(L4 節點 proxy)與 waypoint(選配的 L7 proxy)的架構與設定,今天 Istio 側量測走的就是這條路。
-- **[Cilium — Service Mesh](https://docs.cilium.io/en/stable/network/servicemesh/)** —— Cilium 用 eBPF 加 Envoy 做 L7 traffic management、身分與加密的總覽,含它對斷路/流量切分的支援界定。
-
-## 下一步
-
-Part 1 到這裡收尾:north-south 走 Envoy Gateway、east-west 在 Istio 與 Cilium 之間照軸選型——基礎設施接管了傳輸加密與 L7 安全。但這一整套有一個沒被質疑的前提:**節點本身是可信的**。所有加密都在節點的資料面上做、金鑰在節點的記憶體裡、root 進得了節點就看得到明文。[Day 5](sprint4-day5-confidential-concepts.md) 起的 Part 2 換掉這個前提:當節點與雲平台都不該被信任時,怎麼讓祕密只在硬體 TEE 裡解開——這是機密運算要回答的問題。
+- [Istio ambient](https://istio.io/latest/docs/ambient/)：目標版本的功能與部署方式。
+- [Cilium Service Mesh](https://docs.cilium.io/en/stable/network/servicemesh/)：加密、身分與 HTTP 處理的功能範圍。
 
 ---
 
 !!! quote ""
-    Istio 與 Cilium 標誌為 CNCF(Linux Foundation)官方資產,此處作社群教學用途。資源、延遲、抓包數字擷取自本課程實測。
+    Istio 與 Cilium 標誌為 CNCF（Linux Foundation）官方資產，此處作社群教學用途。數據來自本課程實測。

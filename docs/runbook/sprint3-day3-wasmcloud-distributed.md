@@ -2,32 +2,19 @@
 
 ![wasmCloud 官方標誌](../assets/logos/wasmcloud-icon-color.svg){ align=right width="88" }
 
-> [Day 2](sprint3-day2-wasmcloud.md) 證明了 wasmCloud 不碰節點,也量到它把代價換到哪裡。今天要走它的分散式模型——結果第一步就撞牆:**原本要驗的東西,在 2.6.1 上根本沒有對應的機制。** 這一章有一半在講怎麼判定「表達不出來」,以及改驗什麼才算數。
+你照著網路上的 wasmCloud 教學，想讓同一個元件改用另一種儲存方式。教學要你修改 link definition，但 Day 2 裝好的叢集找不到這種物件。接著把設定裡的 `backend` 改掉，API 接受了，程式的行為卻沒有改變。
 
-!!! abstract "你在課程的哪裡"
-    - **Day 2**:wasmCloud 裝起來、跑了一個元件、節點五份 diff 零差異。
-    - **今天**:加第二台節點,走完 wasmCloud 的分散式模型。**原訂驗收改寫過**,理由在步驟 1。
-    - **Day 4**:換 WasmEdge,第二條路線。
+這一章先查版本提供的設定入口，再用能讀寫檔案的 blobby 元件測試授權，最後把 host 分散到兩台節點。讀完後，你能區分能力設定、host 的 Kubernetes 排程和元件的 wasmCloud 排程，也能判斷一個「設定成功」是否真的改變行為。
 
-原訂的驗收是「**同一個元件不換映像,換掉它的能力提供者,行為隨之改變**」。這是 wasmCloud v1 世代最著名的賣點:元件與能力解耦,link definition 把兩邊綁起來,想換 Redis 換成 NATS 就換一個 provider。
+## 開始之前
 
-**在 2.6.1 的 Kubernetes 整合上,這件事沒有任何可設定的入口。** 判定過程本身比結論有用,所以放在第一步。
+沿用 Day 2 的 wasmCloud 2.6.1、`wasmcloud` namespace 和叢集內可執行 curl 的 `curler` Pod。以下 Service 網址要從叢集內呼叫；本機的終端機不能直接解析 `.svc.cluster.local`。後半段會新增 `spot1` 節點池，完成演練後再刪除它。
 
-## 今天要走的路
+原始碼節錄都對應 wasmCloud 2.6.1；帶 `…` 的 console 區塊是觀察結果節錄，不能整段當成 shell 指令執行。需要操作的地方會另列完整指令。
 
-| 步驟 | 做什麼 | 為什麼排在這 |
-|---|---|---|
-| 1 | 查原訂驗收表達不表達得出來 | **判定「這個版本做不到」需要證據,不是試兩下沒成功就下結論** |
-| 2 | 換一個真的會用到能力的元件 | Day 2 的 `hello-world` 只用 HTTP,驗不出能力這一層 |
-| 3 | 驗收 (A):同一映像、只改能力設定 | 改寫後的第一半 |
-| 4 | 加一台 spot 節點 | Day 2 [地雷 2](sprint3-day2-wasmcloud.md#mine-2) 的實際代價 |
-| 5 | 驗收 (B):誰決定 workload 去哪 | 改寫後的第二半 |
+## 步驟 1: 先確認版本提供哪種能力設定
 
-## 步驟 1: 原訂驗收表達不表達得出來
-
-原訂驗收需要三個 v1 世代的概念:**capability provider**(一個獨立、可抽換的能力實作)、**link definition**(把元件與 provider 綁起來的物件)、以及**換掉 provider 而不動元件**。逐項查,三層都要看。
-
-### CRD 這一側:一個都沒有
+舊版教學中的 capability provider 是獨立的能力實作，例如把儲存操作接到 Redis 或 NATS；link definition 則記錄元件使用哪個 provider。先查目前安裝的版本有沒有對應資源：
 
 ```console
 $ kubectl api-resources --api-group=runtime.wasmcloud.dev
@@ -42,7 +29,7 @@ $ kubectl get crd -o yaml | grep -icE "\blink\b|capabilityprovider|\bprovider\b"
 0
 ```
 
-**五個 CRD、零命中。** 能力在 CRD 上的落點只有一個地方,而它長這樣:
+這裡有 Workload、Host 等物件，沒有獨立的 provider 或 link。Day 2 用過的 `hostInterfaces` 才是本版宣告能力的位置。查看其中的 `config`：
 
 ```console
 $ kubectl explain workloaddeployment.spec.template.spec.hostInterfaces.config
@@ -51,11 +38,11 @@ DESCRIPTION:
     <empty>
 ```
 
-**整個能力設定面是一個沒有 schema、沒有說明、沒有驗證的字串對字串 map。** 這件事後面會造成兩次失敗([地雷 2](#mine-2)、[地雷 3](#mine-3))。
+`map[string]string` 只要求鍵和值都是字串，沒有列出允許的鍵。API 接受 `backend: in-memory`，只代表這個欄位的型別正確，還要看 host 的實作是否讀取它。
 
-### 二進位檔這一側:多後端存在,但沒編進去
+### 為什麼原始碼有多個後端，設定卻不生效
 
-原始碼樹裡確實有一整套可抽換的後端:
+2.6.1 的原始碼包含這些實作：
 
 ```text
 crates/wash-runtime/src/plugin/wasi_blobstore/{in_memory,filesystem,nats}.rs
@@ -63,9 +50,7 @@ crates/wash-runtime/src/plugin/wasi_keyvalue/{in_memory,filesystem,nats,redis}.r
 crates/wash-runtime/src/plugin/multiplex.rs
 ```
 
-`multiplex.rs` 連選擇的鑰匙都寫清楚了:`config.backend`,預設 `in-memory`。
-
-但**跑在 Kubernetes 裡的 host 是 `wash host` 這個子指令**,它註冊了哪些:
+`multiplex.rs` 有使用 `config.backend` 選後端的邏輯。然而 Kubernetes 裡啟動的是 `wash host`，它的註冊程式如下：
 
 ```rust
 // crates/wash/src/cli/host.rs(v2.6.1)
@@ -79,9 +64,7 @@ crates/wash-runtime/src/plugin/multiplex.rs
 }
 ```
 
-**每個能力介面各一個實作,全部是 NATS 版。多後端那一整套鎖在一個 cargo feature 後面。**
-
-chart 的 values 自己承認過同型的事——`hostPlugins` 欄位的註解逐字寫著:
+一般路徑註冊的是 NATS 版。下方的 `#[cfg(feature = ...)]` 是 Rust 的編譯開關，只有啟用該 feature 才會加入多後端的程式。另一種擴充入口 `hostPlugins` 也有自己的編譯條件，chart 的註解寫著：
 
 ```yaml
 # Requires a wash image built with the `host-component-plugins` feature
@@ -89,7 +72,9 @@ chart 的 values 自己承認過同型的事——`hostPlugins` 欄位的註解�
 # build fails to start.
 ```
 
-### 綁定粒度這一側:提供者是 host 的啟動參數
+這兩個 feature 是不同的入口，不能只看其中一個就判定另一個也已啟用。本章沒有直接讀取 release 映像的編譯旗標；能確認的是，後面的測試改動 `backend` 沒有切換實際的 NATS 後端。
+
+從 host 的啟動參數，可以看到資料用的 NATS 端點：
 
 ```console
 $ kubectl -n wasmcloud get deploy hostgroup-default -o jsonpath='{…args}'
@@ -101,25 +86,17 @@ $ kubectl -n wasmcloud get deploy hostgroup-default -o jsonpath='{…args}'
    --http-addr=0.0.0.0:80
 ```
 
-**綁定的粒度是 host group,不是元件、也不是某個 link 物件。** 要換提供者,唯一的入口是 chart 的 `runtime.hostGroups[].dataNatsUrl`——也就是**開第二個 host group 指到另一座 NATS**,而不是「把元件的 link 指到另一個 provider」。
+`runtime.hostGroups[].dataNatsUrl` 是 host group 的設定。若要指向另一個 NATS，修改的位置在 host group，不是元件的 link 物件。本章沒有實測第二個 host group 搭配第二座 NATS，因此先不把它當成已驗證的切換程序。
 
-### 裁決
+下圖對照兩種設定方式。先看左邊獨立的 provider，再看右邊 host 啟動時選用的 NATS 連線。
 
-!!! failure "原訂驗收:表達不出來"
-    **「同一個元件不換映像、換掉它的能力提供者」在 wasmCloud 2.6.1 的 Kubernetes 整合上沒有可設定的入口。** 不是操作方式不對:CRD 沒有對應物件、host 二進位檔裡每個介面只編進一個實作、多後端在 cargo feature 後面、提供者端點是 host 的啟動參數。
+![v1 透過 link definition 連結元件與 provider；本章的 wasmCloud 2.6.1 host 使用內建的 NATS 實作，由 host 啟動參數指定資料端點。](../assets/diagrams/s3d3-provider-binding.svg)
 
-    這一顆記成[地雷 1](#mine-1)。
+差別在設定生效的位置。接下來保留同一個 host 與元件映像，只修改它可以使用哪些 bucket，先驗證本版確實支援的授權方式。
 
-**改成驗兩件它實際支援的事**,兩半都能給出是/否:
+## 步驟 2: 讓 blobby 寫入檔案
 
-- **(A)** 同一個元件映像不換,**只改 `hostInterfaces[].config`**,行為隨之改變。
-- **(B)** 跨 host 排程**由 operator 決定而非 kube-scheduler**,且能力提供者**跨 host、跨節點共享**。
-
-## 步驟 2: 換一個會用到能力的元件,以及第一個 500
-
-Day 2 的 `hello-world` 只用 `wasi:http`。改用 **blobby**——官方 examples 裡的 `wasi:blobstore` CRUD 檔案伺服器,是 2.6.1 有發佈成 OCI artifact 的四個元件之一(另三個是 `hello-world`、`qrcode`、`oci-registry`)。
-
-它的 artifact 一樣是單層 `application/wasm`,290 KiB。world 只 import 一個東西:
+blobby 是官方的檔案服務範例。它接收 HTTP 請求，透過 `wasi:blobstore` 介面讀寫資料；實際的儲存由 host 提供。下面是介面宣告的節錄，只用來看元件要求哪些能力，不需要建立或編譯檔案。WIT 是描述 Wasm 元件介面的語言；這裡的 `world` 列出元件與外部的介面，`import` 表示它需要宿主提供 `wasi:blobstore`：
 
 ```wit
 world blobby {
@@ -127,7 +104,7 @@ world blobby {
 }
 ```
 
-第一版 manifest 照原始碼裡 multiplex 的寫法給 `backend: in-memory`:
+建立 `blobby.yaml`。這份設定先放入 `backend: in-memory`，用來觀察設定被接受、實際後端卻沒有改變的情況：
 
 ```bash
 cat > blobby.yaml <<'EOF'
@@ -156,7 +133,35 @@ spec:
 EOF
 ```
 
-物件全綠、EndpointSlice 有位址。呼叫下去:
+還要建立 Service，讓 operator 能替它維護 EndpointSlice。這裡沒有 selector，位址由 wasmCloud operator 管理：
+
+```bash
+cat > blobby-service.yaml <<'YAML'
+apiVersion: v1
+kind: Service
+metadata:
+  name: blobby
+  namespace: wasmcloud
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      protocol: TCP
+YAML
+kubectl apply -f blobby-service.yaml
+kubectl apply -f blobby.yaml
+```
+
+先查 WorkloadDeployment 與 EndpointSlice。要看到目前設定產生的 Workload 已就緒，EndpointSlice 的位址也對應到目前 host，才能從 `curler` 發出請求。`get` 只列出查詢當下的狀態；更新尚未完成時，重查狀態再繼續：
+
+```bash
+kubectl -n wasmcloud get workloaddeployment blobby
+kubectl -n wasmcloud get endpointslice -l kubernetes.io/service-name=blobby
+kubectl -n wasmcloud exec curler -- curl -sS -D- -X POST --data-binary 'day3' http://blobby.wasmcloud.svc.cluster.local/day3.txt
+```
+
+對應的請求結果如下。HTTP 已經有回應，但寫入失敗：
 
 ```console
 $ curl -sS -D- -X POST --data-binary 'day3' http://blobby.wasmcloud.svc.cluster.local/day3.txt
@@ -164,14 +169,14 @@ HTTP/1.1 500 Internal Server Error
 content-length: 0
 ```
 
-**又是一個零位元組的錯誤,而 `kubectl` 那一側全部正常**——形狀跟 Day 2 [地雷 4](sprint3-day2-wasmcloud.md#mine-4) 一樣,但這次是 500 不是 404。線索一樣只在 host log:
+host 日誌留下了拒絕原因：
 
 ```console
 ERROR handle_http_request{http.method=POST http.uri=/day3.txt}:
       failed to invoke component err=ErrorCode::InternalError(Some("unauthorized"))
 ```
 
-追查改從原始碼下手,把那個字串拿去 grep:
+在 Day 2 取得的 wasmCloud v2.6.1 原始碼目錄搜尋 `unauthorized`，命中的是 NATS 版 blobstore，而不是 manifest 中指定的 in-memory：
 
 ```console
 $ grep -rn '"unauthorized"' crates/
@@ -181,9 +186,7 @@ crates/wash-runtime/src/plugin/wasi_blobstore/nats.rs:233
 crates/wash-runtime/src/plugin/wasi_blobstore/nats.rs:254
 ```
 
-**四處全在 NATS 版 blobstore。** 這本身就是一個確認:**實際被載入的是 NATS 那一個,不是 manifest 裡設定的 in-memory。**
-
-根因在同一個檔案:
+以下是同一份程式碼的授權判斷。先看 `buckets` 沒設時得到的空清單，再看儲存分組的名稱是否在清單裡。程式中的 `container_name` 指 blobstore 的資料容器，與 Kubernetes 容器無關：
 
 ```rust
 let buckets = match interface.config.get("buckets") {
@@ -196,13 +199,32 @@ if is_write && data.read_only { return None }
 None                                                          // 其餘一律拒絕
 ```
 
-**`config.buckets` 是一份 allow-list,預設空的,也就是預設全部拒絕。** blobby 開的 container 叫 `blobby`,所以要寫 `buckets: blobby`。
+bucket 是儲存物件的分組，這份清單列出元件可以使用的分組名稱。blobby 使用的名稱是 `blobby`，因此需要 `buckets: blobby`。沒有設定時，host 不允許元件存取任何 bucket。
 
-**這個鍵在 CRD 裡沒有、在 chart values 裡沒有、在 blobby 的 README 裡也沒有**(README 只說 `wash dev` 會自動接上)。**唯一的來源是 host 的原始碼。** 記成[地雷 3](#mine-3)。
+下圖把請求經過的位置畫出來。Kubernetes 能確認 Service 和 host Pod 存在；是否允許讀寫 bucket，則在 host 裡決定。
 
-## 步驟 3: 驗收 (A)——同一個映像,只改能力設定 {#gate-a}
+![請求經 Service 到達 host 裡的 blobby；NATS blobstore 檢查 buckets 清單，未授權時回 unauthorized，HTTP 回應成為 500。](../assets/diagrams/s3d3-request-path.svg)
 
-四個狀態,`image` 全程不變:
+所以遇到這個 500，先看 host 日誌，再查能力設定。Day 2 的虛擬主機比對失敗則回 404，兩者不能只憑「Pod 都是 Running」就判為服務正常。
+
+## 步驟 3: 只改授權，觀察行為 {#gate-a}
+
+把 `blobby.yaml` 裡 blobstore 的 `config: { backend: in-memory }` 改成 `config: { buckets: blobby }`，重新套用。`image`、HTTP 設定與 Service 都保持不變。確認新 Workload 已就緒、舊版本已移除，且 EndpointSlice 指向目前 host 後，建立一次 `/day3.txt`，並讀回內容：
+
+```bash
+kubectl apply -f blobby.yaml
+kubectl -n wasmcloud exec curler -- curl -sS -D- -X POST --data-binary 'day3-nats-jetstream' http://blobby.wasmcloud.svc.cluster.local/day3.txt
+kubectl -n wasmcloud exec curler -- curl -sS -D- http://blobby.wasmcloud.svc.cluster.local/day3.txt
+```
+
+接著把 bucket 名稱改為 `some-other-bucket`，套用後重試；最後再改回 `blobby`。每次都先確認新設定的 Workload 已就緒、舊版本已移除，再執行下面兩個請求。讀取的是剛才建立的 `/day3.txt`，寫入測試則使用另一個 `/probe.txt`，避免重新寫入掩蓋了舊資料是否還在：
+
+```bash
+kubectl -n wasmcloud exec curler -- curl -sS -D- http://blobby.wasmcloud.svc.cluster.local/day3.txt
+kubectl -n wasmcloud exec curler -- curl -sS -D- -X POST --data-binary 'probe' http://blobby.wasmcloud.svc.cluster.local/probe.txt
+```
+
+下面的四種狀態包含步驟 2 的未授權結果。最後恢復授權時，要先讀到舊檔的原始內容，才能判斷撤權沒有刪除資料。以下是實測摘要，`PUT` 是原紀錄對寫入測試的標記；重播腳本實際使用 HTTP POST：
 
 ```console
 === 狀態 1:buckets 未設
@@ -226,32 +248,22 @@ None                                                          // 其餘一律拒
   PUT /probe.txt -> 201      GET /day3.txt -> 200  body=day3-nats-jetstream
 ```
 
-**四個狀態的映像完全相同,行為在 500 與 200 之間來回四次。過。**
+映像相同，授權名稱改變後，寫入與讀取也跟著失敗或恢復。最後一個狀態還讀得到先前的內容，表示撤銷授權沒有刪除資料。資料存放在 NATS 的 JetStream object store，也就是它提供的物件儲存，而不是 blobby 元件的記憶體。
 
-狀態 4 額外證明一件事:**資料在能力被撤銷、又重新授權之後還在**——它不在元件裡、也不在 host 行程裡,在 NATS 的 JetStream object store 上。
+這還不能證明 NATS 自己消失後資料也能保留。內建 NATS 的磁碟使用 `emptyDir`，本章只測 host 與授權改變，沒有測 NATS Pod 被刪除後的恢復。
 
-### 跟 shim 路線的對照
+## 步驟 4: 把 host 放到不同節點
 
-| | RuntimeClass + shim(Day 1／6) | wasmCloud `hostInterfaces`(今天) |
-|---|---|---|
-| 「這個工作負載能做什麼」寫在哪 | Pod spec 的 `securityContext` / `capabilities` / PSA,由 kernel 執行 | `hostInterfaces[].config`,由 host 行程執行 |
-| 預設值 | 容器預設**有**一組能力,要靠設定收斂 | **預設全部沒有**:沒列進 `hostInterfaces` 的介面連不到,列了但沒授權的資源一律拒絕 |
-| 拒絕的形狀 | `Permission denied`,syscall 層 | 元件收到字串 `"unauthorized"`,通常變成 HTTP 500 |
-| 誰能驗證設定寫得對 | API server 的 schema + admission | **沒有人**——`config` 是 `map[string]string`,寫錯不會被擋 |
-
-**「預設無能力」跟 [Day 0](sprint3-day0-wasm-concepts.md) 講的 wasm 沙箱模型是同一件事的延伸**:瀏覽器不敢讓網頁碰檔案系統,wasmCloud 也不讓元件碰它沒被明確授權的 bucket。差別在於**這一層的授權表達完全沒有型別**。
-
-## 步驟 4: 加一台 spot 節點,以及 Day 2 那顆地雷的實際代價
+新增節點之前，要先區分「有空間放 Pod」與「Pod 會分散」兩件事。spot 節點可能被雲端供應商回收，適合用來觀察節點消失時的恢復。節點上的 taint 會排除不符合條件的 Pod；Pod 要設定對應的 toleration 才能排上去，但這不保證一定排到該節點。以下建立帶有 spot taint 的節點池；把資源群組與叢集名稱換成自己的值：
 
 ```bash
 az aks nodepool add -g <resource-group> --cluster-name <cluster> -n spot1 \
   --node-count 1 --node-vm-size Standard_D2as_v5 \
   --priority Spot --eviction-policy Delete --spot-max-price -1 \
   --node-taints kubernetes.azure.com/scalesetpriority=spot:NoSchedule
-                                            實測 1 分 39 秒
 ```
 
-### 加了節點,host 一顆都沒過去
+新增後，既有 host Pod 仍在原節點：
 
 ```console
 $ kubectl -n wasmcloud get pods -o custom-columns='POD:.metadata.name,NODE:.spec.nodeName'
@@ -262,27 +274,29 @@ nats-…                <system-node>
 runtime-operator-…    <system-node>
 ```
 
-**三顆 host 一顆都沒動**,而且兩件事同時成立:既有 pod 不會因為多了一台機器就被重新排程(Kubernetes 從來不做這件事),而就算重建,taint 也擋著。
+節點的 CPU request 分布是：
 
 ```console
 <system-node>    cpu  1877m (98%)
 <spot-node>      cpu   335m (17%)      ← 只有 kube-system 的 DaemonSet
 ```
 
-**「加一台節點來鬆綁 98%」的直覺在這裡失效**:那 98% 是既有 pod 的 request,新節點對它一點影響都沒有。
+既有 Pod 不會因為加入節點就自動遷移；新 Pod 還必須容忍 spot taint 才能排進去。先把 host 擴到 4 顆，觀察新增 Pod 的排程結果：
 
-把 host group 擴到 4,逼出可見的錯誤訊息:
+```bash
+kubectl -n wasmcloud scale deploy/hostgroup-default --replicas=4
+```
 
 ```console
 Warning  FailedScheduling  default-scheduler
 0/2 nodes are available: 1 Insufficient cpu, 1 node(s) had untolerated taint(s).
 ```
 
-**一行訊息裡同時看得到 Day 2 的兩顆地雷**:隨需節點 `Insufficient cpu`([地雷 1](sprint3-day2-wasmcloud.md#mine-1) 的 overlay),spot 節點 `untolerated taint`([地雷 2](sprint3-day2-wasmcloud.md#mine-2) 的缺欄位)。**訊息沒有說是哪一個 taint**,要自己去 `describe node`。
+一台節點沒有足夠 CPU，另一台有 Pod 尚未容忍的 taint。這裡刻意使用 `kubectl scale` 重現觀察，稍後會看到它與 Helm 管理同一欄位時的衝突。
 
-### 先確認一次 chart 到底有沒有那些欄位
+### chart 沒有提供排程欄位時
 
-Day 2 grep 的是 repo 裡的原始碼。今天改 grep **已發佈的 chart** 與**已安裝的 rendered manifest**:
+先確認 chart 的 values 與已產生的 manifest。以下保留的是查詢摘要；`…` 代表省略的參數：
 
 ```console
 $ helm show values oci://ghcr.io/wasmcloud/charts/runtime-operator --version 2.6.1 | wc -l
@@ -296,14 +310,30 @@ $ helm get manifest wasmcloud -n wasmcloud | grep -cE "toleration|affinity|…"
 0
 ```
 
-**412 行 values、924 行 rendered manifest,五個關鍵字全部零命中。** 而且硬給也不會有人告訴你——`--set runtime.tolerations[0].key=…` helm 會收下,template 不用它,不警告。
+412 行 values 與 924 行 manifest 都有內容，對指定排程欄位的搜尋才有意義。如果取資料的指令已失敗，`grep -c` 對空輸入也可能得到 0，不能把它解讀成「不存在」。
 
-!!! warning "`grep -c … == 0` 不能單獨當證據"
-    這一組 grep 第一次跑時忘了給 helm `KUBECONFIG`,指令其實失敗了,而 **`grep -c` 對空輸入照樣回 `0`**——看起來像「乾淨」,實際上是「沒查到」。
+把下面內容存成 `toleration-patch.json`，它允許 host 排到帶有 spot taint 的節點：
 
-    上面的數字是補上 `wc -l` 確認真的取到內容之後重跑的。**任何拿「零命中」當證據的地方,都要同時證明輸入非空。**
+```json
+{
+  "spec": {
+    "template": {
+      "spec": {
+        "tolerations": [
+          {
+            "key": "kubernetes.azure.com/scalesetpriority",
+            "operator": "Equal",
+            "value": "spot",
+            "effect": "NoSchedule"
+          }
+        ]
+      }
+    }
+  }
+}
+```
 
-### 補上 toleration 之後,四顆 host 全搬到 spot 節點
+套用 patch 後，等新的 host Pod 都 Ready、舊 Pod 已終止，再查 `NODE` 欄位。以下是更新完成後的分布：
 
 ```console
 $ kubectl -n wasmcloud patch deploy/hostgroup-default --type=strategic \
@@ -315,24 +345,59 @@ hostgroup-default-…   <spot-node>
 hostgroup-default-…   <spot-node>
 ```
 
-**四顆全部搬過去。** 節點佔用翻轉:隨需 98% → 59%,spot 17% → 70%。
+四顆 host 都在 spot 節點。toleration 只允許 Pod 使用該節點，沒有要求它們分散；這次滾動更新時，新增 Pod 可以使用的空間主要在 spot 節點。
 
-原因不難理解:滾動更新要先建新 pod,隨需節點只剩 23m 排不下,spot 節點空著,`LeastAllocated` 就全塞過去了。
+若要兩台節點各有一顆 host，還要加上 `topologySpreadConstraints`。它限制節點之間符合標籤的 Pod 數量差距；這裡 `maxSkew: 1` 允許差一顆。把下面內容存成 `spread-patch.json`：
 
-**但結果是整個 wasm 資料平面落在一台隨時可能被回收的機器上,而這是「為了讓 host 能用到 spot 節點」這個動作的直接後果。** 記成[地雷 5](#mine-5)。
+```json
+{
+  "spec": {
+    "template": {
+      "spec": {
+        "topologySpreadConstraints": [
+          {
+            "maxSkew": 1,
+            "topologyKey": "kubernetes.io/hostname",
+            "whenUnsatisfiable": "DoNotSchedule",
+            "labelSelector": {
+              "matchLabels": {
+                "wasmcloud.com/hostgroup": "default",
+                "wasmcloud.com/name": "hostgroup"
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
+```
 
-要一節點一顆,得再 patch 第二個 chart 表達不出來的欄位(`topologySpreadConstraints`,maxSkew=1 over `kubernetes.io/hostname`):
+```bash
+kubectl -n wasmcloud scale deploy/hostgroup-default --replicas=2
+kubectl -n wasmcloud patch deploy/hostgroup-default --type=strategic --patch-file spread-patch.json
+```
+
+同樣先確認新的兩顆 host Pod 都 Ready、舊 Pod 已終止，再查節點分布。這組測試更新完成後，兩顆 host 分別位於兩台節點：
 
 ```console
 hostgroup-default-…   10.244.1.93    <spot-node>
 hostgroup-default-…   10.244.0.117   <system-node>
 ```
 
-**兩顆 host、兩台節點、一台一顆。代價:兩個 `kubectl patch`,兩個 chart 沒有入口的欄位。**
+這兩個 patch 都是 chart values 之外的設定，應與部署設定一起保存，之後才能重建相同的排程行為。
 
-## 步驟 5: 驗收 (B)——誰決定 workload 去哪 {#gate-b}
+## 步驟 5: 元件由誰分配到 host {#gate-b}
 
-把 blobby 從 1 個 replica 擴到 4:
+host Pod 已經分散，現在把 blobby 的元件副本從 1 個增加為 4 個：
+
+```bash
+kubectl -n wasmcloud patch workloaddeployment blobby --type=merge -p '{"spec":{"replicas":4}}'
+kubectl -n wasmcloud get workload -o custom-columns='WORKLOAD:.metadata.name,HOSTID:.status.hostId'
+kubectl get hosts.runtime.wasmcloud.dev -A -o custom-columns='HOST:.metadata.name,HOSTID:.hostId,PODIP:.hostname,WORKLOADS:.status.workloadCount'
+```
+
+等四個新設定的 blobby Workload 都 Ready、舊版本已移除，且 EndpointSlice 指到目前 host，再比較分布。觀察重點是元件與 Pod 數量的變化，不是你的 Pod 總數是否恰好等於 5。測試用 Pod 的數量也會影響總數：
 
 ```console
 === 擴之前:命名空間 pod 總數
@@ -352,11 +417,26 @@ spiritual-death-0162    10.244.0.117   WORKLOADS 2      ← 在隨需節點
 5
 ```
 
-**四個 workload、兩顆 host、兩台節點,而命名空間的 pod 數量從頭到尾是 5。**
+元件增加了，host Pod 沒有跟著一對一增加。Kubernetes scheduler 決定 host Pod 在哪台節點，wasmCloud 則決定元件在哪顆 host。下圖分開畫出這兩個決定。
 
-kube-scheduler 對這四個 workload 一無所知——它們沒有經過 API server 的 Pod 資源、沒有 `nodeName`、沒有 QoS class。**決定它們去哪的是 operator**,判斷依據寫在 `Host` 物件的 `status` 裡,全部經 NATS 回報。
+![Kubernetes scheduler 把 host Pod 排到節點；wasmCloud 把 blobby workload 分配到 host，兩顆 host 共用同一座 NATS。](../assets/diagrams/s3d3-two-schedulers.svg)
 
-直接打每一顆 host pod 的 IP,再做一次方向明確的寫讀分離:
+圖上的四個 blobby 不是四顆 Kubernetes Pod。查元件分布時要看 Workload 與 Host 物件，不能只查 `kubectl get pods`。`Host.status` 提供了工作負載數等資訊，但本章沒有從原始碼確認排程器實際採用哪些欄位，不據此推論它的演算法。
+
+直接呼叫某顆 host 時，還要保留 `Host: blobby.wasmcloud.svc.cluster.local` 標頭，才會符合 Day 2 的虛擬主機設定。先查出兩顆 host 的 Pod IP 與所在節點：
+
+```bash
+kubectl -n wasmcloud get pod -l wasmcloud.com/name=hostgroup -o custom-columns='HOSTPOD:.metadata.name,IP:.status.podIP,NODE:.spec.nodeName'
+```
+
+把 `<spot-host-ip>` 換成位於 `spot1` 節點池的 host Pod IP，`<system-host-ip>` 換成另一台節點上的 host Pod IP。由 spot host 寫入 `/gateb.txt`，再從 system host 讀取：
+
+```bash
+kubectl -n wasmcloud exec curler -- curl -sS -m 10 -D- -X POST -H 'Host: blobby.wasmcloud.svc.cluster.local' -H 'Content-Type: text/plain' --data-binary 'written-via-spot-node-host' http://<spot-host-ip>/gateb.txt
+kubectl -n wasmcloud exec curler -- curl -sS -m 10 -D- -H 'Host: blobby.wasmcloud.svc.cluster.local' http://<system-host-ip>/gateb.txt
+```
+
+以下是跨 host 讀寫的實測摘要：
 
 ```console
   GET /day3.txt @ 10.244.1.93  (spot)   -> 200  body=day3-nats-jetstream
@@ -366,11 +446,31 @@ kube-scheduler 對這四個 workload 一無所知——它們沒有經過 API se
   GET /gateb.txt @ system host -> 200  body=written-via-spot-node-host
 ```
 
-**在 spot 節點的 host 上寫,在隨需節點的 host 上讀得到。過。** 能力提供者(NATS JetStream object store)對兩顆 host 是同一個。
+兩邊讀到同一筆資料，符合兩顆 host 使用相同 NATS 儲存的設定。這個測試沒有模擬 NATS 故障。
 
-### 排程是一次性的,不會重新平衡
+## 步驟 6: Helm 更新為什麼與手動擴縮衝突
 
-同一個實驗跑兩次分佈不一樣:一次 3:1,一次 2:2。而擴完之後再加第三顆 host:
+前面用 `kubectl scale` 改過 host Deployment。使用本課的 Helm 4.2.2 與同一版 chart 更新時，server-side apply 回報欄位衝突：
+
+```bash
+helm upgrade wasmcloud oci://ghcr.io/wasmcloud/charts/runtime-operator   --version 2.6.1 -n wasmcloud --reuse-values
+```
+
+```console
+Error: UPGRADE FAILED: conflict occurred while applying object wasmcloud/hostgroup-default
+  Apply failed with 1 conflict:
+  conflict with "kubectl" with subresource "scale" using apps/v1: .spec.replicas
+```
+
+server-side apply 會記錄哪些管理者在管理哪些欄位，這個管理者稱為 field manager。錯誤訊息已指出衝突的是 `.spec.replicas`，因為 `kubectl scale` 與 Helm 都在管理它。
+
+在確認 chart 中的 replicas 就是你要保留的值之後，本課用 `--force-conflicts` 將衝突欄位交回 Helm：
+
+```bash
+helm upgrade wasmcloud oci://ghcr.io/wasmcloud/charts/runtime-operator   --version 2.6.1 -n wasmcloud --reuse-values --force-conflicts
+```
+
+實測中，replicas 回到 chart 的 3，新增的 host 沒有立刻分到既有元件：
 
 ```console
 $ kubectl get hosts.runtime.wasmcloud.dev -A
@@ -379,11 +479,19 @@ longing-trail-7203       10.244.1.93    WL 2
 spiritual-death-0162     10.244.0.117   WL 3
 ```
 
-**新加入的 host 不會分到既有的 workload。** wasmCloud 沒有重新平衡;跟 Kubernetes 一樣,排程是一次性的決定。
+這次觀察沒有出現自動重新平衡，不能把增加 host 當成既有 workload 一定會重新分散的保證。後續擴縮應從 Helm values 的 `runtime.hostGroups[].replicas` 管理，避免反覆讓兩個工具修改同一欄位。
 
-### 把承載一半 workload 的節點整個刪掉
+另外兩個 patch 欄位仍保留，因為 chart 沒有宣告它們。這是本次 Helm 版本與 chart 更新的結果，不代表任何 chart 升級都會保留外部修改；升級前仍要檢查新範本是否開始管理這些欄位。
 
-刪除 spot 節點池正好是驗證的機會——那台機器上有 2 顆 host:
+## 步驟 7: 刪除 spot 節點池後確認恢復
+
+完成跨節點測試後，刪掉本章建立的 `spot1` 節點池。執行前確認該節點池只承載這次演練的工作負載：
+
+```bash
+az aks nodepool delete -g <resource-group> --cluster-name <cluster> -n spot1
+```
+
+以下保留原測試的刪除與恢復摘要：
 
 ```console
 $ az aks nodepool delete …                          實測 36 秒
@@ -396,95 +504,33 @@ $ curl http://blobby.wasmcloud.svc.cluster.local/gateb.txt
 200  body=written-via-spot-node-host      ← 從已經不存在的節點上寫進去的那一筆
 ```
 
-**兩層復原各自成立**:host pod 是普通 Deployment,節點消失就重建(Kubernetes 做的);workload 跟著新的 host 重新排程,資料因為在 NATS 上而沒有跟著消失(wasmCloud 做的)。
+host Pod 由 Deployment 補回，元件重新分配到可用 host；先前寫入的資料也仍能讀取。NATS 留在另一台節點上，所以這裡驗證的是 host 所在節點被移除後的恢復，並未驗證儲存服務同時故障。
 
-**但耐久性的邊界要講清楚**:chart 內建的那顆 NATS 用的是 **emptyDir**,而它一直跑在隨需節點上。**今天證明的是「資料撐得過 host 消失」,不是「撐得過 NATS pod 消失」。**
+## 疑難排解
 
-## 誠實的差距
+### 找不到舊教學中的 provider 或 link definition {#mine-1}
 
-- **「換掉能力提供者」完全沒有正面實測。** 判定它表達不出來,靠的是 CRD 零命中、原始碼的 `with_plugin` 清單、以及一次反證。**沒有做的是**:開第二個 host group 指到第二座 NATS。那是這個版本上唯一真能換提供者的路徑,今天只有讀 values 得到的推論。
-- **多後端有沒有被編進 release 映像,沒有直接驗證。** 證據是原始碼的 `#[cfg(feature = …)]` 加上 `backend` 鍵無效果。沒做的是在 host pod 裡確認 feature flag 狀態。「設了沒反應」也可能是別的原因,兩者結論相同但推理強度不同。
-- **NATS 掛掉資料會怎樣,沒有測。** 內建 NATS 用 emptyDir,理論上 pod 一重建資料就沒了,**但這個推論沒有實測**——而它決定了「wasmCloud 的 `wasi:blobstore` 算不算持久化儲存」這個判斷。
-- **operator 的排程依據只有旁證。** 同一實驗兩次跑出 3:1 與 2:2,而 `Host.status` 有 `workloadCount` 與 `systemCPUUsage` 兩個看起來像依據的欄位。**沒有讀碼確認。**
-- **`Host.status.systemMemoryFree` 的行為看不懂**:沒有 workload 的新 host 回報約 5 GB,兩顆有 workload 的都回報 `0`。沒有追。
-- **啟動時間只有兩筆非控制條件下的數字**:首次拉取到 workload 啟動 962 ms(含 OCI 拉取),同一顆 host 上第二個 replica 是 586 ms(快取命中)。**各只跑一次、沒有對照組,不作任何比較宣稱。** Day 5 才是量這個的日子。
-- **記憶體同樣只有一個快照**,而且元件跟 Day 2 不同(blobby 290 KiB vs `hello-world` 219 KiB),**不能跟 Day 2 的數字比**。
-- **Day 2 留下的 `hello-world` 全程沒有再驗**,只確認 `READY=True`。今天所有 HTTP 驗證都打 blobby。
+先對照 wasmCloud 的世代與版本。本章 2.6.1 的 Kubernetes 整合使用 `hostInterfaces`，不能直接套用 v1 的 link 操作；設定入口與限制見步驟 1。
 
-## 驗收 checkpoint
+### 能力設定套用成功，行為卻沒有改變 {#mine-2}
 
-| | 判定 | 支撐證據 |
-|---|---|---|
-| **原訂驗收**:換掉能力提供者 | **已改寫** | 五個 CRD 對 `link`/`provider`/`capability` 零命中;`wash host` 每個介面只註冊一個 NATS 實作,多後端在 cargo feature 後面;提供者端點是 host 的 `--data-nats-url` 啟動參數 |
-| **(A)** 同一映像、只改能力設定,行為改變 | **過** | 四個狀態映像完全相同,`PUT` 在 500／201／500／201 之間切換;狀態 4 讀回狀態 2 寫入的資料 |
-| **(B)** 排程由 operator 決定、提供者跨節點共享 | **過** | workload 1→4,命名空間 pod 數恆為 5;四個 workload 落在兩顆 host(分屬兩台節點);spot 節點寫入、隨需節點讀得到 |
-| 節點仍然乾淨(**兩台都比**) | **過** | 兩台節點的 `config.toml`、config dump、`/usr/bin` 清單各三份 diff 全部 `exit=0` |
+`config` 是字串 map，API 不會逐一驗證設定鍵的意義。實測加入 `backend: filesystem` 與 `root: /tmp/blobby` 後仍使用 NATS。應查看對應版本 plugin 讀取的鍵，並用實際讀寫確認；本章有效的授權鍵是 `buckets`。
 
-!!! note "差異出現時,先確認是不是取樣指令本身變了"
-    `/usr/bin` 清單第一次比出差異,原因是 grep 樣式跟 Day 1 不同(`runc` 會順便命中 `runcon`、`truncate`),欄位寬度也因為命中數不同而變。改成錨定完整路徑再正規化空白之後才是真正的零差異。
+### Workload 就緒，檔案寫入仍回 500 {#mine-3}
 
-## 地雷記錄
+先查 host 日誌。如果是 `unauthorized`，檢查 `buckets` 是否包含元件要使用的名稱。步驟 2、3 示範了從拒絕到重新授權的過程。若是 404，則先回到 Day 2 的[虛擬主機比對](sprint3-day2-wasmcloud.md#mine-4)。
 
-### 地雷 1:2.6.1 的 Kubernetes 整合沒有可抽換的 capability provider {#mine-1}
+### 手動擴縮後，Helm 更新回報 replicas 衝突 {#mine-4}
 
-**症狀**:照 v1 世代的教學找 link definition 或 capability provider 的 CRD,找不到;改設 `config.backend: in-memory`(原始碼裡確實有這個選擇鍵),設了完全沒有效果。
+步驟 6 的衝突發生在 field manager 管理同一欄位。`--force` 不適用於這次的 server-side apply；`--take-ownership` 處理的是 Helm 的資源歸屬，沒有解決這個欄位衝突。先確認要採用的 replicas 值，再使用該 Helm 版本支援的 `--force-conflicts`。失敗的更新也會留在 release history，確認狀態時要看最後一次是否成功。
 
-**根因**三層一起:**CRD 層**五個 CRD grep `link`/`provider`/`capability` 零命中;**二進位檔層**`wash host` 每個能力介面只註冊一個 NATS 實作,多後端(`with_multiplexed_plugins()`)鎖在 `#[cfg(feature = "wasm_component_model_implements")]` 後面;**綁定粒度層**提供者端點是 host 的 `--data-nats-url` 啟動參數,只能在 `runtime.hostGroups[].dataNatsUrl` 覆寫——**粒度是 host group,不是元件**。
+### 補上 toleration 後，host 全排到 spot 節點 {#mine-5}
 
-**判斷準則**:**「這個版本做不到」需要三層證據,不是試兩下沒成功就下結論。** 查 CRD 表面、查實際載入的實作、查綁定粒度——三層都指向同一個答案才算數。
+toleration 只解決能不能排入節點，分散需求要另外設定。步驟 4 用 `topologySpreadConstraints` 限制分布；不要只加 toleration 就以為已經分散。
 
-### 地雷 2:`config` 是沒有 schema 的 map,寫錯的鍵靜默忽略 {#mine-2}
+### 設定 read_only 之後，寫入仍然成功 {#mine-6}
 
-**症狀**:`config: {backend: filesystem, root: /tmp/blobby}` 套用成功、`READY=True`、沒有任何 Event 或警告,而資料照樣進出 NATS。
-
-**根因**:`kubectl explain …hostInterfaces.config` 的 `DESCRIPTION` 是 `<empty>`,型別是 `map[string]string`——**API server 對這個 map 的內容一無所知**,operator 不驗,host 端的 plugin 只 `config.get("自己認識的鍵")`。**能寫進去不代表有人會讀。**
-
-**追查順序**:**唯一可靠的鍵清單來源是 host 原始碼**(`crates/wash-runtime/src/plugin/<介面>/`,找 `config.get(…)`)。實務上先用「改一個鍵、看行為變不變」二分:今天 `backend`/`root` 沒反應、`buckets` 有反應,就分得出哪些是真的。
-
-### 地雷 3:blobstore 預設全部拒絕,而拒絕長成一個 HTTP 500 {#mine-3}
-
-**症狀**:三層 Workload 物件全綠、EndpointSlice 有位址,而 curl 得到 `500` + `content-length: 0`。
-
-**根因**:`config.buckets` 是 allow-list,**沒設就是空的,也就是預設全部拒絕**。blobby 開的 container 叫 `blobby`,所以要 `buckets: blobby`。**這個鍵在 CRD、chart values、blobby 的 README 裡都查不到**——README 只寫 `wash dev` 會自動接上,那是本機開發路徑。
-
-**追查順序**:host pod log 找 `err=ErrorCode::InternalError(Some("unauthorized"))` → 把字串 grep 原始碼 → 找到出自哪一個 plugin(**順帶確認實際被載入的是哪一個實作**)→ 讀該 plugin 的 `on_workload_bind` 拿到鍵名。
-
-**跟 Day 2 [地雷 4](sprint3-day2-wasmcloud.md#mine-4) 是同一種情況:wasmCloud 的錯誤只出現在 host pod 的 log,`kubectl` 那一側永遠是綠的。** 差別是那一顆給 404(虛擬主機比對失敗),這一顆給 500(能力授權失敗)——**兩種代碼分得開,值得記成反射動作。**
-
-### 地雷 4:`kubectl scale` 過的 Deployment 會讓下一次 `helm upgrade` 直接失敗 {#mine-4}
-
-**症狀**:
-
-```console
-Error: UPGRADE FAILED: conflict occurred while applying object wasmcloud/hostgroup-default
-  Apply failed with 1 conflict:
-  conflict with "kubectl" with subresource "scale" using apps/v1: .spec.replicas
-```
-
-**根因**:chart 走 server-side apply,而 `kubectl scale` 把 `.spec.replicas` 的 field manager 搶成 `kubectl`(`--show-managed-fields` 看得到 `manager=kubectl operation=Update subresource=scale`)。SSA 遇到別人擁有的欄位就拒絕。
-
-**兩個直覺解法都無效**:`--force` 回 `cannot use server-side apply and force replace together`;`--take-ownership` 只處理 helm 自己的 annotation,對 SSA 的欄位所有權沒有用。而**每一次失敗都在 release 歷史留下一個 `failed` 版本**。
-
-**修法**:`helm upgrade --force-conflicts`。**預防**:`replicas` 一律走 `--set runtime.hostGroups[0].replicas=N`,不要用 `kubectl scale`。
-
-**這一顆同時修正 Day 2 的預期。** Day 2 說「patch 會被下次 upgrade 蓋掉」,實測**只對一半**:
-
-- chart **沒有** template 的欄位(`tolerations`、`topologySpreadConstraints`),patch 進去 upgrade **不會**沖掉——SSA 只管自己宣告過的欄位。
-- chart **有** template 的欄位(`replicas`)才會被蓋回去,而且用 `kubectl scale` 動過還會先讓 upgrade 整個失敗。
-
-**實務建議因此要改寫**:chart 表達不出來的排程欄位**可以** patch,但要接受它是一份沒有紀錄在任何 values 檔裡的帶外設定。
-
-### 地雷 5:加節點不會讓 host 擴散過去;補上 toleration 之後,整組 host 反而全搬到 spot 節點 {#mine-5}
-
-**症狀**:spot node pool 加完,三顆 host 一顆都沒過去(節點 request 佔用仍是 98% vs 17%)。`kubectl patch` 補 toleration 之後,滾動更新把**四顆 host 全部**排到 spot 節點,隨需節點掉到 0 顆。
-
-**根因**兩件事疊加:chart 沒有 `tolerations`(已發佈 values 與 rendered manifest 各驗一次,零命中),也沒有 `topologySpreadConstraints` 或反親和性——所以補了 toleration 之後排程只剩容量在決定,隨需節點只剩 23m,spot 節點空著,`LeastAllocated` 全塞過去。
-
-**修法**:要一節點一顆 host,得 patch **兩個** chart 表達不出來的欄位。
-
-所以「加 spot 節點省錢」這句話要連著另一半一起說:你會需要兩個帶外 patch,而且中途會有一段時間**整個資料平面都在可回收機器上**。
-
-### 地雷 6:`read_only: "true"` 是死碼,設了永遠不會生效 {#mine-6}
+2.6.1 的這段授權程式先檢查 bucket allow-list，命中後直接放行，後面的 `read_only` 判斷不會阻擋已授權 bucket 的寫入。實測結果如下：
 
 ```console
 --- read_only=true
@@ -492,11 +538,9 @@ Error: UPGRADE FAILED: conflict occurred while applying object wasmcloud/hostgro
   GET(ro.txt)=200 body=should-fail    ← 剛剛那次寫入確實落地了
 ```
 
-**根因**:`workload_permit` 裡 allow-list 命中就 `return Some(…)`,**`read_only` 的檢查排在它後面**。所以只要 bucket 在 allow-list 裡,`read_only` 永遠輪不到;不在 allow-list 裡的話本來就全部拒絕。**這個鍵在任何情況下都不會改變行為。**
+因此這個版本不能依賴 `read_only: "true"` 提供唯讀保護。這與拼錯設定鍵不同：程式有讀取這個鍵，但判斷順序讓它沒有產生預期效果。
 
-**這是[地雷 2](#mine-2) 的一個特例,但更難發現**——它是一個**會被讀取**的合法鍵,只是邏輯上到不了。靠「改一個鍵看行為變不變」二分也分不出來,因為它跟寫錯的鍵一樣沒反應。
-
-### 地雷 7:每次拉元件都會噴一行看起來像認證失敗的 WARN,而拉取其實成功 {#mine-7}
+### 憑證 WARN 之後，公開元件仍成功啟動 {#mine-7}
 
 ```console
 WARN …:resolve_credentials{registry=ghcr.io}:
@@ -504,48 +548,31 @@ WARN …:resolve_credentials{registry=ghcr.io}:
 INFO Starting workload                                    ← 下一行,拉取成功了
 ```
 
-**根因**:host 容器裡沒有 `~/.docker/config.json`(`readOnlyRootFilesystem: true`,也沒掛 imagePullSecret),憑證解析當然失敗,於是退回匿名拉取。公開 registry 匿名拉得到,所以沒有後果。
+這次是 host 沒讀到 Docker 憑證設定，接著以匿名方式成功取得公開元件。要連同後續的 `Starting workload` 與 Workload 狀態判斷；如果使用私有 registry，不能因為這次公開映像成功就忽略憑證錯誤。
 
-**為什麼要記**:**這行是 `WARN` 而且字面上寫 `failed`**,在追查真正的拉取問題時(私有 registry、`imagePullSecret` 沒設對)會跟真正的錯誤混在一起,而官方文件沒有提到這是正常噪音。**判斷準則:看它下一行有沒有 `Starting workload`。**
+## 想一想
 
-## 帶得走的東西
+1. `backend: filesystem` 與 `buckets: blobby` 都能套用成功，為什麼只有後者改變測試結果？
+2. 把 blobby 副本從 1 增加到 4，Pod 數量不變。你應該查哪種物件，才能知道各元件在哪裡執行？
+3. 刪除 spot 節點後還能讀到檔案，是否足以證明 NATS Pod 消失後也不會丟資料？
 
-- **判定「這個版本做不到」需要三層證據。** 查它的宣告面(CRD)、查它實際載入了什麼(二進位檔裡的註冊清單)、查綁定的粒度。三層都指向同一個答案才算數——**試兩下沒成功就宣稱「不支援」,跟照抄教學一樣不負責任。**
-- **驗收表達不出來就改寫,不要硬湊。** 今天原訂的那一半換成了兩件這個版本實際支援的事,而且各自都能給出是/否。**寫清楚原本要驗什麼、為什麼表達不出來、改成驗什麼**,比勉強生出一個「通過」有用得多。
-- **`grep -c … == 0` 不能單獨當證據,要同時證明輸入非空。** 指令失敗跟「沒有命中」對 `grep -c` 來說是同一個 `0`。這條在任何用「零命中」下結論的地方都成立。
-- **沒有 schema 的設定面,只能靠原始碼與二分法。** `map[string]string` 意味著寫錯不會被擋、也不會有 Event。今天三顆地雷都長在這一個根上:寫錯的鍵靜默忽略、必要的鍵沒有文件、合法但到不了的鍵。
-- **「加一台節點」不是一個中性的動作。** 它不會鬆綁既有 pod 的 request、不會讓既有 pod 搬家,而一旦你補上 toleration 讓它們能搬,它們可能**全部**搬過去。加節點之前要先想清楚你要的是容量還是分散,那是兩個不同的欄位。
-- **server-side apply 決定了帶外 patch 的壽命。** 誰宣告過那個欄位,誰就管它;沒人宣告的欄位 patch 進去會活著。這比「patch 遲早被 helm 沖掉」這個直覺精確,而且方向相反。
+## 小結
+
+wasmCloud 把元件的能力與執行位置放在 host 模型裡管理。查錯時要分清楚 Kubernetes 是否成功部署 host、wasmCloud 是否成功執行元件，以及 host 是否授權它使用特定資源。擴充節點則還要分開處理 host 的排程與元件的分配，最後以實際讀寫確認恢復範圍。
 
 ## 延伸閱讀
 
-想往下深挖,從這幾份開始:
+想再深入，可以從這幾份開始：
 
-- **[Kubernetes:Server-Side Apply](https://kubernetes.io/docs/reference/using-api/server-side-apply/)** —— 地雷 4 的一手來源。「A conflict is a special status error that occurs when an Apply operation tries to change a field that another manager also claims to manage」,以及 `--force-conflicts` 的三種解法。讀懂 field manager 才知道為什麼 `--force` 跟 `--take-ownership` 在這裡都沒用。
-- **[wasmCloud 的 blobby 範例](https://github.com/wasmCloud/wasmCloud/tree/main/examples/blobby)** —— 今天用的元件。值得看的是它**沒有**寫什麼:README 只說 `wash dev` 然後開 localhost:8000,`buckets`、`backend` 這些設定鍵一個字都沒提。地雷 3 的成因就在這裡。
-- **[wasmCloud 的 runtime-operator chart](https://github.com/wasmCloud/wasmCloud/tree/main/charts/runtime-operator)** —— `values.yaml` 的 `hostPlugins` 註解自己承認多後端「not enabled in release images yet」,是地雷 1 最直接的一份佐證。
-
-## 這條路線收尾:wasmCloud 適合誰
-
-兩天實測走完,配上 [Day 0 那五條](sprint3-day0-wasm-concepts.md#health-method)的查證(2026-08-11),這條路線可以下判定了:
-
-**體質**:三條路線裡最好——CNCF Incubating(另兩條是 Sandbox)、近 13 週 384 個 commit、機器人佔比僅 7%、標準跟得最緊(WASI 0.3 預設開啟)。隱憂是集中度:最近 100 筆 commit 有 74 筆出自同一人,而且在惡化(開課前查是 69%)。
-
-**適合**:要用 wasm 元件組跨雲、跨邊緣的分散式應用,而且接受它自成一套執行模型。節點零侵入(五份 diff 為證),所以退出成本預期是三條最低的——不過「`helm uninstall` 之後節點真的一乾二淨」本課沒有實際拆過驗證,這一步是推論。
-
-**不適合**:想把 wasm 塞進現有的 Kubernetes 工作負載模型。它不走 RuntimeClass、元件不是 Pod、kubectl 對它半盲——它解的不是那個問題。這種需求要等 Day 6 的 SpinKube。
-
-選它的話,把單一貢獻者 74% 這件事寫進風險登記簿。
+- **[Kubernetes Server-Side Apply](https://kubernetes.io/docs/reference/using-api/server-side-apply/)**：說明 field manager 與欄位衝突，對應本章 Helm 更新時的 replicas 問題。
+- **[wasmCloud 的 blobby 範例](https://github.com/wasmCloud/wasmCloud/tree/main/examples/blobby)**：查看檔案服務如何使用 blobstore；比對本章時請切到所用版本。
+- **[wasmCloud 的 runtime-operator chart](https://github.com/wasmCloud/wasmCloud/tree/main/charts/runtime-operator)**：核對 host group 能設定的欄位，以及 plugin 的啟用條件。
 
 ## 下一步
 
-wasmCloud 這條路線到此告一段落。兩天實測下來,位置很清楚:**它不碰節點,而它換來的是自己的一整套抽象**——自己的排程器、自己的能力授權模型、自己的分散式狀態,以及一個沒有型別的設定面。
-
-[Day 4](sprint3-day4-wasmedge.md) 換 **WasmEdge**,第二條路線。它比 wasmCloud 更靠近節點(走執行期整合),但還沒到 Day 6 改 containerd 設定那一步。**對節點的侵入程度由低到高**這個順序,到那一天會開始看得出差別。
-
-而 Day 2、Day 3 留下的量測陷阱(記憶體不會歸還、元件不同不能比、啟動時間各只跑一次)全部指向同一天:**Day 5 才是量成本的日子**,那天要先做方法學試跑,確認雜訊小於效果。
+[Day 4](sprint3-day4-wasmedge.md) 改走 WasmEdge 與 runwasi，直接追蹤 RuntimeClass、containerd 設定和 shim。你會看到不採用 wasmCloud host 模型時，哪些工作需要由節點管理者完成。
 
 ---
 
 !!! quote ""
-    wasmCloud 標誌為 CNCF(Linux Foundation)官方資產,此處作社群教學用途。
+    wasmCloud 標誌為 CNCF（Linux Foundation）官方資產，此處作社群教學用途。

@@ -1,40 +1,31 @@
-# Day 8: 遠端證明——MAA、SKR 與金鑰釋放政策
+# Day 8：兩個 Pod 都 Running，為什麼只有一個拿得到金鑰？
 
 ![Kubernetes 官方標誌](../assets/logos/kubernetes-icon-color.svg){ align=right width="80" }
 
-> [Day 7](sprint4-day7-katacc.md) 的 pod 跑在真的 SEV-SNP 硬體上,但那只是「平台這麼說」。機密運算真正的價值不是「跑起來」,是**證明給遠端看它值得信任,才把祕密交給它**。今天做這件事:一個 pod 只有在硬體證明「我跑著預期的程式碼」時才拿得到金鑰;改一個環境變數,measurement 就變,金鑰立刻拿不到。這一章是整個 Part 2 最重要的一天。
+兩個 kata-cc Pod 都能啟動，也都使用各自有效的安全政策。但資料擁有者只願意把金鑰交給其中一份核准政策。這章會讓金鑰服務比較證明中的政策雜湊，並用允許與拒絕兩次結果，區分「能執行」與「能取得秘密」。
 
-!!! abstract "你在課程的哪裡"
-    - **[Day 7](sprint4-day7-katacc.md)**:kata-cc pod 跑在 SEV-SNP 硬體上,取得平台層證據。
-    - **今天**:接上 MAA(遠端證明)+ SKR sidecar + Key Vault Premium,做兩次部署對照——符合政策的 pod 拿得到金鑰、篡改過的 pod 被拒絕。
-    - **接下來**:[Day 9](sprint4-day9-decision-matrix.md) 收尾——可逆性、AKS kata-cc vs 上游 CoCo 的決策表。
+## 先認識誰驗證、誰決定釋出
 
-## 證明先行,拿祕密在後
+**MAA（Microsoft Azure Attestation）**驗證執行環境提供的證據，並簽發包含 **claim（已簽署屬性）**的權杖。**SKR（Secure Key Release）**sidecar 協助工作負載取得證明並向 Key Vault 要求金鑰。
 
-Day 5 說過一句話:機密運算「證明先行,拿祕密在後」。今天把這句話變成一條可運作的鏈:
+Key Vault 的 **release policy（金鑰釋出政策）**則指定：接受哪個證明服務，以及權杖中哪些屬性必須符合條件。這和 Day 7 限制 guest agent 操作的安全政策，是兩份不同用途的政策。
 
-```mermaid
-flowchart TB
-    A["kata-cc pod<br/>SEV-SNP 硬體產出 attestation report"]
-    B["MAA<br/>驗 report、簽發 token<br/>(claim 含 hostdata = 安全政策的 sha256)"]
-    C["Key Vault 的金鑰<br/>release policy 綁定:<br/>authority=MAA、hostdata=預期的 sha256"]
-    D["SKR sidecar<br/>拿 token 向 Key Vault 要金鑰"]
-    A --> B --> D --> C
-    C -->|"claim 相符才放"| D
-```
+先沿著下圖看證據與決策的方向。金鑰是否釋出，由 Key Vault 根據請求者權限及 release policy 判斷，不是 Pod 自己宣告。
 
-關鍵在最後一步:金鑰有一份 **release policy**,說「只有在 MAA 簽的 token 裡 `hostdata` 等於**這個確切的值**時才釋放」。而那個 `hostdata` 是 pod 安全政策的 **sha256**(叫 WORKLOAD_MEASUREMENT)。**改任何一個 pod 設定 → 政策變 → sha256 變 → hostdata 不符 → 金鑰不放。** 這就是「祕密綁定到確切工作負載」。
+![MAA 驗證證據，Key Vault 依身分與 release policy 決定釋出](../assets/diagrams/s4d8-release-flow.svg)
 
-今天四步:建基礎資源 → 建綁定證明的金鑰 → 部署符合的 pod(拿得到)→ 部署篡改的 pod(拿不到)。
+工作負載身分回答「誰在向 Azure API 發出請求」，證明與 release policy 回答「這個執行環境是否符合金鑰持有者的要求」。只完成其中一項不夠。
 
-## 步驟 1: 基礎資源
+## 準備金鑰服務與工作負載身分
 
-kata-cc 的 attestation 靠幾個 Azure 資源接起來:
+本章沿用 Day 7 的 kata-cc 環境，以及已啟用的 OIDC issuer 與 workload identity。下列命令建立 Key Vault Premium、MAA 與 managed identity，會產生 Azure 資源。
+
+`<rg>`、`<kv>`、`<maa>`、`<mid>` 分別是資源群組與三種資源名稱；名稱須符合 Azure 規則。`<叢集 OIDC issuer>` 取自 AKS 的 OIDC issuer URL；`<mid client id>`、`<mid principal>` 分別取 managed identity 的 clientId、principalId；`<kv id>` 是 Key Vault 的完整資源 ID。不要把這三種 ID 互換。
 
 ```bash
 # Key Vault Premium(HSM 金鑰)、MAA 證明服務、managed identity
 az keyvault create -g <rg> -n <kv> --sku premium --enable-rbac-authorization true
-az attestation create -g <rg> -n <maa> -l westeurope      # 慢,別用前景 2 分 timeout,見地雷 1
+az attestation create -g <rg> -n <maa> -l westeurope
 az identity create -g <rg> -n <mid>
 
 # workload identity:managed identity ↔ 叢集 OIDC ↔ k8s service account
@@ -49,12 +40,17 @@ az role assignment create --role "Key Vault Crypto Officer" --assignee-object-id
 az role assignment create --role "Key Vault Crypto User"    --assignee-object-id <mid principal> --scope <kv id>
 ```
 
-!!! warning "RBAC「可能要等 24 小時」——但不保證會等"
-    官方文件警告 managed identity 的角色指派快取「可能要 24 小時」才生效。本課實測**沒有撞到**——建金鑰即時成功、SKR 放金鑰也即時。但這不保證別人不會遇到;若 Day 8 卡在 `ForbiddenByRbac`,先確認是不是在等這個快取,而不是設定錯。
+聯合身分設定把 `cc-lab/skr-sa` 這個 ServiceAccount 連到 managed identity。consumer Pod 也必須指定此 ServiceAccount，並依 workload identity 的要求啟用注入，才能使用這條身分路徑。
 
-## 步驟 2: 建一把綁定證明的金鑰
+以上保留練習時的兩個角色指派。`Crypto Officer` 包含金鑰管理權限，不能將這組寬權限配置直接視為正式環境的最小權限設計。實際部署應分開管理金鑰的人與只需要求釋出的工作負載，確認各自操作權限；本課未驗證最小角色組合。
 
-先算出 pod 安全政策的 sha256(WORKLOAD_MEASUREMENT)。用 Day 7 那個 podman 繞道產政策,再在**本機**算 hash(azure-cli 容器裡沒有 `awk`,在容器裡算會對空輸入算出錯的值——[地雷 2](#mine-2)):
+## 先產生政策，再計算它的雜湊
+
+本章的 **hostdata** 是 SNP 證據中用來綁定安全政策雜湊的欄位。**SHA-256** 將政策內容轉成固定長度的摘要；只要政策位元組改變，摘要通常也會改變。它不是完整 Pod YAML 的直接雜湊。
+
+準備包含 app 與 `mcr.microsoft.com/aci/skr:2.7` 的 consumer manifest，使用 `kata-cc-isolation` 與 `skr-sa`，再依 [Day 7](sprint4-day7-katacc.md) 的方式產生政策，保存為 `consumer-policy.yaml`。app 需呼叫 SKR 的 `/key/release`，提供 MAA endpoint、Key Vault endpoint 與金鑰 ID；請求格式見 [SKR API](https://github.com/microsoft/confidential-sidecar-containers/blob/main/cmd/skr/README.md)。
+
+以下取出 annotation、解碼，再計算政策雜湊。這個抽取方式假設 annotation 是單行、沒有額外引號的輸出格式；開始前須確認只抽到一份非空的 base64 內容，解碼成功且是完整政策。
 
 ```bash
 # 政策注入 consumer manifest 後,在 macOS 本機算:
@@ -63,7 +59,11 @@ printf '%s' "$POLICY_B64" | base64 -d | shasum -a 256
 # → ca8442bb3d17f7d85556b5c21682db11f2313cdbe3db1adcd27c89c3f88e720d
 ```
 
-建一把 **exportable** 金鑰,release policy 綁定 MAA + `sevsnpvm` + 這個 hash:
+範例的 64 位十六進位值來自這份政策，你自己的結果通常不同。不要複製範例雜湊代替實際產物；也不要只因 `shasum` 印出值，就假定前面的抽取與解碼成功。
+
+## 把核准的政策雜湊綁到金鑰
+
+以下 release policy 限定可信任的 MAA authority、證明類型，以及 hostdata。保存為 `release-policy.json` 前，必須把 authority 換成 MAA 資源實際提供的完整 attestation URI；hostdata 的 `ca8442bb…720d` 是縮寫，**必須換成上一步完整的 64 位雜湊**。
 
 ```json
 {
@@ -78,14 +78,20 @@ printf '%s' "$POLICY_B64" | base64 -d | shasum -a 256
 }
 ```
 
+接著建立允許依政策匯出的 HSM 金鑰。`exportable` 是這個測試讓金鑰進入合格 guest 的前提，與一般不可匯出金鑰的使用方式不同。
+
 ```bash
 az keyvault key create --vault-name <kv> -n skr-key --kty RSA-HSM --size 3072 \
   --exportable true --policy release-policy.json
 ```
 
-## 步驟 3: 符合政策的 pod → RELEASED
+金鑰現在綁定原政策。稍後建立變更版本時，這份 release policy 必須保持不變，才能做有意義的拒絕測試。
 
-部署一個 kata-cc pod,裡面兩個容器:**SKR sidecar**(`mcr.microsoft.com/aci/skr`)加一個 app。app 呼叫 SKR 的 `/key/release` 要金鑰;因為預設政策擋 `exec`/`logs`([Day 7 地雷 5](sprint4-day7-katacc.md#mine-5)),app 把結果掛在一個 TCP 埠、從叢集內另讀([地雷 3](#mine-3)):
+## 先驗證核准版本
+
+部署已產生政策的 consumer Pod。app 向本 Pod 的 SKR sidecar 要求釋出金鑰，再把結果以狀態字串提供給叢集內的 TCP Service；回應內容應只有狀態，不能包含金鑰。`<service>` 是這個狀態服務的位址，並非 SKR API 本身。
+
+原驗證透過狀態服務讀到：
 
 ```console
 # app 內部:curl SKR → SKR 取 SEV-SNP report → MAA 簽 token(hostdata=ca8442bb…)
@@ -93,11 +99,13 @@ az keyvault key create --vault-name <kv> -n skr-key --kty RSA-HSM --size 3072 \
 $ curl http://<service>/          →  RELEASED
 ```
 
-**RELEASED。** 完整的鏈跑通了:硬體證明 → MAA → 金鑰釋放,而且只因為這個 pod 的 measurement 正好等於金鑰綁定的值。
+`RELEASED` 是 app 整理後的結果，表示這組測試完成金鑰釋出。它不是原始 SNP report，也不是完整 MAA 權杖；驗證紀錄沒有提供 guest report 原文，因此這裡不把狀態字串當成可供獨立解析的硬體證據。
 
-## 步驟 4: 篡改 → DENIED
+## 改環境變數，重新產生政策，再測拒絕
 
-現在做「篡改」:同一份工作負載,只給 app 容器**多加一個環境變數 `TAMPER=yes`**。這改變了 pod spec,於是安全政策變、sha256 變:
+接著複製原 manifest，在 app 新增 `TAMPER=yes`，並**對變更後的 manifest 重新執行政策產生工具**。這一步不可省略：本章測試的是新政策能讓新 Pod 啟動，但它不在金鑰核准清單內。若只改 Pod、沿用舊政策，可能先被 guest agent 拒絕啟動，測到的會是另一個機制。
+
+變更版政策的 SHA-256 如下：
 
 ```console
 # 篡改版的政策 hash:
@@ -105,61 +113,50 @@ a07958c9891de4f177cf6f1bf207b75d1c6ee78250f8064b968308e730c912b0
 # ≠ 金鑰綁定的 ca8442bb…720d
 ```
 
-篡改版**自己起得起來**(它有自己一致的政策),但要金鑰時:
+將變更版部署為另一個 Pod 與狀態 Service，並繼續要求同一把金鑰。金鑰的 release policy 仍綁原雜湊。結果是：
 
 ```console
 $ kubectl get pod skr-tampered            →  2/2 Running   （自己的政策相符自己）
 $ curl http://<tampered-service>/         →  DENIED
 ```
 
-**DENIED。** SNP report 的 `hostdata` 是 `a07958c9…`,不等於金鑰 release policy 綁的 `ca8442bb…`,Key Vault 拒絕釋放。**一個環境變數之差,金鑰就拿不到。** 這就是「祕密綁定到確切工作負載」最有力的實證——不是靠信任,是靠硬體證明加密碼學比對。
+變更版 2/2 Running，表示它符合自己的啟動政策；狀態服務回 DENIED，則呈現它沒有取得金鑰。這組對照支持「釋出條件綁定核准的政策雜湊」；它沒有測試任意 Pod 欄位變更，也沒有保證所有欄位都會被政策產生器納入。
 
-## 驗收 checkpoint
+實作時若只有 DENIED，仍需區分 RBAC、證明服務、網路與 release policy 的拒絕原因。此處留存的是結果摘要，沒有原始 Key Vault 錯誤明細，不能把任意同名回應都直接歸因 hostdata。
 
-| 驗證 | 判準 | 本課環境的結果 |
-|---|---|---|
-| 符合政策 → 拿得到 | measurement 等於金鑰綁定值的 pod,SKR 放金鑰 | `hostdata=ca8442bb…` → **RELEASED** |
-| 篡改 → 拿不到 | 改一個 env → measurement 變 → 被拒 | `hostdata=a07958c9…` → **DENIED** |
+## 疑難排解
 
-## 地雷記錄
+### 建立 MAA 的命令逾時，資源狀態尚未就緒 {#mine-1}
 
-### 地雷 1:`az attestation create` 慢,前景 2 分 timeout 會誤判失敗 {#mine-1}
+用戶端逾時不代表雲端建立作業一定已停止。先檢查同一資源的 provisioning 狀態，再決定等待或重試，避免立即重複建立。給長時間作業足夠的等待時間，不要只以本機命令是否在兩分鐘內結束判定成功。
 
-**症狀**:前景跑 MAA 建立被 2 分 timeout 砍掉,`attestation show` 一時 `NotFound`,看起來像失敗。
-**根因**:MAA 建立就是慢;背景重跑就成功(status `Ready`)。
-**判斷準則**:MAA 這類慢操作用背景或長 timeout,別用前景 2 分砍完就當它失敗。
+### 算出的 SHA-256 是空字串摘要 {#mine-2}
 
-### 地雷 2:azure-cli 容器裡沒有 `awk`,hash 會對空輸入算 {#mine-2}
+`e3b0c442…` 是空輸入的 SHA-256。驗證時曾因工具映像缺少抽取所用的程式，導致後段對空輸入計算。先檢查 annotation 抽取、base64 解碼與各命令狀態，再計算雜湊。換到本機計算能避開該容器工具缺口，仍不能省略輸入檢查。
 
-**症狀**:在 podman 的 azure-cli 容器裡用 `awk` 抽政策算 sha256,拿到 `e3b0c442…`——那是**空字串**的 sha256。
-**根因**:`mcr.microsoft.com/azure-cli` 容器沒裝 `awk`,指令靜默失敗、對空輸入算了。
-**修法**:hash 改在 macOS 本機從注入的政策 annotation 算(`base64 -d | shasum -a 256`)。**看到 `e3b0c442…` 就知道你算到的是空的。**
+### 預設政策不允許 exec 或 logs {#mine-3}
 
-### 地雷 3:預設政策擋 exec/logs,結果只能用 TCP Service 讀 {#mine-3}
+`ExecProcessRequest` 與 `ReadStreamRequest` 可被 guest 政策拒絕，見 [Day 7 的操作限制](sprint4-day7-katacc.md#mine-5)。本章以 app 主動提供 TCP 狀態服務觀察結果，並未開放這兩項操作。狀態服務與 consumer manifest 需事先準備，不能把範例中的 `<service>` 直接當成現成資源。
 
-**根因**:kata-cc 預設政策 `ExecProcessRequest`/`ReadStreamRequest := false`,`kubectl exec`/`logs` 進不去 consumer 看 SKR 結果。
-**繞法**:app 自己 curl SKR、把結果(RELEASED/DENIED)用 `nc -l` 掛在 TCP 埠,再從叢集內用 ClusterIP 讀(kata-cc 的 Service 只支援 TCP,剛好符合)。
+## 想一想
 
-## 帶得走的東西
+1. 新增環境變數後仍使用舊政策，Pod 在 sandbox 階段就失敗。這和本章 DENIED 對照測到的是同一件事嗎？
+2. 你同時更新變更版政策與 Key Vault 核准雜湊，再看到 RELEASED，是否仍能驗證原本的拒絕條件？
+3. 任意 YAML 欄位改變，都一定會改變 hostdata 嗎？應先檢查哪個產物？
 
-- **機密運算的價值是「證明」,不是「加密」本身。** 記憶體加密讓主機讀不到;但真正有用的是「向遠端證明我跑著預期的程式碼,你才把祕密給我」。沒有這一步,加密只是自說自話。
-- **祕密綁定到 measurement,而 measurement 綁定到整份工作負載。** release policy 綁的是安全政策的 sha256;改任何一個 pod 設定都會改 sha256。這就是為什麼「改一個 env → 拿不到金鑰」。
-- **「起得來」和「拿得到祕密」是兩件事。** 篡改版 pod 自己起得來(它的政策相符自己),但它的 measurement 不符金鑰綁定值,所以拿不到。攻擊者換掉工作負載,pod 能跑,祕密拿不到。
-- **控制平面的每一段都可能靜默失敗。** MAA 慢被誤判、容器沒 `awk` 算出空 hash、預設政策擋觀測——每一個都不報大錯,要靠「這個值看起來不對」自己抓。
+## 小結
+
+安全政策控制 guest 允許的操作，金鑰釋出政策則控制哪份已證明的政策可以取得秘密。本章先讓核准版本取得金鑰，再對變更 manifest 重產政策、保留原金鑰條件，觀察另一個可啟動 Pod 被拒絕。證據支持這組政策雜湊對照，範圍不應擴大成所有工作負載內容的全面保證。[Day 9](sprint4-day9-decision-matrix.md) 會據此整理部署選擇與移除後的檢查。
 
 ## 延伸閱讀
 
-想往下深挖,從這幾份開始:
+想再深入，可以從這幾份開始：
 
-- **[AKS Confidential Containers 部署(含 attestation)](https://learn.microsoft.com/en-us/azure/aks/deploy-confidential-containers-default-policy)** —— SKR sidecar、workload identity、Key Vault release policy 的一手流程;本課的 RELEASED/DENIED 對照就是它的精簡版。
-- **[SKR(Secure Key Release)sidecar API](https://github.com/microsoft/confidential-sidecar-containers/blob/main/cmd/skr/README.md)** —— `/key/release` 的請求格式(`maa_endpoint`/`akv_endpoint`/`kid`),步驟 3 的一手依據。
-- **[Microsoft Azure Attestation 總覽](https://learn.microsoft.com/en-us/azure/attestation/overview)** —— MAA 驗 SNP report、簽 token 的角色;release policy 的 `authority` 指的就是它。
-
-## 下一步
-
-Part 2 的動手到今天為止:概念(Day 5)、Kata(Day 6)、kata-cc(Day 7)、遠端證明(Day 8)。[Day 9](sprint4-day9-decision-matrix.md) 不動手,把這幾天收成一張決策表——AKS kata-cc 與上游 CoCo 的差別、拆除的可逆性,以及回頭把「主機該不該看得到工作負載」這個對比講完。
+- [AKS 機密容器部署](https://learn.microsoft.com/en-us/azure/aks/deploy-confidential-containers-default-policy)：政策、身分與證明服務整合。
+- [SKR sidecar API](https://github.com/microsoft/confidential-sidecar-containers/blob/main/cmd/skr/README.md)：金鑰釋出請求與設定。
+- [MAA 概觀](https://learn.microsoft.com/en-us/azure/attestation/overview)：證據驗證與權杖角色。
 
 ---
 
 !!! quote ""
-    Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,此處作社群教學用途。
+    Kubernetes 標誌為 CNCF（Linux Foundation）官方資產，此處作社群教學用途。

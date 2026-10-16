@@ -2,59 +2,38 @@
 
 ![Kubernetes 官方標誌](../assets/logos/kubernetes-icon-color.svg){ align=right width="95" }
 
-> Day 0 到 Day 5,叢集裡的卡從頭到尾是同一種東西:節點上一個叫 `nvidia.com/gpu` 的整數。要表達「我只要 4 GB」,HAMi 得另外發明 `nvidia.com/gpumem` 這個資源名,再配一支攔在 CUDA 前面的函式庫才擋得住([Day 3](sprint1-day3-hami-memory-isolation.md));要把同一個數字交給另一套排程器,得先換算成兩位小數的卡比例,進位誤差直接吃掉一個租戶的位置([Day 4 地雷 6](sprint1-day4-hami-kai-integration.md#mine-6))。整數能表達「幾顆」,表達不了「哪一顆」——挑 VRAM 大於某個門檻的卡、排掉某個世代的型號、讓兩顆 pod 明確持有同一顆裝置,這些在 `resources.limits` 那一格裡寫不出來,只能推給節點標籤、annotation 與自訂資源名去繞。Kubernetes 1.34 把另一套表達方式收成正式版:Dynamic Resource Allocation(DRA)。裝置在這套 API 裡是有屬性、可以被查詢語言挑選、可以被具名持有的物件。今天不開真卡,用官方的模擬 driver 把四個 API 物件與 CEL 選擇器整套走一遍。
+假設你要替一個推論服務寫 pod，需求是「VRAM 40Gi 以上的卡，而且不要舊的那一批型號」。打開 `resources.limits`，你能寫的只有一行 `nvidia.com/gpu: 1`。這一格只放得下一個整數，「多大」「哪一型」都沒有地方寫。
 
-!!! abstract "你在課程的哪裡"
-    - **Day 0–5**:device plugin 世界的排程與切分都走過了,它的表達力天花板也撞過了。
-    - **今天**:用模擬 driver 走完 DRA 的四個 API 與 CEL 選擇器。驗收:條件式挑裝置、排除特定型號、兩顆 pod 具名共用同一個裝置,全部演過。
-    - **Day 7**:同一套 API,換真卡。
+這一章介紹 Kubernetes 裡另一種要裝置的寫法：Dynamic Resource Allocation（DRA，動態資源配置）。我們不開真卡，改用官方的模擬 driver 在一台 CPU 節點上變出幾顆假的 GPU，把「挑符合條件的裝置」「排除某個型號」「兩顆 pod 共用同一顆裝置」都實際做一次。
 
-## 原理與架構
+讀完之後，遇到「要符合某些條件的裝置」或「兩顆 pod 要用同一顆裝置」這類需求時，你能決定條件該寫在 DeviceClass 還是 claim 裡，以及該用具名 claim 還是 template。
 
-### 四個物件:誰供貨、誰分類、誰下單、誰代下單
+## 整數寫不出條件
 
-DRA 的 API 全在 `resource.k8s.io/v1` 這個群組底下,核心只有四個型別,分工乾淨到可以各用一句話講完。
+Day 0 到 Day 5 用的都是 device plugin 的做法：節點回報「我有幾個 `nvidia.com/gpu`」，pod 在 `resources.limits` 寫要幾個，排程器做減法。這套做法能回答「幾顆」，回答不了「哪一顆」。
 
-- **ResourceSlice——供給。**節點上的 driver 自己 publish 的物件,內容是「這台節點有哪些裝置、每顆的屬性(`attributes`)與容量(`capacity`)是什麼」。叢集層級的物件,但每一份都掛著 `nodeName`。
-- **DeviceClass——型錄。**叢集層級,內容是一條 CEL 表達式,把符合條件的裝置框成一類。管理員先定義「這叢集有哪幾種裝置可以被要求」,使用者才在需求裡引用類別名稱。
-- **ResourceClaim——需求。**namespace 層級,內容是「我要幾顆、要什麼樣的」。它同時也是持有憑證:`status.allocation` 記著配到哪幾顆,`status.reservedFor` 記著誰正在用。
-- **ResourceClaimTemplate——需求範本。**同樣是 namespace 層級,但它不會被引用,而是**被實體化**:每一顆引用它的 pod 都生出一份專屬的 ResourceClaim。
+Day 3 已經碰過這個限制。為了表達「我只要 4 GB」，HAMi 另外發明了 `nvidia.com/gpumem` 這個資源名稱，再加一支攔在 CUDA 前面的函式庫才擋得住超用（[Day 3](sprint1-day3-hami-memory-isolation.md)）。挑 VRAM 大於某個門檻的卡、排掉某一型、讓兩顆 pod 明確共用同一顆，在 device plugin 的寫法裡都只能靠節點標籤、annotation 或自訂資源名稱繞過去。
 
-```mermaid
-flowchart TB
-    DRV["driver 的 kubelet plugin<br/>每個節點一顆"] --> RS["ResourceSlice(供給)<br/>裝置清單<br/>attributes + capacity"]
-    RCT["ResourceClaimTemplate<br/>(需求範本)"] --> RC["ResourceClaim(需求)<br/>要幾顆、要什麼樣的"]
-    DC["DeviceClass(型錄)<br/>一條 CEL 框出一整類裝置"] --> RC
-    RS --> S["kube-scheduler 的<br/>dynamicresources 外掛"]
-    RC --> S
-    S --> A["claim.status.allocation<br/>配到哪幾顆、綁在哪個節點"]
+DRA 換了一個做法：裝置不再是節點上的一個數字，而是一個個帶著屬性的 API 物件。pod 可以用條件挑裝置，也可以用名字指定要跟誰共用。DRA 的核心在 Kubernetes 1.34 正式發佈（GA），API 群組是 `resource.k8s.io/v1`。
+
+## 為什麼用一台 CPU 節點就夠
+
+這一章用的 driver 是 **kubernetes-sigs/dra-example-driver v0.4.0**。它管的裝置是模擬出來的，不碰任何硬體，設定 `numDevices: 8` 就會回報八顆。
+
+模擬裝置學得到東西，是因為 DRA 從頭到尾的流程跟真卡一樣：driver 回報裝置、使用者寫條件、排程器挑一顆、節點上的 driver 把裝置交給容器。唯一的差別在最後一步：真卡要把 `/dev/nvidia*` 和函式庫掛進容器，模擬裝置只放進幾個環境變數。這一章要學的是前面那一整段。
+
+官方 quickstart 用的是 kind（Kubernetes in Docker，在自己電腦上用 Docker 容器跑一座叢集的工具），在本機 build 映像再載入叢集。我們改在 Day 0 建好的 AKS 上臨時開一個 CPU 的 spot 節點池 `drasim`（spot 是 Day 0 用過的折扣 VM，Azure 需要容量時可能把它收回），用完就刪。
+
+## 步驟 1:先確認映像拉得到，再開節點
+
+不走 kind，就要先確定有公開的映像可以直接拉；如果沒有，就得自己 build，那是另一件事。先把 driver 的原始碼 clone 下來，切到這一章用的 `v0.4.0` tag。安裝用的 chart 和後面要讀的原始碼都在裡面，這一章後面的指令都在這個目錄裡執行：
+
+```bash
+git clone --branch v0.4.0 --depth 1 https://github.com/kubernetes-sigs/dra-example-driver.git
+cd dra-example-driver
 ```
 
-pod 這一端的寫法也是兩段式,跟 device plugin 只有一格 `resources.limits` 明顯不同:pod 層的 `spec.resourceClaims` 宣告這顆 pod 會用到哪些 claim、各自從哪來(具名 claim 或 template),容器層的 `resources.claims` 再按名字引用。宣告來源與實際使用分開,是後面「兩顆 pod 指向同一個 claim」這種寫法能成立的前提。
-
-### CEL 是挑裝置的語言
-
-DeviceClass 與 ResourceClaim 裡的選擇條件都寫成 CEL(Common Expression Language)表達式,對每一顆候選裝置各求值一次,回傳 true 才留下。能比對的東西有三種:內建欄位 `device.driver`、driver 宣告的屬性 `device.attributes['<網域>'].<鍵>`、以及容量 `device.capacity['<網域>'].<鍵>`。屬性與容量都用「網域」分鍵,而網域就是 driver 名——這個設計是為了讓多個 driver 在同一顆節點上各自命名而不撞名,步驟 4 造異質性靠的就是這件事。
-
-### 為什麼今天用一台 CPU 節點就夠
-
-官方 quickstart 走的是 kind:本機起一個容器叢集、本機 build 映像、`kind load` 進去。本課程改走另一條路——在既有的 AKS `<cluster>` 上臨時開一個 CPU spot 節點池 `drasim`,跑 **kubernetes-sigs/dra-example-driver v0.4.0**。
-
-換得動的理由在於這支 driver 的性質:它管的裝置是**模擬**出來的,不碰任何實體硬體,`numDevices: 8` 就憑空 advertise 八顆。而 DRA 從 ResourceSlice 發佈、CEL 過濾、排程器配置、到 kubelet 呼叫 driver 準備裝置,整條路徑對真卡與模擬裝置完全相同,差別只在最後一步注入容器的內容——真卡注入 `/dev/nvidia*` 與函式庫掛載,模擬裝置注入幾個環境變數。今天要學的是前面那整條路。
-
-代價是一台 `Standard_D2as_v5`(2 vCPU／8 GB)spot 節點,`gpuspot` 全程 0 台。時間也省:CPU spot 節點 1 分 52 秒 Ready,而 Day 1 到 Day 5 每次把 GPU pool 拉起來都要五分鐘上下,差在 GPU 節點開機要跑 driver 安裝與裝置初始化。
-
-### 今天要走的路
-
-八段:查證映像拉不拉得到再開節點、問 apiserver 哪些 DRA 功能是開的、裝 driver 讀出第一份 ResourceSlice、把同一份 chart 換個名字再裝一次造出異質性、六組示範把核心 API 走一遍、回頭看節點物件上留下了什麼、卸載後盯著 ResourceSlice 何時消失、最後刪掉節點池結帳。KAI Scheduler v0.16.8、HAMi v2.9.0、HAMi-WebUI v1.2.0 全程留在叢集裡但不參與,步驟 6 會確認有沒有互相干擾。
-
-## 步驟
-
-### 步驟 1:先確認映像拉得到,再開節點
-
-官方 quickstart 的 `./demo/build-driver.sh` 是在本機 build 映像再塞進 kind。本課程既沒有本機 docker、叢集也不是 kind,所以動手前的第一個判斷題是:有沒有一個公開、叢集拉得到的映像?答案若是沒有,今天就該停在這裡,而不是在叢集裡即興搞 in-cluster build。
-
-chart 的 `values.yaml` 給了倉庫位址 `registry.k8s.io/dra-example-driver/dra-example-driver`,`tag` 留空時取 `Chart.yaml` 的 `appVersion`(`v0.4.0`)。直接對 registry 打 manifest,不必先拉整包映像:
+這個 driver 用 Helm 安裝：Helm 是 Kubernetes 的套件管理工具，chart 是它的安裝套件，chart 裡的 `values.yaml` 是預設設定值，安裝時可以用自己的值檔覆蓋。chart 放在 `deployments/helm/dra-example-driver/`，它的 `values.yaml` 寫的倉庫位址是 `registry.k8s.io/dra-example-driver/dra-example-driver`，`tag` 留空時取 `Chart.yaml` 的 `appVersion`（`v0.4.0`）。不必真的把映像拉下來，直接向 registry 要這個 tag 的 manifest 就知道它存不存在：
 
 ```console
 $ curl -sSL -o /dev/null -w "%{http_code} %{content_type}\n" \
@@ -63,9 +42,9 @@ $ curl -sSL -o /dev/null -w "%{http_code} %{content_type}\n" \
 200 application/vnd.docker.distribution.manifest.list.v2+json
 ```
 
-回的是 manifest list,裡面三個平台(amd64／arm64／ppc64le),而第一個轉址落在 `asia-east1-docker.pkg.dev/v2/k8s-artifacts-prod/images/…`——`registry.k8s.io` 是官方的多雲映像前端,日本區的叢集拉的是亞太節點。**映像已公開發佈且匿名可拉,不需要任何本機 build**,kind 那條路是為了離線開發,不是唯一的路。
+`200` 表示映像存在，而且不用登入就拿得到。回來的類型是 manifest list，也就是一份索引，列出同一個映像在不同 CPU 架構（這裡是 amd64、arm64、ppc64le）各自的版本，節點會自己挑對的那一份。
 
-節點池照 Day 0 的規格開,只是換成 CPU:
+確定映像沒問題，再開節點池。規格照 Day 0，只是換成 CPU 機型：
 
 ```console
 $ az aks nodepool add -g <resource-group> --cluster-name <cluster> -n drasim \
@@ -78,33 +57,13 @@ $ az aks nodepool add -g <resource-group> --cluster-name <cluster> -n drasim \
           allocatable: cpu=1900m  memory=5930728Ki  pods=250
 ```
 
-後面所有 `nodeSelector` 與 toleration 都照這組標籤與汙點寫。
+輸出裡要記下的是標籤 `pool=drasim` 和 spot 的 taint。後面所有 `nodeSelector` 與 toleration 都照這兩項寫。
 
-### 步驟 2:問 apiserver 哪些 DRA 功能是開的
+## 步驟 2:裝 driver，讀出第一份 ResourceSlice
 
-DRA 的核心在 1.34 進 GA,但周邊功能有一大半還在 alpha,而**託管叢集不給改 feature gate**。AKS 沒有 apiserver 的 pod 可以 `describe`,也看不到啟動參數,唯一問得出真實狀態的地方是 metrics 端點:
+先寫安裝值。大部分欄位一看就懂：用哪個映像、每個節點模擬幾顆裝置、driver 要跑在哪個節點池。
 
-```console
-$ kubectl get --raw /metrics | grep 'kubernetes_feature_enabled' | grep -i DRA | sort
-kubernetes_feature_enabled{name="DRAAdminAccess",stage="BETA"} 1
-kubernetes_feature_enabled{name="DRAConsumableCapacity",stage="ALPHA"} 0
-kubernetes_feature_enabled{name="DRADeviceBindingConditions",stage="ALPHA"} 0
-kubernetes_feature_enabled{name="DRADeviceTaintRules",stage="ALPHA"} 0
-kubernetes_feature_enabled{name="DRADeviceTaints",stage="ALPHA"} 0
-kubernetes_feature_enabled{name="DRAExtendedResource",stage="ALPHA"} 0
-kubernetes_feature_enabled{name="DRAPartitionableDevices",stage="ALPHA"} 0
-kubernetes_feature_enabled{name="DRAPrioritizedList",stage="BETA"} 1
-kubernetes_feature_enabled{name="DRAResourceClaimDeviceStatus",stage="BETA"} 1
-kubernetes_feature_enabled{name="DRASchedulerFilterTimeout",stage="BETA"} 1
-```
-
-規則一目瞭然:beta 的一律 1、alpha 的一律 0。這張表直接決定今天能示範什麼——`gpuPartitions` 要 `DRAPartitionableDevices`、裝置分食容量要 `DRAConsumableCapacity`、用 `resources.limits` 要裝置要 `DRAExtendedResource`,三個都是 0,全部用不上;留下能用的是 `DRAResourceClaimDeviceStatus`(把裝置實況寫回 claim status)、`DRAPrioritizedList` 與 `DRAAdminAccess`。
-
-**這一步的順序不能顛倒。**先裝好 driver 再回頭想示範怎麼配,會發現想做的多半做不了,而失敗的樣子是「設定寫了但什麼都沒發生」,查起來很費工([地雷 1](#mine-1))。
-
-### 步驟 3:裝 driver,讀出第一份 ResourceSlice
-
-安裝值的重點,每一行都對得上步驟 2 那張表:
+值檔裡有幾行註解提到 `DRA` 開頭的名字，例如 `DRAConsumableCapacity`。這些是 DRA 周邊功能的開關名稱：`BETA=1` 表示這項功能在 beta 階段，而且這座叢集有開；`which is 0` 表示沒開。註解寫 0 的，表示它依賴的功能在這座叢集沒開，所以把對應的設定關掉。步驟 3 會實際查出這些開關的狀態：
 
 ```bash
 cat > 01-dra-driver-values.yaml <<'EOF'
@@ -146,10 +105,13 @@ webhook:
 EOF
 ```
 
-兩件事先講清楚。第一,`controller.plugins: []` 是 chart 預設值,而這個空清單會讓整份 `templates/controller-deployment.yaml` 不被渲染——模板外層包著 `{{- if .Values.controller.plugins }}`。這個 chart 的 controller 只服務 BindingConditions(本叢集該 gate 是 0),**不是 DRA 的必要元件**;整套 driver 只剩一個 per-node 的 DaemonSet,全部落在 `drasim` 上,system pool 一顆 pod 都沒多,[Day 5 地雷 6](sprint1-day5-hami-webui.md#mine-6) 那個 2 vCPU 塞不下滾動更新的問題今天不構成阻礙。第二,`numDevices: 8` 是唯一能調的裝置數量旋鈕,而且是**每個節點各 8 顆**。
+另外兩個設定值得說明：
+
+- `controller.plugins: []` 是 chart 的預設值。chart 的 controller 模板外層包著 `{{- if .Values.controller.plugins }}`，清單是空的就整份不產生。這個 controller 只用在一項這座叢集沒開的試驗功能上，DRA 本身不需要它。所以整套 driver 只剩一個 DaemonSet，每個 `drasim` 節點跑一份。
+- `numDevices: 8` 是**每個節點**各模擬 8 顆。
 
 ```console
-$ helm install dra-example-driver /tmp/dra-example-driver/deployments/helm/dra-example-driver \
+$ helm install dra-example-driver ./deployments/helm/dra-example-driver \
     -n dra-example-driver --create-namespace \
     -f 01-dra-driver-values.yaml --wait --timeout 5m
 16:04:22 → 16:04:29(7 秒)   STATUS: deployed   REVISION: 1
@@ -162,7 +124,11 @@ NAME                                       NODE                             DRIV
 00000-gpu.example.com-aks-drasim-…-fffzn   aks-drasim-30601265-vmss000000   gpu.example.com   aks-drasim-…
 ```
 
-七秒裝完。chart 建的那個 DeviceClass 內容只有一條 CEL——`device.driver == 'gpu.example.com'`,把這個 driver 的全部裝置框成一類。ResourceSlice 才是今天要讀懂的東西,八顆裝置結構相同,節錄第一顆與池資訊:
+裝完之後，叢集裡多了兩種新物件，我們一個一個看。
+
+第一個是 `gpu.example.com` 這個 **DeviceClass**，意思是「一類裝置」。chart 建的這一個，內容只有一行條件：`device.driver == 'gpu.example.com'`，也就是「這個 driver 回報的裝置都算這一類」。這行條件的寫法叫 **CEL**（Common Expression Language），一種只用來寫判斷條件的小型運算式語言，Kubernetes 用它在 API 物件裡描述「哪些東西符合條件」。步驟 4b 會自己寫幾條。
+
+第二個是 **ResourceSlice**，driver 在節點上跑起來之後自己回報的裝置清單：這台節點有哪些裝置，每一顆有什麼屬性、多少容量。它取代的是 device plugin 時代節點上那個整數。下面節錄第一顆裝置和開頭的清單資訊，其他七顆結構相同：
 
 ```yaml
 spec:
@@ -179,7 +145,7 @@ spec:
     capacity: { compute: { value: "100" }, memory: { value: 80Gi } }
 ```
 
-整理成表,右欄就是後面每一條 CEL 的素材:
+每顆裝置有兩組資料：`attributes` 是描述性的屬性（型號、版本、編號），`capacity` 是可以比大小的容量（記憶體、算力）。後面寫條件時，挑的就是這些欄位。把八顆的內容整理成表，最右欄是在 CEL 裡怎麼引用。後面的示範只會用到 `model`、`memory` 和 `driver` 三列，其他幾列列出來供參考：
 
 | 位置 | 鍵 | 型別 | 值 | CEL 寫法 |
 |---|---|---|---|---|
@@ -191,26 +157,58 @@ spec:
 | `capacity` | `compute` | quantity | `100`(全部一樣) | `device.capacity['gpu.example.com'].compute` |
 | 內建欄位 | `driver` | string | driver 名 | `device.driver` |
 
-### 步驟 4:同一份 chart 裝兩次,造出兩個屬性網域
+注意 CEL 寫法中括號裡的 `'gpu.example.com'`：屬性和容量的鍵前面都掛著 driver 的名字，叫做「網域」。這樣同一台節點上有兩個 driver 時，各自的 `model` 不會撞名。下一步就要用到這件事。
 
-八顆裝置只有 `index` 與 `uuid` 會變,其餘全同。這不是設定沒調對,是原始碼寫死的——`internal/profiles/gpu/gpu.go` 裡 `memoryPerGPU` 固定 `80Gi`、`computePerGPU` 固定 `100`,而屬性表只有兩個欄位隨迴圈變:
+## 步驟 3:八顆一模一樣，換一個 driver 名再裝一次
+
+看上面那張表的「值」欄：八顆裝置只有 `index` 和 `uuid` 不同，型號、記憶體、算力全部一樣。拿這樣的裝置練習「挑 VRAM 大的」「排除舊型號」，條件寫得出來，卻分不出任何一顆。
+
+原因在 driver 原始碼：`internal/profiles/gpu/gpu.go` 裡記憶體固定 `80Gi`、算力固定 `100`，屬性表的型號和版本也是常數：
 
 ```go
 "model":         { StringValue:  ptr.To("LATEST-GPU-MODEL") },   // constant
 "driverVersion": { VersionValue: ptr.To("1.0.0") },              // constant
 ```
 
-把 chart 的旋鈕逐項對上步驟 2 那張 gate 表,能用與不能用切得很乾淨。可用的是 `numDevices`(每節點幾顆)、`deviceProfile`(裝置屬性,但 `net`／`cpu` 依賴 consumable capacity)、`driverName`(換 driver 名等於換屬性網域與 DeviceClass 名)、`gpuDeviceStatus`(把裝置實況寫回 claim status);不可用的三個各卡在一個 alpha gate 上:
+chart 裡倒是有能做出差異的設定，例如 `kubeletPlugin.gpuPartitions` 會把一顆切成幾份，每一份的記憶體比整顆小。可是它就是步驟 2 值檔裡被關掉的那一行。為什麼要關？
 
-| 旋鈕 | 效果 | 卡在哪個 gate |
+### 查這座叢集開了哪些試驗功能
+
+Kubernetes 的新功能會依序經過 alpha（試驗，預設關閉）、beta、GA（正式）幾個階段。還沒正式的功能由 **feature gate** 控制，它是 Kubernetes 元件啟動時的功能開關。DRA 的核心已經 GA，但以本課程的叢集（AKS 1.35.6）來看，周邊有一大半功能還在 alpha。
+
+自己架的叢集要打開這些功能，通常得在 apiserver、kube-scheduler、kubelet 等元件上都開啟對應的 feature gate，有些功能還要另外啟用對應的 API 版本。託管的 AKS 不讓你改這些設定：看不到 apiserver 的 pod，也看不到它的啟動參數。能問出真實狀態的地方，是 apiserver 的 metrics 端點。下面是在 AKS 1.35.6 上的輸出：
+
+```console
+$ kubectl get --raw /metrics | grep 'kubernetes_feature_enabled' | grep -i DRA | sort
+kubernetes_feature_enabled{name="DRAAdminAccess",stage="BETA"} 1
+kubernetes_feature_enabled{name="DRAConsumableCapacity",stage="ALPHA"} 0
+kubernetes_feature_enabled{name="DRADeviceBindingConditions",stage="ALPHA"} 0
+kubernetes_feature_enabled{name="DRADeviceTaintRules",stage="ALPHA"} 0
+kubernetes_feature_enabled{name="DRADeviceTaints",stage="ALPHA"} 0
+kubernetes_feature_enabled{name="DRAExtendedResource",stage="ALPHA"} 0
+kubernetes_feature_enabled{name="DRAPartitionableDevices",stage="ALPHA"} 0
+kubernetes_feature_enabled{name="DRAPrioritizedList",stage="BETA"} 1
+kubernetes_feature_enabled{name="DRAResourceClaimDeviceStatus",stage="BETA"} 1
+kubernetes_feature_enabled{name="DRASchedulerFilterTimeout",stage="BETA"} 1
+```
+
+每一行是一個功能，最後的 1 或 0 表示開或關。規律很清楚：`BETA` 的都是 1，`ALPHA` 的都是 0。拿這張表對照 chart 的設定，能做出差異的三個設定，在 AKS 1.35.6 上剛好都卡在 alpha：
+
+| 設定 | 效果 | 依賴的功能 |
 |---|---|---|
 | `kubeletPlugin.gpuPartitions` | 一顆切成 N 份,partition 與整顆的 memory 不同 | `DRAPartitionableDevices` |
 | `gpuAllowMultipleAllocations` | 裝置可被多個 claim 依容量分食 | `DRAConsumableCapacity` |
 | `deviceClass.extendedResourceName` | 讓 pod 用 `resources.limits` 要裝置 | `DRAExtendedResource` |
 
-`gpuPartitions` 本來是**單一 driver 內**唯一能造出容量差異的路(partition 拿 `80Gi / N`、整顆拿 `80Gi`),偏偏就是被關掉的那一個(見[地雷 1](#mine-1))。裝置層造不出差異,就把差異做到 driver 層:同一份 chart、同一個 profile,只換 `driverName` 為 `retro-gpu.example.com`、`numDevices` 改成 3,再裝一次。
+第一行的 partition 是把一顆裝置切成幾份；第二行是多個 claim 按容量分用同一顆裝置。三個在這座叢集上都用不了。還能用的是 `gpuDeviceStatus`，它依賴的 `DRAResourceClaimDeviceStatus` 是 beta、已開啟，作用是讓 driver 把裝置資訊寫回 claim。
 
-第二份值檔跟第一份的差別只有三處:多一行 `driverName`、裝置數改成 3、拿掉兩個本來就用不上的 alpha 開關。
+在託管叢集上做 DRA，這張表最好在設計示範或規劃功能之前就先查。先裝再查的話，想做的事多半做不了，而且失敗的樣子常常是「設定寫了，什麼都沒發生」（見[疑難排解：做出裝置差異的設定都依賴被關掉的 alpha 功能](#mine-1)）。
+
+### 把差異做在 driver 這一層
+
+裝置層做不出差異，就利用步驟 2 最後提到的網域。chart 有一個 `driverName` 設定，沒寫時用預設的 `gpu.example.com`，它同時決定 driver 名、屬性網域和 chart 建立的 DeviceClass 名稱。同一份 chart、同一種模擬裝置，只把 `driverName` 換成 `retro-gpu.example.com`、裝置數改成 3，再裝一次。新 driver 的裝置屬性掛在另一個網域下，等於多了一批「另一個廠牌」的卡。
+
+第二份值檔跟第一份只差三處：多一行 `driverName`、裝置數改成 3、拿掉兩個本來就用不上的 alpha 設定。
 
 ```bash
 cat > 02-dra-driver-retro-values.yaml <<'EOF'
@@ -248,6 +246,8 @@ webhook:
 EOF
 ```
 
+裝好之後，把兩個 driver 的裝置一起列出來：
+
 ```console
 $ helm install retro-gpu … -f 02-dra-driver-retro-values.yaml --wait
 16:05:42  STATUS: deployed
@@ -258,34 +258,88 @@ gpu.example.com         gpu-0 … gpu-7   model=LATEST-GPU-MODEL   mem=80Gi     
 retro-gpu.example.com   gpu-0 … gpu-2   model=LATEST-GPU-MODEL   mem=80Gi     (3 顆)
 ```
 
-同一顆節點上現在有 11 顆裝置、2 個 driver、2 個 DeviceClass。注意兩個 driver 的裝置名字**都叫 `gpu-0`**:DRA 的裝置識別是 `(driver, pool, device)` 三元組,名字只在 pool 內唯一,這也是為什麼 claim status 裡永遠三個欄位一起寫。兩個 kubelet plugin 能在同一顆節點共存,實測有兩個前提:DaemonSet 沒有用 `hostNetwork`(`templates/kubeletplugin.yaml` 裡沒有這個欄位,兩個 metrics port 8080 不會撞),以及 driver 名是靠 `DRIVER_NAME` 環境變數傳進去的,兩個實例各自向 kubelet 註冊成不同的 driver。
+同一台節點上現在有 11 顆裝置、2 個 driver、2 個 DeviceClass。我們可以看到兩個 driver 的裝置名字**都有 `gpu-0`**。DRA 用 driver、pool、裝置名三個欄位一起識別一顆裝置，名字只在同一個 pool 裡唯一，所以後面 claim 的配置結果裡，這三個欄位永遠一起出現。
 
-### 步驟 5:六組示範,把核心 API 走一遍
+兩個 driver 能在同一台節點上並存，有兩個原因：DaemonSet 沒有用 `hostNetwork`（`templates/kubeletplugin.yaml` 裡沒有這個欄位），所以兩份 metrics 的 8080 port 不會撞；driver 名透過 `DRIVER_NAME` 環境變數傳進去，兩份各自用不同名字向 kubelet 註冊。
 
-所有測試 pod 都釘在 `drasim`(`nodeSelector: pool=drasim` 加 spot toleration),映像用 `registry.k8s.io/e2e-test-images/busybox:1.36.1-1`——同樣先 `curl` 驗過 manifest 回 200 才寫進檔案,Docker Hub 的 `ubuntu:22.04` 在課程環境有 rate limit 風險。容器進來先 `env | sort` 再睡著,**driver 注入了什麼,看 pod log 就好**。
+## 步驟 4:六組示範，把核心 API 走一遍
 
-#### 5a. 最小可行:一份 template、一顆 pod、一顆裝置
+接下來的測試 pod 都固定在 `drasim` 上（`nodeSelector: pool=drasim` 加 spot toleration）。映像用 `registry.k8s.io/e2e-test-images/busybox:1.36.1-1`，避開 Docker Hub 的拉取次數限制。容器一啟動先執行 `env | sort` 再睡著，所以 driver 往容器裡放了什麼，看 pod log 就知道。
 
-```yaml
+### 4a. 最小可行：一份 template、一顆 pod、一顆裝置
+
+有了供給（ResourceSlice）和分類（DeviceClass），還缺需求這一端：pod 要怎麼說「我要一顆」。這個需求物件叫 **ResourceClaim**，內容是要幾顆、要什麼樣的。ResourceClaim 可以由使用者直接建立，也可以由 **ResourceClaimTemplate**（一份需求的範本）替每顆 pod 各產生一份。先看這幾種物件之間的關係，每個方框最下面一行寫著它由誰建立：
+
+![DRA 四種物件的關係：driver 發佈 ResourceSlice；管理者建立 DeviceClass；使用者建立 Pod 與 ResourceClaimTemplate，pod 透過 template 實體化或直接引用具名的 ResourceClaim，claim 引用 DeviceClass 的名稱；kube-scheduler 的 dynamicresources 外掛讀取 ResourceSlice 與 ResourceClaim，把配置結果寫回 claim 的 status](../assets/diagrams/s1d6-dra-objects.svg)
+
+照著圖看：
+
+1. ResourceSlice 由 driver 發佈，使用者不會去改它。
+2. DeviceClass 由管理者建立，決定這座叢集有哪幾類裝置可以要。
+3. ResourceClaim、ResourceClaimTemplate 和 Pod 都在使用者這一端。pod 可以寫 template，讓每顆 pod 各產生一份 claim；也可以直接引用一份事先建好的具名 claim（虛線）。4e 會比較這兩種寫法。
+4. 排程器的 `dynamicresources` 外掛把供給和需求對起來，挑好之後寫回 claim 的 status。
+
+pod 這一端的寫法分兩段：pod 層的 `spec.resourceClaims` 宣告這顆 pod 會用到哪些 claim、各從哪來；容器層的 `resources.claims` 再按名字引用，表示哪個容器要用。下面是完整的檔案，裡面有三個物件：一個 namespace、一份只說「從 `gpu.example.com` 這一類裡要一顆」的 ResourceClaimTemplate，以及引用它的 `pod0`。pod 除了上面講的兩段，還照步驟 1 的標籤和 taint 寫了 `nodeSelector` 與 toleration；容器一啟動先執行 `env | sort` 把環境變數印到 log，再睡著等待：
+
+```bash
+cat > 03-a-basic-claimtemplate.yaml <<'EOF'
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dra-3a
+---
 apiVersion: resource.k8s.io/v1
 kind: ResourceClaimTemplate
-metadata: { namespace: dra-3a, name: single-gpu }
+metadata:
+  namespace: dra-3a
+  name: single-gpu
 spec:
   spec:
     devices:
       requests:
-        - { name: gpu, exactly: { deviceClassName: gpu.example.com } }
+        - name: gpu
+          exactly:
+            deviceClassName: gpu.example.com
 ---
+apiVersion: v1
 kind: Pod
+metadata:
+  namespace: dra-3a
+  name: pod0
 spec:
+  nodeSelector:
+    pool: drasim
+  tolerations:
+    - key: kubernetes.azure.com/scalesetpriority
+      operator: Equal
+      value: spot
+      effect: NoSchedule
   containers:
     - name: ctr0
-      resources: { claims: [ { name: gpu } ] }                  # container level: which claim
+      image: registry.k8s.io/e2e-test-images/busybox:1.36.1-1
+      command: ["sh", "-c"]
+      args: ["env | sort; trap 'exit 0' TERM; sleep 9999 & wait"]
+      resources:
+        claims:
+          - name: gpu
   resourceClaims:
-    - { name: gpu, resourceClaimTemplateName: single-gpu }      # pod level: where it comes from
+    - name: gpu
+      resourceClaimTemplateName: single-gpu
+EOF
+kubectl apply -f 03-a-basic-claimtemplate.yaml
 ```
 
-`pod0` 起來之後,namespace 裡多出一份叫 `pod0-gpu-mpm8x` 的 ResourceClaim,狀態是 `allocated,reserved`。名字的組成是 `<pod 名>-<claim 名>-<隨機碼>`,證明 template 是被實體化出來的,不是被引用。claim 的 status 分三塊,各自有不同的寫入者:
+套用之後，看 pod 和 claim：
+
+```console
+$ kubectl -n dra-3a get pods,resourceclaims
+pod/pod0                             1/1   Running
+resourceclaim/pod0-gpu-mpm8x         allocated,reserved
+```
+
+`pod0` 在跑，namespace 裡也多出一份叫 `pod0-gpu-mpm8x` 的 ResourceClaim，狀態是 `allocated,reserved`。檔案裡沒有寫這份 claim，它的名字由 `<pod 名>-<claim 名>-<隨機碼>` 組成：template 不會被 pod 直接使用，而是每顆 pod 照著它**產生**一份自己的 ResourceClaim。
+
+這份 claim 的 status 記著配置的結果：
 
 ```yaml
 status:
@@ -305,7 +359,9 @@ status:
   - { name: pod0, resource: pods }
 ```
 
-`allocation` 裡那段 `nodeSelector` 是排程器回填的:claim 一旦配置成功,就綁死在提供裝置的那顆節點上。pod 裡看得到的則是 driver 注入的環境變數:
+現在只要看兩處：`allocation` 是排程器寫的，記著配到哪一顆，driver、pool、裝置名三個欄位一起出現；`reservedFor` 記著現在是誰在用這份 claim，4e 會用到它。中間的 `devices` 是 driver 寫回的裝置資訊，就是步驟 3 留下的 `gpuDeviceStatus` 開關的作用。
+
+裝置怎麼進到容器裡？`pod0` 啟動時印出了所有環境變數，用 `kubectl logs` 加 `grep` 挑出跟裝置有關的幾行：
 
 ```console
 $ kubectl -n dra-3a logs pod0 | grep -E 'GPU_DEVICE|DRA_RESOURCE'
@@ -316,11 +372,20 @@ GPU_DEVICE_0_TIMESLICE_INTERVAL=Default
 GPU_DEVICE_GPU_0_RESOURCE_CLAIM=f8bb6f0b-…
 ```
 
-做這件事的是 **CDI(Container Device Interface)**:driver 在 `NodePrepareResources` 回傳 CDI device ID,containerd 據此改寫容器規格。真卡 driver 在這一步注入 `/dev/nvidia*` 節點與函式庫掛載,模擬 driver 注入幾個環境變數,機制相同,只有 payload 不同。
+這幾行都不是 03-a 檔案裡寫的（檔案裡沒有任何 `env`），是 driver 在容器啟動前放進去的：
 
-#### 5b. CEL 門檻:可滿足與不可滿足各一顆
+- `GPU_DEVICE_0=gpu-0`：配給這個容器的裝置，就是 claim status 裡的 `gpu-0`。
+- `GPU_DEVICE_0_SHARING_STRATEGY`、`GPU_DEVICE_0_TIMESLICE_INTERVAL`：模擬裝置的共用方式設定。
+- `GPU_DEVICE_GPU_0_RESOURCE_CLAIM`：這顆裝置屬於哪一份 claim，值是那份 claim 的 UID（Kubernetes 替每個物件產生的唯一識別碼）。
+- `DRA_RESOURCE_DRIVER_NAME`：放進這些變數的 driver。
 
-兩份 template 只差一個數字。`quantity()` 與 `.compareTo()` 是 Kubernetes CEL 的量詞擴充,**不能直接寫 `>= '40Gi'`**,那是字串比較。
+driver 是透過 **CDI**（Container Device Interface，描述「要讓容器用某個裝置，得對容器做哪些修改」的規格）把這些變數放進去的。模擬 driver 放的是環境變數；真卡的 driver 用同一個機制把 `/dev/nvidia*` 和函式庫掛進容器，Day 7 再細看。
+
+### 4b. 用 CEL 設門檻：一個挑得到，一個挑不到
+
+現在回到開場的需求：「VRAM 40Gi 以上」。從這一組開始，Namespace 和 Pod 的寫法都跟 4a 一樣，只列出不同的部分；寫成檔案後同樣用 `kubectl apply -f` 套用。條件寫在 claim 的 request 裡，用的是步驟 2 看過的 CEL。排程器會拿每一顆候選裝置代入運算式算一次，結果是 true 的才留下。
+
+下面兩份 template 只差一個數字。比較記憶體大小要用 Kubernetes 為 CEL 加的 `quantity()` 和 `.compareTo()`，**quantity 不能直接跟字串比**，不能寫成 `>= '40Gi'`，要先用 `quantity('40Gi')` 轉型，再用 `compareTo` 比較：
 
 ```yaml
 # gpu-mem-40gi:  80Gi >= 40Gi  → all 8 devices qualify
@@ -328,6 +393,8 @@ GPU_DEVICE_GPU_0_RESOURCE_CLAIM=f8bb6f0b-…
 # gpu-mem-160gi: 80Gi < 160Gi  → none qualify
 - cel: { expression: "device.capacity['gpu.example.com'].memory.compareTo(quantity('160Gi')) >= 0" }
 ```
+
+每顆裝置都是 80Gi，所以第一份八顆都合格，第二份一顆都不合格。兩顆 pod 各用一份：
 
 ```console
 $ kubectl -n dra-3b get pods,resourceclaims
@@ -342,17 +409,21 @@ Warning  FailedScheduling  default-scheduler
   2 Preemption is not helpful for scheduling.
 ```
 
-`cannot allocate all claims` 就是 `dynamicresources` 這個排程外掛的全部回覆,資訊量比 device plugin 時代的 `Insufficient nvidia.com/gpu` 還少([地雷 2](#mine-2))。
+`pod-ok` 拿到 `gpu-1`；`pod-impossible` 停在 Pending。注意它的事件：`drasim` 那台節點的理由只有 `cannot allocate all claims` 一句，沒說是哪個 claim、哪一條條件、篩掉了幾顆。條件打錯字跟裝置真的不夠，事件會長得一模一樣，怎麼追查見[疑難排解：`cannot allocate all claims`](#mine-2)。
 
-#### 5c. 排除式選擇:把某個世代的裝置整批篩掉
+### 4c. 排除式條件：把某一型整批篩掉
 
-先自建一個**跨 driver** 的 DeviceClass `mixed-gpu.example.com`,選擇器寫 `device.driver == 'gpu.example.com' || device.driver == 'retro-gpu.example.com'`,把步驟 4 造出來的異質性框進同一類。三顆 pod 各測一種排除法:
+開場需求的後半是「不要舊的那一批」。步驟 3 造出的 `retro-gpu.example.com` 正好扮演舊型號。
+
+要讓同一個需求同時看得到兩個 driver 的裝置，先自建一個跨 driver 的 DeviceClass `mixed-gpu.example.com`，條件寫 `device.driver == 'gpu.example.com' || device.driver == 'retro-gpu.example.com'`。再用三顆 pod 各測一種排除寫法：
 
 | pod | 選擇器 | 預期 | 實際 |
 |---|---|---|---|
 | `pod-not-retro` | `mixed` 類別加 `device.driver != 'retro-gpu.example.com'` | 只能拿到新型號 | Running,配到 `gpu.example.com/gpu-2` |
 | `pod-not-bleeding-edge` | `model != 'BLEEDING-EDGE-GPU'`(排掉不存在的型號) | 8 顆全合格 | Running,配到 `gpu-3` |
 | `pod-not-latest` | `model != 'LATEST-GPU-MODEL'`(排掉唯一存在的型號) | 全被排掉 | Pending |
+
+三份 claim 實際配到的裝置：
 
 ```console
 $ kubectl -n dra-3c get resourceclaims -o json | jq -r '.items[] |
@@ -362,11 +433,13 @@ pod-not-latest-gpu-rpcd4          (空)
 pod-not-retro-gpu-24pkg           gpu.example.com/gpu-2
 ```
 
-`pod-not-retro` 這一列的意義最大:候選集裡確實有 11 顆裝置、其中 3 顆屬於被排除的 driver,最後落在合格的那 8 顆裡。**不需要事先給節點貼標籤、不需要把不同世代的卡分到不同節點池,一條 CEL 就在裝置層級解決。**device plugin 那套要做同一件事,粒度只到節點。
+最值得看的是 `pod-not-retro`：它的候選裝置有 11 顆，其中 3 顆屬於被排除的 driver，最後配到的 `gpu-2` 落在合格的 8 顆裡。不必先替節點貼標籤，也不必把不同型號的卡拆到不同節點池，一條 CEL 就在裝置層級挑完。device plugin 的寫法要做同一件事，只能靠 `nodeSelector` 挑節點，最細只到節點。
 
-#### 5d. 一個 request 要兩顆
+到這裡可以回答一個設計問題：條件該寫在 DeviceClass 還是 claim？DeviceClass 是叢集層級的物件，由管理者定義「這座叢集有哪幾類裝置」，例如 `mixed-gpu.example.com` 把兩個 driver 的裝置收成一類，所有引用它的人都受這個條件約束。claim 裡的條件只屬於這一次需求，例如 4b 的記憶體門檻、這裡的排除 retro。多數使用者共用的條件放 DeviceClass，某個工作自己的條件放 claim。要注意，DeviceClass 本身不會強制任何人：使用者可以改引用別的類別。要讓條件真的生效，管理者還得控制叢集裡有哪些 DeviceClass 可以用。
 
-`exactly` 裡加上 `allocationMode: ExactCount` 與 `count: 2`,一個 request 就會展開成兩筆配置結果:
+### 4d. 一個 request 要兩顆
+
+在 `exactly` 裡加上 `allocationMode: ExactCount` 和 `count: 2`，一個 request 就會要兩顆：
 
 ```console
 $ kubectl -n dra-3d get resourceclaims -o json | jq …
@@ -383,11 +456,14 @@ GPU_DEVICE_GPU_4_RESOURCE_CLAIM=7ba5eeb3-…
 GPU_DEVICE_GPU_5_RESOURCE_CLAIM=7ba5eeb3-…
 ```
 
-兩顆不同的裝置、同一個 claim UID,而兩筆 `results` 的 `request` 欄位都是 `gpus`——這是 `count` 的展開,不是兩個 request。
+兩顆不同的裝置（`gpu-4`、`gpu-5`）屬於同一個 claim UID，兩筆配置結果的 `request` 欄位都是 `gpus`。這是一個 request 依 `count` 展開成兩筆，不是兩個 request。
 
-#### 5e. 共享與獨佔的左右對照
+### 4e. 共享與獨佔並排比較
 
-這一組是 device plugin 表達不出來的語意,所以證據做成左右兩邊同時跑。左邊一個**具名 ResourceClaim** `shared-gpu`,兩顆 pod 都寫 `resourceClaimName: shared-gpu`;右邊一份 **ResourceClaimTemplate**,兩顆 pod 各自實體化一份。
+4a 提過 pod 有兩種方式拿到 claim。這一組把兩種寫法並排跑：
+
+- 左邊先建一份**具名 ResourceClaim** `shared-gpu`，也就是使用者自己建立、有固定名字的 claim。兩顆 pod 都寫 `resourceClaimName: shared-gpu`。
+- 右邊是一份 ResourceClaimTemplate，兩顆 pod 都寫 `resourceClaimTemplateName`，各自產生一份。
 
 ```console
 $ kubectl -n dra-3e get pods
@@ -406,7 +482,9 @@ GPU_DEVICE_6=gpu-6
 GPU_DEVICE_GPU_6_RESOURCE_CLAIM=a88a00a8-…
 ```
 
-兩顆 pod 拿到同一顆 `gpu-6`,而且是**同一個 claim UID**——不是各自被配到剛好相同的裝置,是同一個 claim 物件被兩顆 pod 同時 reserve。`own-b` 的 Pending 把對照做得更完整,當下全叢集的帳本:
+`share-a` 和 `share-b` 拿到同一顆 `gpu-6`，而且 claim UID 也相同。這不是兩份 claim 剛好配到同一顆，而是同一份 claim 的 `reservedFor` 裡同時記著兩顆 pod。
+
+右邊的 `own-b` 為什麼 Pending？把當下全叢集的 claim 列出來就知道：
 
 ```text
 dra-3a/pod0-gpu-mpm8x                    gpu-0            pods=pod0
@@ -421,11 +499,15 @@ dra-3e/own-a-gpu-z6rlc                   gpu-7            pods=own-a            
 dra-3e/own-b-gpu-j5qrn                   (空)             pods=(空)                ← 沒得配了
 ```
 
-`gpu-0` 到 `gpu-7` 全滿。`share-a` 加 `share-b` 兩顆 pod 只花掉**一顆**裝置;`own-a` 加 `own-b` 要花掉**兩顆**,第八顆被 `own-a` 拿走之後 `own-b` 就 Pending。同樣兩顆 pod,共享寫法的裝置消耗量是獨佔寫法的一半,而差別只在 manifest 裡一個欄位名:`resourceClaimName` 對 `resourceClaimTemplateName`。
+`gpu.example.com` 的 `gpu-0` 到 `gpu-7` 全部配出去了，最後一顆 `gpu-7` 被 `own-a` 拿走，`own-b` 就沒得配。把 4e 這兩組畫成圖：
 
-#### 5f. 生命週期:誰跟著 pod 走,誰要自己收
+![左右對照：左邊 share-a 與 share-b 兩顆 pod 都指向具名 claim shared-gpu，共用一顆 gpu-6；右邊 own-a 與 own-b 各自從 template 產生一份 claim，own-a 拿到 gpu-7，own-b 沒有裝置可配，停在 Pending](../assets/diagrams/s1d6-share-vs-own.svg)
 
-先刪掉 template 產生的那份 claim 的消費者,claim 跟著 pod 一起消失,原因寫在物件上:
+我們可以從圖上看到，同樣兩顆 pod，左邊只用掉一顆裝置，右邊要兩顆。差別只在 manifest 裡的一個欄位名：`resourceClaimName` 或 `resourceClaimTemplateName`。要讓兩顆 pod 共用一顆裝置，就用具名 claim；要每顆 pod 各拿各的，就用 template。
+
+### 4f. 生命週期：哪種 claim 會跟著 pod 消失
+
+兩種寫法在刪除時也不一樣。先刪 4a 的 `pod0`，它的 claim 是 template 產生的：
 
 ```console
 16:09:26 $ kubectl -n dra-3a delete pod pod0
@@ -437,7 +519,12 @@ $ kubectl -n dra-3d get resourceclaim pod-two-gpus-q6z79 -o json | jq '{finalize
   "owner": [ { "kind": "Pod", "name": "pod-two", "controller": true } ] }
 ```
 
-template 產生的 claim 帶著一個指向 pod 的 ownerReference,pod 一死就被垃圾回收;`delete-protection` finalizer 則保證裝置先被 unprepare 才真的刪掉。`gpu-0` 一釋放,剛才卡住的 `own-b` 立刻補上,而 kubelet plugin 的 log 把整條因果鏈記了下來:
+claim 跟著 pod 一起消失了，原因寫在物件上。第二個指令看的是 4d 那份同樣由 template 產生的 claim，它帶著兩樣東西：
+
+- `owner` 是 **ownerReference**，記錄「這個物件屬於誰」。擁有者（這裡是 pod）被刪掉後，Kubernetes 的垃圾回收會把它一起刪除。
+- `finalizers` 裡的 **finalizer** 是物件刪除前必須先完成的清理項目，清單沒清空，物件就不會真的消失。`delete-protection` 保證裝置先從節點上釋放，claim 才刪得掉。
+
+`gpu-0` 一空出來，剛才 Pending 的 `own-b` 就補上了。節點上 driver 的 kubelet plugin（driver 跑在每個節點上、替 kubelet 準備和釋放裝置的那一部分）的 log 記下了整個交接過程：
 
 ```text
 08:09:27.254  "UnprepareResourceClaims is called" numClaims=1                     ← pod0 走
@@ -447,7 +534,9 @@ template 產生的 claim 帶著一個指向 pod 的 ownerReference,pod 一死就
                               "k8s.gpu.example.com/gpu=fc30f0da-…-gpu-0"]}]
 ```
 
-0.5 秒內完成交接。這段 log 也攤開了 CDI 的兩段式 device ID:一個 `common`(所有裝置共用的容器編輯),一個 `<claimUID>-<device>`(該次配置專屬)。具名 claim 那一邊要另外看,兩個消費者逐一離開:
+照時間往下看：先釋放 `pod0` 的裝置，接著替 `own-b` 的 claim 準備裝置，最後回傳 `gpu-0` 和兩個 CDI 裝置 ID。這兩個 ID 一個是 `common`，所有裝置共用的容器修改；一個是 `<claimUID>-<裝置名>`，只屬於這次配置。
+
+具名 claim 那一邊，兩顆 pod 逐一刪掉：
 
 ```console
 16:09:49 $ kubectl -n dra-3e delete pod share-a
@@ -456,11 +545,11 @@ template 產生的 claim 帶著一個指向 pod 的 ownerReference,pod 一死就
           shared-gpu   pending   allocation: NULL   reservedFor=(空)
 ```
 
-具名 claim 沒有指向任何 pod 的 ownerReference,它是使用者自己建的,所以物件不會消失;但只要 `reservedFor` 清空,配置就被釋放,`status.allocation` 變回 `null`、狀態回到 `pending`。營運上的差別因此很好記:**template 寫法的 claim 生命週期等於 pod 的生命週期,不留垃圾;具名 claim 忘了刪,漏掉的是一個 API 物件,不是一顆裝置**。
+具名 claim 是使用者自己建的，沒有指向任何 pod 的 ownerReference，所以 pod 都刪了，物件還在。但 `reservedFor` 清空之後，`status.allocation` 變回空值、狀態回到 `pending`，裝置已經釋放。所以 template 產生的 claim 跟 pod 同生同死；具名 claim 忘了刪，留下的只是一個 API 物件，不會一直佔著裝置。
 
-### 步驟 6:回頭看節點物件,裡面什麼都沒有
+## 步驟 5:回頭看節點物件
 
-八顆裝置正被佔用的當下,節點物件長這樣:
+在 device plugin 的世界，要知道一台節點還剩幾張卡，`kubectl describe node` 就看得到。現在 11 顆裝置裡有 8 顆正在被用，同樣看一次節點：
 
 ```console
 $ kubectl describe node aks-drasim-30601265-vmss000000
@@ -473,7 +562,9 @@ Non-terminated Pods:          (16 in total)
   dra-3c/3d/3e   pod-not-bleeding-edge / pod-not-retro / pod-two / own-a / share-a / share-b …
 ```
 
-11 顆裝置、8 顆已配置,`Capacity` 與 `Allocatable` 裡一個字都沒有;八顆正在用裝置的 pod,在節點的資源帳本上全部是 `0 (0%)`([地雷 3](#mine-3))。三種方案並排,差異一目瞭然——三欄都是本課程的實測:
+`Capacity` 和 `Allocatable` 裡沒有任何裝置，正在用裝置的 pod 在節點的資源欄位裡全部是 `0 (0%)`。原因是 DRA 的裝置不走 device plugin 那種「節點上的擴充資源」，根本不寫進節點物件。
+
+把三種做法放在一起比較：
 
 | | 資源在節點物件上長什麼樣 | 查「誰佔了什麼」看哪裡 |
 |---|---|---|
@@ -481,13 +572,15 @@ Non-terminated Pods:          (16 in total)
 | HAMi(Day 3–4) | 一樣是擴充資源(`nvidia.com/gpu`、`nvidia.com/gpumem`),切卡帳本另外塞在 `hami.io/*` annotation | `describe node` 加解析 annotation 加 WebUI |
 | DRA(本日) | 完全不出現,節點物件上零痕跡 | `kubectl get resourceslices`(供給)加 `kubectl get resourceclaims -A`(需求) |
 
-[Day 3 地雷 2](sprint1-day3-hami-memory-isolation.md#mine-2) 記過 `nvidia.com/gpumem` 查不到餘額,那還只是少一行;DRA 這裡是整套資源都不在節點物件上。排程器那一側能拿到的線索同樣少:AKS 是託管控制面,`kube-scheduler` 沒有 pod 可看,`kubectl -n kube-system get pods` 撈 scheduler 只撈得到 Day 3 裝的 `hami-scheduler`。所以 `dynamicresources` 外掛的 trace 在託管叢集上唯一看得到的形式,就是 pod 事件那一行 `cannot allocate all claims`;真正詳細的一手紀錄在 kubelet plugin 那邊,5f 引的 `UnprepareResourceClaims` → `Preparing claim` → `Returning newly prepared devices` 就是。**在託管 K8s 上診斷 DRA,driver 的 DaemonSet log 比排程器事件有用得多。**
+Day 3 的[「`kubectl describe node` 查不到 VRAM 餘額」](sprint1-day3-hami-memory-isolation.md#mine-2)只是少了一項；DRA 是整套裝置都不在節點物件上。所以多數讀節點 `allocatable` 來算剩餘容量的工具，都看不到 DRA 的裝置，要改成讀 ResourceSlice 和 ResourceClaim，見[疑難排解：節點上看不到 DRA 的裝置](#mine-3)。
 
-至於共存:KAI Scheduler、HAMi、HAMi-WebUI 全程 Running,本日所有 pod 都走預設的 `default-scheduler`,`gpuspot` 維持 0 台,沒有任何干擾。DRA 走的是 `resource.k8s.io` 這一整套獨立的 API 與獨立的排程外掛,跟擴充資源那條路沒有交集,這正是它們能在同一叢集共存的原因。
+排程器那一端能看到的也不多。AKS 的控制面是託管的，看不到 `kube-scheduler` 的 pod 和 log，`dynamicresources` 外掛的判斷只留下 pod 事件裡那句 `cannot allocate all claims`。比較詳細的紀錄在節點上的 driver，例如 4f 那段 `UnprepareResourceClaims` → `Preparing claim` → `Returning newly prepared devices`。在託管叢集上查 DRA 的問題，driver DaemonSet 的 log 比排程器事件有用。
 
-### 步驟 7:卸載,並確認 ResourceSlice 什麼時候才真的消失
+前幾天裝的 KAI Scheduler、HAMi、HAMi-WebUI 這段時間都還在叢集裡跑著，沒有受到影響。這一章的 pod 都由預設的 `default-scheduler` 排程，而 DRA 用的是 `resource.k8s.io` 這組獨立的 API 和排程外掛，跟擴充資源那條路沒有交集，所以兩套可以並存。
 
-刪掉測試負載之後,`resourceclaims` 全叢集歸零,但 chart 建的兩個 DeviceClass 還在——driver 還沒卸。接著卸兩個 release,並在卸載前後各數一次 ResourceSlice:
+## 步驟 6:卸載，並確認 ResourceSlice 什麼時候才消失
+
+先刪掉所有測試 pod、template、具名 claim 和自建的 `mixed-gpu.example.com`，這時全叢集已經沒有 claim，但 chart 建的兩個 DeviceClass 還在，因為 driver 還沒卸。接著卸載兩個 release，並在前後各看一次 ResourceSlice：
 
 ```console
 16:15:37 $ kubectl get resourceslices --no-headers | wc -l
@@ -505,15 +598,13 @@ No resources found                          ← DeviceClass 與 DaemonSet 都立
 No resources found                          ← 卸載後約 95 秒,自己清掉了
 ```
 
-DeviceClass 與 DaemonSet 是 helm 管的,`uninstall` 一下就走;ResourceSlice 不是 helm 建的,它是 kubelet plugin 在執行期自己 publish 的,helm 的 release manifest 裡根本沒有這個物件,所以會清,但不同步([地雷 4](#mine-4))。
+我們可以看到兩種物件消失的時間不同。DeviceClass 和 DaemonSet 是 helm 建的，`uninstall` 當下就刪掉；ResourceSlice 不是 helm 建的，而是 driver 跑起來之後自己發佈的，helm 的 release 裡沒有它，要等 driver 消失後由 Kubernetes 另外回收，所以晚了一段時間才清掉（見[疑難排解：`helm uninstall` 之後 ResourceSlice 還在](#mine-4)）。
 
-中間那段窗口另補一項驗證:在 ResourceSlice 還在、driver 已經沒了的狀態下,重建一個指向 `gpu.example.com` 的 DeviceClass 與 claim,會不會配到一顆不存在的裝置?結果是 `ghost-pod` 排在 Pending,claim 停在 `pending`,事件同樣是那句 `cannot allocate all claims`,沒有配置成功。不過這裡要誠實標一句:**這只證明「到觀察的時候不會配」,沒有證明「窗口內任一時刻都不會配」**,因為 slice 消失的確切時刻沒有量到,只知道落在 15 秒到 95 秒之間。
+ResourceSlice 清空後，再確認沒有殘留：`kubectl get deviceclass,resourceslices` 沒有任何結果，`kubectl get clusterrole,clusterrolebinding | grep -i dra` 也沒有（chart 的權限設定隨 uninstall 刪掉），webhook 本來就沒開，也不會有殘留的 webhook 設定。
 
-殘留照 Day 4 的做法逐項回查:`get deviceclass,resourceslices` 零筆、`get clusterrole,clusterrolebinding | grep -i dra` 零筆(chart 的 RBAC 隨 uninstall 清掉)、兩種 webhook 設定也都零筆(`webhook.enabled=false`,本來就沒建)。
+## 步驟 7:刪掉 `drasim` 節點池
 
-### 步驟 8:刪掉 `drasim`,結清今天的帳
-
-`drasim` 不在 Day 0 那套收工歸零循環的涵蓋範圍內(那套指令只管 `gpuspot`),所以這一步必須自己做完:
+Day 0 的收工指令只 scale `gpuspot`，`drasim` 要自己刪：
 
 ```console
 16:17:43 $ az aks nodepool delete -g <resource-group> --cluster-name <cluster> -n drasim \
@@ -525,56 +616,40 @@ system   1.35.6              Standard_D2as_v5       1       Succeeded           
 gpuspot  1.35.6              Standard_NC4as_T4_v3   0       Succeeded           User
 ```
 
-## 驗收 checkpoint
+清單裡只剩 `system` 和 `gpuspot` 就完成了。
 
-| 檢查項 | 指令 | 期待結果 |
-|---|---|---|
-| 映像不必自己 build | `curl -o /dev/null -w "%{http_code}" https://registry.k8s.io/v2/dra-example-driver/dra-example-driver/manifests/v0.4.0` | `200`,且回的是 manifest list |
-| 知道哪些 DRA 功能是開的 | `kubectl get --raw /metrics \| grep kubernetes_feature_enabled \| grep -i DRA` | 每個 gate 一行 0 或 1;AKS 上 beta 全 1、alpha 全 0 |
-| driver 有把裝置 advertise 出來 | `kubectl get resourceslices` | 每個 driver 每個節點一份,`POOL` 欄是節點名 |
-| 屬性讀得出來、兩個 driver 互不干擾 | `kubectl get resourceslices -o yaml` | 兩份 slice、兩個 DRIVER 值(裝置數 8 與 3),每顆裝置有 `index`／`uuid`／`model`／`driverVersion` 與 `memory`／`compute` |
-| CEL 選得到也選得掉 | `kubectl -n dra-3b get pods` | `pod-ok` Running、`pod-impossible` Pending |
-| 共享語意成立 | `kubectl -n dra-3e get resourceclaims -o yaml` | `shared-gpu` 的 `reservedFor` 有兩筆,裝置只有一顆 |
-| 節點物件上查不到裝置 | `kubectl describe node <drasim 節點>` | `Capacity`／`Allocatable` 沒有任何 DRA 字樣,消費 pod 全是 `0 (0%)` |
-| driver 真的走乾淨 | `kubectl get resourceslices` | `helm uninstall` 之後多等一輪,`No resources found` 才算數 |
-| 節點池刪掉了 | `az aks nodepool list … -o table` | 清單只剩 `system` 與 `gpuspot` |
+## 疑難排解
 
-## 地雷記錄
+### 做出裝置差異的設定都依賴被關掉的 alpha 功能 {#mine-1}
 
-### 地雷 1:能造出裝置差異的旋鈕,全部依賴被關掉的 alpha gate {#mine-1}
+**症狀**：driver 裝好，裝置也都在，但每顆的 `model`、`driverVersion`、`memory`、`compute` 完全相同，CEL 條件寫得出來卻分不出裝置。chart 裡能做出差異的三個設定（`kubeletPlugin.gpuPartitions`、`gpuAllowMultipleAllocations`、`deviceClass.extendedResourceName`）在託管叢集上都用不了。
 
-**症狀**:driver 裝好、8 顆裝置都在,`kubectl get resourceslices -o yaml` 攤開來卻發現每顆的 `model`、`driverVersion`、`memory`、`compute` 完全相同,只有 `index` 與 `uuid` 會變。CEL 練習沒有素材可挑——寫得出語法,分不出裝置。回頭翻 chart values 找旋鈕,三個能造出差異的(`kubeletPlugin.gpuPartitions`、`gpuAllowMultipleAllocations`、`deviceClass.extendedResourceName`)在託管叢集上全部不能用。
+**原因**：模擬裝置的屬性在原始碼裡就是固定值；能做出差異的設定都依賴 alpha 功能，而 AKS（1.35.6）上 DRA 的 alpha 功能全部關閉，也不能改。
 
-**根因**:兩層。第一層在原始碼,`internal/profiles/gpu/gpu.go` 把 `model` 與 `driverVersion` 寫成常數、`memoryPerGPU` 與 `computePerGPU` 也是固定值,gpu profile 的模擬裝置是刻意同質的。第二層在 feature gate,唯一能在單一 driver 內造出容量差異的 `gpuPartitions` 依賴 `DRAPartitionableDevices`,而 AKS 1.35 把 DRA 的 alpha gate 全部設 0,不給改。
-
-**修法**:把異質性做到 driver 層,同一份 chart、同一個 profile,只換名字再裝一次:
+**修法**：照步驟 3 的做法換一個 `driverName` 再裝一次，把差異做在 driver 這一層。步驟 3 做過就跳過。值檔要帶著 `drasim` 的 nodeSelector 和 spot toleration，只用 `--set` 帶 `driverName` 和裝置數的話，DaemonSet 會排不上節點：
 
 ```bash
 helm install retro-gpu <chart> -n dra-example-driver \
   -f 02-dra-driver-retro-values.yaml --wait
 ```
 
-值檔裡除了 `driverName: retro-gpu.example.com` 與裝置數 3,還帶著 `drasim` 的 nodeSelector 和 spot toleration——只用 `--set` 帶前兩項的話,DaemonSet 會排不上節點。裝完之後,同一顆節點上就有兩個屬性網域、兩個 DeviceClass、11 顆可區分的裝置,`device.driver != X` 這條 CEL 也有了作用對象。
+在託管叢集上規劃 DRA 功能前，先用 `kubectl get --raw /metrics | grep kubernetes_feature_enabled` 查哪些功能有開。
 
-**教訓**:託管叢集上做 DRA,順序是「先問 gate,再設計示範」。`kubectl get --raw /metrics | grep kubernetes_feature_enabled` 是唯一問得出真實狀態的方法,而它應該跑在 `helm install` 之前,不是之後。
+### `cannot allocate all claims` 不說是哪個 claim、哪條條件 {#mine-2}
 
-### 地雷 2:`cannot allocate all claims` 不說是哪個 claim、哪條 selector、篩掉幾顆 {#mine-2}
+**症狀**：pod Pending，事件只有一行 `0/2 nodes are available: 1 cannot allocate all claims`。
 
-**症狀**:pod Pending,事件只有一行 `0/2 nodes are available: 1 cannot allocate all claims`。
+**原因**：`dynamicresources` 排程外掛目前只回這一句。device plugin 的 `Insufficient nvidia.com/gpu` 至少說明缺哪一種資源，這一句連 claim 名字都沒有。CEL 打錯字（屬性名或網域寫錯）和裝置真的不夠，事件一模一樣。
 
-**根因**:`dynamicresources` 排程外掛目前就只回這一句。device plugin 世界的 `Insufficient nvidia.com/gpu` 至少講明缺哪一種資源;這一句連 claim 名字都不給。結果是 CEL 打錯字(屬性名寫錯、網域寫錯)跟裝置真的不夠,事件長得一模一樣。
+**修法**：自己拆開查。把多條條件拆成單條逐一測，找出是哪一條把候選裝置篩光；或用 `kubectl get resourceslices -o yaml` 把裝置屬性列出來，跟運算式逐字對照。最常見的錯是網域（driver 名）寫錯，先查這個。設計 claim 時，複雜的條件拆成幾條獨立的 selector，出問題時比較好一條一條排除。
 
-**修法**:只能自己拆。把多條 selector 拆成單條逐一測,確認是哪一條把候選集清空;或直接 `kubectl get resourceslices -o yaml` 把裝置屬性攤開,跟表達式逐字對。屬性存在與否比表達式對錯更常是元兇,先確認網域名(driver 名)有沒有寫對。
+### 節點上看不到 DRA 的裝置，`describe node` 顯示 `0 (0%)` {#mine-3}
 
-**教訓**:這是 DRA 現階段最大的可觀測性缺口。設計 claim 的時候就要預留除錯路徑——把複雜條件拆成幾條獨立的 selector,失敗時能二分;全部塞進一條長表達式,出事只能重寫。
+**症狀**：節點上 11 顆裝置、8 顆已配置，`kubectl describe node` 的 `Capacity` 與 `Allocatable` 裡沒有任何裝置，正在用裝置的 pod 全部顯示 `0 (0%)`。
 
-### 地雷 3:DRA 的裝置不是擴充資源,所有算節點餘量的工具都看不見它 {#mine-3}
+**原因**：DRA 的裝置不是擴充資源，不會寫進 `node.status.capacity` 與 `node.status.allocatable`。`describe node`、`kubectl top`，以及多數讀節點 `allocatable` 的儀表板、配額工具，都看不到 DRA 的供給與用量。
 
-**症狀**:節點上 11 顆裝置、8 顆已配置,`kubectl describe node` 的 `Capacity` 與 `Allocatable` 一個字都沒有,八顆正在用裝置的 pod 在 `Non-terminated Pods` 區塊全部顯示 `0 (0%)`。
-
-**根因**:DRA 的裝置根本不走擴充資源那條路,`node.status.capacity` 與 `node.status.allocatable` 裡沒有它。`describe node`、`kubectl top`、以及任何讀 `node.status.allocatable` 的儀表板、autoscaler、配額工具,都看不到 DRA 的供給與消耗。
-
-**修法**:供給端讀 `ResourceSlice`、需求端讀 `ResourceClaim`,兩邊自己 join:
+**修法**：供給讀 ResourceSlice，用量讀 ResourceClaim，兩邊自己對起來：
 
 ```bash
 kubectl get resourceslices -o json | jq '[.items[].spec.devices[]] | length'
@@ -582,40 +657,38 @@ kubectl get resourceclaims -A -o json | \
   jq '[.items[].status.allocation.devices.results // [] | length] | add'
 ```
 
-**教訓**:遷移到 DRA 的時候容量儀表板要整套重寫,這件事要進遷移計畫,不能留到上線後才發現。[Day 3 地雷 2](sprint1-day3-hami-memory-isolation.md#mine-2) 的 `nvidia.com/gpumem` 查不到餘額只是少一行,還能靠 annotation 補;DRA 是整套資源都不在節點物件上,補不了,只能換查法。
+從 device plugin 換到 DRA 時，原本讀節點資源的容量儀表板多半要改寫，這件事要排進換用的計畫裡。
 
-### 地雷 4:`helm uninstall` 不會帶走 ResourceSlice,清理是非同步的 {#mine-4}
+### `helm uninstall` 之後 ResourceSlice 還在 {#mine-4}
 
-**症狀**:`helm uninstall` 回報兩個 release 都卸乾淨,DeviceClass 與 DaemonSet 當場消失,`kubectl get resourceslices` 卻還列著兩份裝置清單。15 秒後還在,約 95 秒後才自己不見。
+**症狀**：`helm uninstall` 回報兩個 release 都卸載了，DeviceClass 與 DaemonSet 當場消失，`kubectl get resourceslices` 卻還列著兩份裝置清單，過一陣子才自己不見。
 
-**根因**:ResourceSlice 是 kubelet plugin 在執行期 publish 的物件,不在 helm release 的 manifest 裡,`uninstall` 碰不到它;真正負責清掉它的是控制面在 driver 消失後的回收,而那是非同步的。
+**原因**：ResourceSlice 是 driver 執行時自己發佈的，不在 helm release 裡，`uninstall` 刪不到它。driver 消失後，由 Kubernetes 另外回收，不是同步完成的。
 
-**修法**:判斷 driver 是否真的走乾淨,看 ResourceSlice,不要看 helm release——`kubectl get resourceslices` 多等一輪再確認一次。
+**修法**：判斷 driver 有沒有卸乾淨，看 ResourceSlice，不要只看 helm release；`kubectl get resourceslices` 隔一段時間再確認一次。在 driver 已卸、ResourceSlice 還沒清掉的那段時間裡另外建 claim 測過一次，當時沒有被配到這份殘留的裝置清單上，但這只代表測試當下，不保證整段時間內任何時刻都不會配到。升級 driver 版本時，chart `values.yaml` 裡的 `maxSurge: 1` 就是為了避開這段空檔：滾動更新時新舊 driver 會重疊一段時間，不會出現沒有 driver 的時候。
 
-**教訓**:這個窗口在換 driver 版本或換 driver 廠商時會現身,「裝置清單還在、driver 已經不在」的狀態本次最長觀察到 95 秒。chart 的 `values.yaml` 裡那個 `maxSurge: 1` 註解明講是為了 seamless rolling update,講的就是這件事:滾動更新讓新舊 plugin 有重疊時間,窗口才不會變成空窗。
+## 想一想
 
-## 帶得走的東西
+- 一座叢集裡有兩代 GPU，管理者希望所有人都只用新的一代；其中一個推論服務另外要求 VRAM 40Gi 以上。這兩個條件你會分別寫在哪裡？管理者要怎麼確保大家真的只用新的一代？
+- 一個前處理程式和一個推論服務要用同一顆 GPU 交換資料，你寫了一份 ResourceClaimTemplate 讓兩顆 pod 都引用，結果兩顆 pod 拿到不同的裝置。問題出在哪？改成具名 claim 之後，兩顆 pod 都刪掉時，那顆 GPU 會被釋放嗎？
+- 監控儀表板顯示某台節點的 GPU 用量是 0，但新的 DRA pod 卻排不上去，事件只有 `cannot allocate all claims`。你會先查哪兩樣東西？
 
-- 裝置從整數變成物件之後,多出來的不是欄位,是**表達力**。`resources.limits: nvidia.com/gpu: 1` 只能講「幾顆」,而 ResourceSlice 的 `attributes` 加一條 CEL 可以講「 VRAM 至少 40 GiB 而且不是 retro 那個世代的那幾顆」。過去要靠節點標籤、節點池切分、自訂資源名去繞的需求,現在有一個放得下它們的地方。
-- 共享與獨佔的差別,在 DRA 裡是 manifest 上一個欄位名。兩顆 pod 寫 `resourceClaimName` 指同一個具名 claim,就真的持有同一顆裝置、同一個 claim UID;各自寫 `resourceClaimTemplateName`,就各拿各的。同樣兩顆 pod,前者的裝置消耗量是後者的一半。
-- 託管叢集上任何 alpha 功能,能力邊界都由 apiserver 說了算。`kubectl get --raw /metrics | grep kubernetes_feature_enabled` 這一句問得出的答案,決定的是示範怎麼設計,而不是裝完之後拿來解釋失敗。查在前面省下的是重做,查在後面得到的只是理由。
-- DRA 的可觀測性目前往兩端集中:排程失敗只有一句 `cannot allocate all claims`,kubelet plugin 的 log 卻把 prepare 與 unprepare 的每一步連同 CDI device ID 都記下來。託管 K8s 拿不到 `kube-scheduler` 的 log,所以診斷路徑要反過來走,從 driver 的 DaemonSet 往回推。
-- 概念驗證不需要真硬體。模擬 driver 與真卡 driver 在 ResourceSlice、CEL、排程配置、CDI 注入這四段上走同一條路,差別只在最後注入容器的是環境變數還是裝置節點。同樣的內容搬到 GPU 節點上做,光是等節點開機就多五分鐘。
+## 小結
+
+DRA 把裝置從節點上的一個整數，變成 driver 發佈的 ResourceSlice 裡一顆顆帶屬性的物件。管理者用 DeviceClass 定義有哪幾類裝置，使用者用 ResourceClaim 寫要幾顆、用 CEL 寫條件，排程器把兩邊對起來，再由 driver 透過 CDI 把裝置交給容器。要共用一顆裝置，就讓 pod 引用同一份具名 claim；各拿各的，就用 template。之後遇到「要某種條件的卡」或「兩個程式要用同一顆卡」的需求，或是 DRA 的 pod 排不上去、節點上又看不到裝置時，就回來想這一章：條件放在哪裡、claim 是哪一種，以及資料要去 ResourceSlice 和 ResourceClaim 查。
 
 ## 延伸閱讀
 
-想往下深挖,從這幾份開始:
+想再深入，可以從這幾份開始：
 
-- **[Kubernetes 官方文件:Dynamic Resource Allocation](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)** —— 四個 API 物件的權威定義與 `resource.k8s.io/v1` 的欄位說明,本章「原理與架構」那四條的出處。
-- **[kubernetes-sigs/dra-example-driver 原始碼](https://github.com/kubernetes-sigs/dra-example-driver)** —— 本章用的模擬 driver。`internal/profiles/gpu/gpu.go` 是[地雷 1](#mine-1) 那兩個常數的所在,`deployments/helm/` 則是本章所有安裝值的對照本。
-- **[Kubernetes v1.34: DRA has graduated to GA](https://kubernetes.io/blog/2025/09/01/kubernetes-v1-34-dra-updates/)** —— 官方部落格,說明核心 GA 的範圍與同期各項周邊功能的階段,對照步驟 2 那張 gate 表讀最有感。
-- **[Kubernetes CEL 參考:quantity 函式庫](https://kubernetes.io/docs/reference/using-api/cel/)** —— `quantity()` 與 `compareTo()` 的完整定義,5b 那條 memory 門檻為什麼不能寫成字串比較,答案在這一頁。
+- **[Kubernetes 官方文件:Dynamic Resource Allocation](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/)** —— 四個 API 物件的定義與 `resource.k8s.io/v1` 的欄位說明。
+- **[kubernetes-sigs/dra-example-driver 原始碼](https://github.com/kubernetes-sigs/dra-example-driver)** —— 本章用的模擬 driver。`internal/profiles/gpu/gpu.go` 是步驟 3 那兩個常數的所在,`deployments/helm/` 是本章所有安裝值的出處。
+- **[Kubernetes v1.34: DRA has graduated to GA](https://kubernetes.io/blog/2025/09/01/kubernetes-v1-34-dra-updates/)** —— 官方部落格,說明核心 GA 的範圍與同期各項周邊功能所在的階段,可以對照步驟 3 查到的功能開關一起看。
+- **[Kubernetes CEL 參考:quantity 函式庫](https://kubernetes.io/docs/reference/using-api/cel/)** —— `quantity()` 與 `compareTo()` 的完整定義,4b 的記憶體門檻為什麼不能寫成字串比較,這一頁有說明。
 
 ## 下一步
 
-今天所有結論都建立在一個前提上:裝置是 driver 憑空生成的。ResourceSlice 裡的 `80Gi` 沒有一顆實體晶片對應,CDI 注入的也只是幾個環境變數,所以「配置成功」就是全部——沒有 driver 版本要對、沒有節點上的執行期要配合、也沒有裝置初始化會失敗。
-
-Day 7 把同一組 API 換到真的 T4 上。四個物件不變、CEL 不變、共享語意不變,變的是供貨那一端從模擬換成硬體:ResourceSlice 裡的屬性要真的查出來、注入容器的要換成裝置節點與函式庫、而 `gpuspot` 那條每次都要等五分鐘的開機路徑也回來了。前六天累積的整數世界怎麼跟這套新模型在同一顆節點上相處,是那一天要當場量出來的東西。
+這一章的裝置都是 driver 模擬出來的，ResourceSlice 裡的 `80Gi` 沒有對應的晶片，放進容器的也只是環境變數。Day 7 把同一組 API 搬到真的 T4 上：四種物件、CEL、共享寫法都不變，變的是供給那一端，屬性要從硬體查出來，放進容器的換成裝置檔案與函式庫。[Day 7](sprint1-day7-dra-aks-real-gpu.md)
 
 ---
 

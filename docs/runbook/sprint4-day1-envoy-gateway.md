@@ -1,46 +1,23 @@
-# Day 1: Envoy Gateway 取代 Ingress——Gateway API 與 HTTP/3
+# Day 1：用 Envoy Gateway 驗證入口路由與 HTTP/3
 
 ![Envoy 官方標誌](../assets/logos/envoy-icon-color.svg){ align=right width="76" }
 
-> 入口流量以前都交給 Ingress。它把「用哪個 controller、在哪個主機路徑、送到哪個後端」三件事全塞進一個物件,而且新東西(像 HTTP/3)一直很難補上去。今天用 **Envoy Gateway**——Gateway API 的 Envoy 實作——把入口流量重新接一次,並且開起 Ingress 一直做不好的 HTTP/3。
+同一個 nginx 網站已經可以透過 Service 存取。現在要讓外部使用者用 `demo.mesh.lab` 連進來，並且支援 HTTP/3。頁面能打開，只能說明某條路徑成功；它不能告訴你主機名稱規則是否生效，也不能證明使用了 HTTP/3。這章會用對照請求與協定資訊，分別判斷這兩件事。
 
-!!! abstract "你在課程的哪裡"
-    - **[Day 0](sprint4-day0-mesh-concepts.md)**:畫好三層地圖,知道 north-south(入口)跟 east-west(服務之間)是兩回事。
-    - **今天**:動手做 north-south 那層——建一座叢集、裝 Envoy Gateway,用 Gateway API 把一條入口流量路由起來,再把 HTTP/3 開起來。
-    - **接下來**:[Day 2](sprint4-day2-istio-ambient.md) 做 east-west——Istio ambient 的服務間 mTLS 與斷路。
+## 先備妥 Pod 網路與入口控制器
 
-## 今天要走的路
+本章使用 AKS、Cilium 1.20.0、Envoy Gateway v1.8.3 與 Kubernetes 1.35.6 的驗證結果。實作前需備妥可使用的 AKS 叢集、Helm，以及命名空間 `mesh-demo` 中名為 `web`、連接埠為 80 的 nginx Service 與後端 Pod。範例網域不需要公開 DNS；後續以 Host 標頭或 `--resolve` 指定路由與位址。
 
-| 步驟 | 做什麼 | 對應 |
-|---|---|---|
-| 1 | 建一座 AKS 叢集,用 BYOCNI 裝上游 Cilium 當 CNI | 整個 Sprint 4 的地基 |
-| 2 | 裝 Envoy Gateway,用 Gateway API 三件套路由一條入口流量 | gate:外部請求打到後端 |
-| 3 | 開 HTTP/3(QUIC),驗客戶端真的走 h3 | gate:回應走 h3 |
+這組練習環境使用 **BYOCNI（自行安裝 CNI）**：建立 AKS 時選用 `network-plugin none`，再自行安裝 Cilium。它讓後續章節可以調整 Cilium 與 Istio 共存所需的設定；已有其他 CNI 的叢集不能直接照下面安裝指令覆蓋。本章不提供既有叢集的 CNI 遷移程序。
 
-一個先講清楚的詞:**BYOCNI**(Bring Your Own CNI,自帶 CNI)。開 AKS 時微軟預設會幫你裝一個受管的 CNI;BYOCNI 是叫它「什麼都別裝」(`--network-plugin none`),節點先呈 `NotReady`,再由你自己裝上游 Cilium。之所以要這樣,是因為受管版的 Cilium 只開放子集功能,而後面幾天要用到完整上游 Cilium 的 mesh/Gateway API——所以從第一天就自己裝。
-
-### Ingress 與 Gateway API:一份拆成三份
-
-Gateway API 不是 Ingress 的加強版,是把 Ingress 那一份物件**拆成三個各自負責的物件**:
-
-| Ingress 裡的一件事 | Gateway API 對應的物件 |
-|---|---|
-| `ingressClassName: nginx`(用哪個 controller) | **GatewayClass**(controllerName 指向 Envoy Gateway) |
-| host + 入口埠(:80) | **Gateway**(listener) |
-| path → backend | **HTTPRoute**(rules) |
-
-拆開的好處是各段可以獨立擁有、獨立授權——平台團隊管 Gateway,應用團隊管自己的 HTTPRoute,不用再共編一份 Ingress。
-
-## 步驟 1: 建 BYOCNI 叢集 + 裝上游 Cilium
-
-叢集建起來時網路外掛是 `none`,節點會先卡在 `NotReady`——這是 BYOCNI 的正常現象,還沒裝 CNI 而已:
+尚未安裝 CNI 時，控制平面可以是 Running，但節點仍然 NotReady。下面兩行呈現的就是這個差別：
 
 ```text
 prov=Succeeded  power=Running  k8s=1.35.6  networkPlugin=none  containerd=2.3.3-2
 aks-nodepool1-31753998-vmss000000   NotReady   ...   containerd://2.3.3-2
 ```
 
-裝上游 Cilium(這一組設定會一路用到 Day 3,先釘好):
+`networkPlugin=none` 與節點的 `NotReady` 要一起判讀。先確認使用的是預定的 BYOCNI 環境，再安裝網路外掛。下列指令需要 Helm 已加入 Cilium chart repository；`<API server FQDN>` 請替換成該叢集 kubeconfig 中 `server` URL 的主機名稱，不含 `https://` 與連接埠。
 
 ```sh
 helm install cilium cilium/cilium --version 1.20.0 --namespace kube-system \
@@ -51,7 +28,7 @@ helm install cilium cilium/cilium --version 1.20.0 --namespace kube-system \
   --set cni.exclusive=false --set envoyConfig.enabled=true
 ```
 
-那幾個設定不是隨便挑的:`cni.exclusive=false` 是留位子給 Day 2 的 Istio(讓它的 CNI 掛得上去),`kubeProxyReplacement=true` 是 Day 3 Cilium L7 要的前置。裝完節點就轉 `Ready`:
+`cni.exclusive=false` 允許後續 Istio CNI 共存；`socketLB.hostNamespaceOnly=true` 限制 socket 負載平衡的作用範圍，供 ambient 的流量導引使用。這些設定在 [Day 2](sprint4-day2-istio-ambient.md) 會繼續使用。安裝完成後，除了節點 Ready，還要確認 Cilium 與 Envoy 狀態：
 
 ```text
 aks-nodepool1-31753998-vmss000000   Ready   <none>   6m30s   v1.35.6
@@ -61,12 +38,63 @@ Envoy DaemonSet:   OK
 Cluster Pods:      5/5 managed by Cilium
 ```
 
-!!! note "kube-proxy 沒有走,而是跟 Cilium 併存"
-    設了 `kubeProxyReplacement=true`、Cilium 接手了 kube-proxy 的活,但 AKS 的 `kube-proxy` DaemonSet **仍然在跑**(desired=1)——AKS 不會因為你裝了 Cilium 就把它撤掉。Day 1 這不影響功能,但 Day 3 要純用 Cilium 的 L7 時得回頭確認這件事。
+驗證環境仍有 AKS 管理的 kube-proxy DaemonSet。`kubeProxyReplacement=true` 不代表 AKS 會自動刪除它；本章僅確認這組環境的路由功能，沒有驗證手動移除受管元件的後果。
 
-## 步驟 2: Envoy Gateway + Gateway API 三件套
+接著需要先安裝 Envoy Gateway 控制器及它使用的 Gateway API CRD；安裝方式見[官方快速入門](https://gateway.envoyproxy.io/docs/tasks/quickstart/)。以下以控制器與 CRD 已就緒為前提，繼續設定入口與路由。
 
-裝好 Envoy Gateway 後,套用三件套(GatewayClass / Gateway / HTTPRoute)。Envoy Gateway 會自動佈一個 Envoy proxy,並替它開一個 Azure LoadBalancer 拿公網 IP:
+## 把入口選擇、監聽與路由分開
+
+Gateway API 將不同管理責任分成幾種物件。**GatewayClass** 選擇控制器實作；**Gateway** 宣告入口的 listener，也就是接收連線的協定與連接埠；**HTTPRoute** 宣告哪些 HTTP 請求送到哪個 Service。平台團隊可以管理共用 Gateway，應用團隊則管理自己的路由。
+
+以下是已驗證的 HTTP 路由設定。套用前，前述 `web` Service 必須已存在。先看 `parentRefs` 如何將 HTTPRoute 連到 `eg`，再看 `backendRefs` 如何指向 `web:80`：
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: eg
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: eg
+  namespace: mesh-demo
+spec:
+  gatewayClassName: eg
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      hostname: "demo.mesh.lab"
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: web
+  namespace: mesh-demo
+spec:
+  parentRefs:
+    - name: eg
+  hostnames:
+    - "demo.mesh.lab"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: web
+          port: 80
+```
+
+`hostnames` 限定 `demo.mesh.lab`，`PathPrefix: /` 則匹配它底下的路徑。Gateway 與 HTTPRoute 放在同一個 `mesh-demo` 命名空間，符合 listener 的 `allowedRoutes` 設定。
+
+控制器接受設定後，應再確認它已完成配置，且後端參照可解析。驗證結果如下：
 
 ```text
 Gateway eg:    Accepted=True  Programmed=True
@@ -74,7 +102,7 @@ HTTPRoute web: Accepted=True  ResolvedRefs=True
 envoy-mesh-demo-eg-dd08789d   LoadBalancer   <LB-IP>   80:32421/TCP
 ```
 
-打進去驗——對的 host 走到 nginx 後端、錯的 host 不被路由:
+`Accepted=True` 表示設定被接受，`Programmed=True` 表示 Gateway 已配置；HTTPRoute 的 `ResolvedRefs=True` 則表示參照能解析。這些狀態仍不能取代一次實際請求。將 `<LB-IP>` 換成該 LoadBalancer Service 的外部 IP，再用兩種 Host 測試：
 
 ```console
 $ curl -H "Host: demo.mesh.lab" http://<LB-IP>/
@@ -85,11 +113,49 @@ $ curl -H "Host: nope.invalid" http://<LB-IP>/
 wrong-host -> HTTP 404
 ```
 
-**200 而且 `server: nginx`**,代表請求真的經過 Envoy Gateway、照 HTTPRoute 找到後端;錯 host 拿 404,代表 hostname 比對有生效。第一個 gate 過了。
+同一個入口 IP，正確 Host 回 200、錯誤 Host 回 404，才把 hostname 匹配也驗到了。`server: nginx` 提供後端回應的線索，但單憑這個標頭無法證明整條代理路徑；需要和 Gateway 狀態、所使用的入口 IP 一起判讀。
 
-## 步驟 3: HTTP/3
+## 啟用 HTTP/3 前，先建立 HTTPS listener
 
-先講 **HTTP/3** 是什麼、為什麼 Ingress 一直很難:它走的傳輸協定是 **QUIC**,而 QUIC 跑在 **UDP** 上(HTTP/1 和 HTTP/2 是走 TCP)。Ingress Nginx 對 HTTP/3 的支援一直很卡,Envoy Gateway 則是設定一個欄位就開:
+**HTTP/3** 使用 **QUIC** 傳送 HTTP，QUIC 建立在 UDP 上。這次要驗證的是用戶端到 Envoy 的連線；Envoy 可以把請求轉成另一種 HTTP 版本送給 nginx。
+
+下圖標出協定終止的位置。注意最右邊：後端不必改成 HTTP/3，才能讓外部入口提供 HTTP/3。
+
+![HTTP/3 在 Envoy 終止，再轉送到 nginx](../assets/diagrams/s4d1-http3-path.svg)
+
+因此要同時檢查 UDP 443 能否抵達 Envoy，以及 HTTPS listener 的憑證是否符合 `demo.mesh.lab`。先在 `mesh-demo` 備妥名為 `demo-tls` 的 TLS Secret，再以以下已驗證的 Gateway 設定加入 HTTPS listener。憑證需包含對應網域，瀏覽器測試還需要信任它的簽發者。
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: eg
+  namespace: mesh-demo
+spec:
+  gatewayClassName: eg
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      hostname: "demo.mesh.lab"
+      allowedRoutes:
+        namespaces:
+          from: Same
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: "demo.mesh.lab"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: demo-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+```
+
+`tls.mode: Terminate` 表示 TLS 在 Gateway 終止，`certificateRefs` 則指定憑證。這些前提完成後，才加入 **ClientTrafficPolicy**，也就是 Envoy Gateway 管理用戶端連線行為的政策。以下設定須套用在 `mesh-demo`，因為它的目標 Gateway `eg` 位於該命名空間：
 
 ```yaml
 apiVersion: gateway.envoyproxy.io/v1alpha1
@@ -104,7 +170,7 @@ spec:
   http3: {}
 ```
 
-開了之後,Envoy Gateway 自動在**同一個** LoadBalancer service 上多掛一個 **UDP 443**(給 QUIC 用):
+在驗證版本中，`http3: {}` 會讓 Envoy Gateway 為同一個 LoadBalancer Service 加入 UDP 443。觀察輸出時要看協定欄，不能只看同樣出現的數字 443：
 
 ```text
 envoy-mesh-demo-eg-dd08789d   LoadBalancer   <LB-IP>   PORTS: 80,443,443  PROTOS: TCP,TCP,UDP
@@ -113,9 +179,11 @@ envoy-mesh-demo-eg-dd08789d   LoadBalancer   <LB-IP>   PORTS: 80,443,443  PROTOS
   https-443-h3: UDP/443      ← http3 帶出來的 QUIC port
 ```
 
-AKS 的 LoadBalancer 有個常見認知:一個 service 不能在同一個埠同時掛 TCP 和 UDP,要拆成兩個 service 共用一個 IP、還得加特別的 annotation。這一版 Envoy Gateway + AKS 不是這樣——**一個 service 就承載 TCP80 / TCP443 / UDP443,Azure 自動配了 IP、也自動放行了 UDP 防火牆**,不用手動繞。
+TCP 443 供既有 HTTPS 連線使用，UDP 443 供 QUIC 使用。這組 AKS 與 Envoy Gateway 版本可以在一個 Service 內提供兩者；本課未測試其他版本或雲端負載平衡器的混合協定限制。
 
-先看 HTTPS(走 TCP 443 的 h2)有沒有廣告 h3。伺服器用一個叫 **alt-svc** 的回應標頭告訴瀏覽器「我這裡也有 h3,你可以升級」:
+## 先讀廣告，再確認實際連線
+
+HTTPS 回應可使用 **alt-svc** 標頭告知用戶端另有 HTTP/3 入口。以下請求本身走 HTTP/2：
 
 ```console
 $ curl -k --http2 --resolve demo.mesh.lab:443:<LB-IP> https://demo.mesh.lab/
@@ -123,7 +191,7 @@ HTTP/2 200
 alt-svc: h3=":443"; ma=86400          ← 廣告了 HTTP/3
 ```
 
-再用一顆有 HTTP/3 的 curl 真的連一次(macOS 內建的 `curl 8.7.1` 沒編 h3,見[誠實的差距](#gaps);`brew install curl` 那顆有),`-v` 把整條 h3 攤開:
+`alt-svc` 只表示伺服器宣告支援 HTTP/3。它沒有證明 UDP 可達，也沒有證明下一次請求會使用 HTTP/3。必須用支援 HTTP/3 的 curl 再連線，並讀取實際協定：
 
 ```console
 $ curl --http3 -v --resolve demo.mesh.lab:443:<LB-IP> https://demo.mesh.lab/
@@ -135,59 +203,51 @@ $ curl --http3 -v --resolve demo.mesh.lab:443:<LB-IP> https://demo.mesh.lab/
 < alt-svc: h3=":443"; ma=86400
 ```
 
-`using HTTP/3`、`GET / HTTP/3`、`HTTP/3 200` 三行,就是客戶端經 QUIC/UDP 443 → Azure LB → Envoy 的 QUIC listener → nginx、一路走 HTTP/3。第二個 gate 過了。
+這個命令未使用 `-k`，因此要求 curl 信任站台憑證；若使用未受信任的測試憑證，會先遇到憑證錯誤。日誌中的另一個測試以 `--http3-only -k` 驗證測試端點，不能把略過驗證的方式用來判定正式站台的憑證正確。
 
-### 瀏覽器要走 h3,得先信任憑證
+`using HTTP/3` 與 `HTTP/3 200` 才是這次連線使用 HTTP/3 的證據。範圍到 Envoy 為止，不能據此宣稱 Envoy 到 nginx 也使用 HTTP/3。
 
-curl 加 `-k` 就肯對自簽憑證硬走 h3,瀏覽器不會。同一個站,Chrome 強制走 QUIC 時,自簽憑證會直接 `ERR_QUIC_PROTOCOL_ERROR`——瀏覽器對 QUIC 的憑證要求比 TCP 嚴,而且 QUIC 沒有 TCP 那種「仍要前往」可以點。把憑證換成一張本機信任的(例如 mkcert 簽發、把它的 CA 加進系統信任區),Chrome 才走得動 h3。
+## 在瀏覽器檢查協定
 
-而且要「**看到**」它走 h3,不能看頁面——h1/h2/h3 載出來的畫面一模一樣。要確認協定有兩個地方:DevTools 的 **Network** 分頁把 **Protocol** 欄叫出來(會顯示 `h3`),或在主控台問瀏覽器自己:
+瀏覽器對不同 HTTP 版本通常呈現相同頁面，所以要開啟 DevTools 的 Network 分頁查看 Protocol 欄。也可讀取 **nextHopProtocol**，也就是瀏覽器為這次導覽記錄的網路協定：
 
 ```js
 performance.getEntriesByType('navigation')[0].nextHopProtocol   // → "h3"
 ```
 
-`nextHopProtocol` 是 Navigation Timing API 直接回報「這一頁實際用哪個協定載入」,對 `https://demo.mesh.lab/` 它回 `"h3"`。實際在 Chrome 開這個站、DevTools 主控台跑一次就是下面這樣:
+以下畫面顯示網站載入成功，主控台同時回報 `h3`。頁面內容與協定欄位回答的是不同問題。
 
-![Chrome 開 demo.mesh.lab、DevTools 主控台對它執行 nextHopProtocol,回報 h3](../assets/screenshots/sprint4-day1/h3-browser-devtools.png)
+![Chrome DevTools 顯示此次導覽使用 h3](../assets/screenshots/sprint4-day1/h3-browser-devtools.png)
 
-網址列是 `demo.mesh.lab`、頁面是 nginx 預設頁,右邊主控台印出 `HTTP protocol = h3`——同一頁看起來跟 h1/h2 沒兩樣,協定的差別只在這裡讀得出來。
+## 疑難排解 {#gaps}
 
-在瀏覽器驗 h3 有兩個前提:憑證要能被信任、而且要看協定(Network 分頁的 Protocol 欄、或主控台的 `nextHopProtocol`)而不是看頁面——這是把 HTTP/3 端到端接起來時最容易漏掉的兩步。
+### curl 不支援 --http3
 
-## 驗收 checkpoint
+HTTP/3 是否可用取決於 curl 的編譯功能，不能只依作業系統或版本號推斷。若出現 `the installed libcurl version doesn't support this`，請使用有 HTTP/3 功能的 curl，並確認實際呼叫的是該執行檔。原驗證的系統 curl 不支援，因此改用具備 HTTP/3 的用戶端完成測試。
 
-| 驗證 | 判準 | 本課環境的結果 |
-|---|---|---|
-| 外部請求經 HTTPRoute 到後端 | 對的 host 回 200、錯的 host 不被路由 | `demo.mesh.lab` → 200 nginx;`nope.invalid` → 404 |
-| Ingress 規則可對應成 Gateway API | 一條 Ingress 拆成 GatewayClass/Gateway/HTTPRoute 三件 | 對照見 `sprint4-day1-mesh-manifests/` |
-| HTTP/3 客戶端走 h3 | `curl --http3` 回 `http_version=3` | `HTTP/3 200`、`alt-svc: h3=":443"` |
+### 瀏覽器一直沒有使用 h3
 
-## 誠實的差距 {#gaps}
+先確認憑證受信任、主機名稱符合憑證，再確認 UDP 443 的 Service、負載平衡器與防火牆路徑。`alt-svc` 存在而連線仍是 h2，不能直接判定 HTTPRoute 錯誤。驗證環境換成受信任憑證後才完成瀏覽器測試；單一 QUIC 錯誤碼不足以推定所有環境都是相同原因。
 
-- **系統內建的 curl 沒有 HTTP/3**。macOS 內建 `curl 8.7.1` 只編了 HTTP/2(nghttp2),`curl --http3` 會回「the installed libcurl version doesn't support this」。`brew install curl`(8.21.0,帶 ngtcp2 + nghttp3)那顆有,但它是 keg-only,要用完整路徑 `/opt/homebrew/opt/curl/bin/curl` 或把它加進 `PATH`,不然打到的還是沒 h3 的系統 curl。
-- **混合 TCP+UDP 的 LoadBalancer 只驗了會成、沒探邊界**。這一版 AKS + Envoy Gateway 一個 service 就吃下 TCP+UDP 443;但沒有反過來測「換更舊的 AKS 或 Envoy Gateway 版本會不會就得拆兩個 service」。所以「不用繞」這個結論綁在這組版本上。
-- **單節點量測**。整座叢集只有一個 D4s_v3 節點,Day 1 夠用;但要拿它量效能(Day 4 的對比),單節點的排程壓力會污染數字,那時得先擴到兩個節點。
-- **kube-proxy 併存的後果沒追到底**。設了 `kubeProxyReplacement=true` 但 AKS 的 kube-proxy 還在跑,Day 1 功能正常;這個併存對 Day 3 純 Cilium L7 有沒有影響,留到 Day 3 再確認。
+## 想一想
 
-## 帶得走的東西
+1. 正確 Host 與錯誤 Host 都回 200，應先檢查路由中的哪一個條件？
+2. 只有 `alt-svc: h3`、沒有實際 h3 連線，還缺哪一類證據？
+3. curl 顯示 `HTTP/3 200`，是否代表 nginx 也啟用了 QUIC？請沿著圖說明。
 
-- **Gateway API 是把 Ingress 一份拆成三份**(GatewayClass / Gateway / HTTPRoute),讓入口流量的三件事各自可獨立擁有與授權。不是換個寫法,是換個權責模型。
-- **BYOCNI 是「叫 AKS 別管網路、我自己裝」**,換到的是完整上游 Cilium 的功能,代價是那一層要自己顧。要用受管版沒有的功能,才值得走這條。
-- **HTTP/3 的難處在 UDP**:QUIC 跑在 UDP 上,而傳統入口與雲端 LoadBalancer 對「同埠混 TCP/UDP」向來彆扭。Envoy Gateway 一個欄位開起來、AKS 這版又剛好不用繞——但這種「剛好不用繞」要標清楚綁哪個版本,別當成永遠成立。
-- **工具鏈自己的 bug,錯誤訊息可能只給底層 traceback**。`az aks create` 吐 Python traceback 時,根因是擴充套件版本,不是叢集建立參數——先比對版本,能省掉在參數上鬼打牆的半小時。
+## 小結
+
+Gateway API 讓入口配置與應用路由分開管理。判斷功能完成時，先以正反例檢查 Host 匹配，再檢查 HTTPS listener、UDP 443 與實際協定。HTTP/3 在 Envoy 終止，因此入口成功不會自動證明內部服務通訊的加密；[Day 2](sprint4-day2-istio-ambient.md) 會繼續處理服務間的身分與連線限制。
 
 ## 延伸閱讀
 
-- **[Envoy Gateway — HTTP/3 任務頁](https://gateway.envoyproxy.io/docs/tasks/traffic/http3/)** —— 今天開 HTTP/3 用的 `ClientTrafficPolicy.http3` 的官方文件,含它對 QUIC listener 的處理。
-- **[Kubernetes Gateway API 官網](https://gateway-api.sigs.k8s.io/)** —— GatewayClass / Gateway / HTTPRoute 三件套的規格出處;想理解「為什麼拆三份」讀它的 API concepts。
-- **[AKS — Bring your own CNI(BYOCNI)](https://learn.microsoft.com/en-us/azure/aks/use-byo-cni)** —— `--network-plugin none` 的官方說明,以及「叢集我們支援、你的 CNI 你自己顧」的支援邊界。
+想再深入，可以從這幾份開始：
 
-## 下一步
-
-north-south 這層通了——入口流量走 Envoy Gateway、HTTP/3 也開了。[Day 2](sprint4-day2-istio-ambient.md) 換到 east-west:同一座叢集上起 **Istio ambient**,讓服務**之間**自動 mTLS 加密、再對一個服務設斷路把它壓到跳開。而 Istio 要疊在今天裝的 Cilium 上,那個 `cni.exclusive=false` 的伏筆,Day 2 開頭就收。
+- [Envoy Gateway HTTP/3](https://gateway.envoyproxy.io/docs/tasks/traffic/http3/)：HTTPS listener 與 ClientTrafficPolicy 的設定。
+- [Gateway API 概念](https://gateway-api.sigs.k8s.io/docs/concepts/api-overview/)：各種資源的管理責任。
+- [AKS BYOCNI](https://learn.microsoft.com/en-us/azure/aks/use-byo-cni)：自行管理 CNI 的前提與支援範圍。
 
 ---
 
 !!! quote ""
-    Envoy 標誌為 CNCF(Linux Foundation)官方資產,此處作社群教學用途。瀏覽器 DevTools 擷圖為本課程實測自製。
+    Envoy 標誌為 CNCF（Linux Foundation）官方資產，此處作社群教學用途。瀏覽器 DevTools 擷圖為本課程實測自製。

@@ -2,41 +2,38 @@
 
 ![Falco 官方標誌](../assets/logos/falco-icon-color.svg){ align=right width="95" }
 
-> Day 2 的過濾器要人架、要人看、要人比對,而且一次只認一顆 pod。今天換上一個常駐元件:同樣是 syscall 那一層的事件,但容器身分由執行期提供、規則寫成檔案、輸出送得出節點。裝完之後最重要的事不是看它報什麼,是先讀懂它憑什麼報——規則語言看不懂,就不知道自己買到了多寬的保障。
+Day 2 的手工基線抓得到偏離，但要有人先掛好探針、有人比對清單，而且一次只看一顆 pod。這一章換上 Falco：一個常駐在每顆節點上的偵測元件，規則寫成檔案，事件符合規則就印出一筆告警。
 
-!!! abstract "你在課程的哪裡"
-    - **Day 0–2**:知道 eBPF 程式怎麼掛進核心、會用 bpftrace 追 syscall,也會把核心事件裡的 cgroup id 換算回 pod 名字,並替一顆 pod 手工建立行為基線。
-    - **今天**:在叢集上裝 Falco,拆解一條預設規則的完整結構,觸發它並指出告警裡哪個欄位認出了 pod;然後把同樣的偏離動作拿去跟 Day 2 的手工基線對打。
-    - **Day 4**:今天會找到預設規則的兩個具體空白,下一章自己寫規則把它們補起來。
+裝好之後，同事多半會問：「有人進容器開 shell、從容器連到沒見過的位址，Falco 會不會報？」如果你寫一支腳本，用 `kubectl exec -t` 進容器開 shell 來測，Falco 一筆都不會報。Falco 本身沒有壞，報不報是規則裡那幾行 `condition` 決定的。這一章安裝 Falco，逐行讀一條預設規則，觸發它，再把 Day 2 的四個偏離動作拿來測一次。
 
-## 常駐元件與隨用工具,差在哪裡
+讀完之後，Falco 該報卻沒報、或報了卻指向錯的 pod 時，你能分辨是預設規則根本沒寫這件事、規則的條件把這次動作排除了，還是告警裡的 pod 欄位指向了發起動作的那一端。
 
-Day 2 結尾列過手工做法辦不到的七件事。今天要關掉的是其中四件——沒有持久化、沒有告警、沒有規則語言、必須剛好在看。Falco 用一個 DaemonSet 換掉這四件:每顆節點一份、全時間執行、規則寫在檔案裡、告警印到標準輸出。
+## 從隨用的探針換成常駐的元件
 
-代價也很具體。Day 2 那套是「要用的時候才進去跑」,不用的時候成本是零;Falco 是常駐的,節點上每一個 `execve` 都要進使用者空間比對規則,不管最後報不報警。這筆帳步驟 6 會量出實際數字。
+Day 2 結尾那張「辦不到的七件事」表，前四列是沒有持久化、沒有告警、沒有規則語言、必須剛好在看。Falco 用一個 DaemonSet 處理這四件：每顆節點跑一份，從 pod 啟動起一直在看，規則寫在檔案裡，符合規則的事件印成告警。
 
-今天走六步:
+兩種做法最大的差別，在事件是在哪裡被過濾掉的。把 Day 2 和今天的做法並排，上半是使用者空間，下半是核心：
 
-| 步驟 | 做什麼 | 為什麼排在這 |
-|---|---|---|
-| 1 | 選 driver | 選錯的話後面全部白做,而預設值不會告訴你它選了什麼 |
-| 2 | 安裝 | 要先知道它裝出了哪些東西,才知道出事時該看哪一個 |
-| 3 | 讀預設規則 | **今天的重心**;讀不懂規則語言,Day 4 寫不出規則 |
-| 4 | 觸發一條規則 | 驗收:告警裡哪個欄位認出了 pod |
-| 5 | 跟 Day 2 的基線對打 | 同樣的偏離動作,兩種方法各抓到什麼 |
-| 6 | 量噪音與資源 | 「裝一下 Falco」實際上要付什麼 |
+![左邊是 Day 2：核心裡的 bpftrace 探針只留下指定 pod 的 cgroup 的事件，送到使用者空間的 bpftrace，輸出檔再由人工比對基線；右邊是 Day 3：核心裡的 modern_ebpf 探針把整台節點上規則用得到的 syscall 事件經 ring buffer 送上來，由 falco 行程比對規則，印出具名告警](../assets/diagrams/s2d3-two-approaches.svg)
 
-## 步驟 1: 選 driver,而且不要讓它自己決定
+我們可以從圖上看到兩件事：
 
-Falco 需要一個 driver 把 syscall 事件從核心送到使用者空間。三個選項,受管的 AKS 節點上只有一個走得通:
+1. Day 2 的過濾器掛在 pod 的 cgroup 上，範圍外的事件在核心裡就丟掉，送上來的量很少；不跑的時候也不佔任何資源。
+2. Falco 把整台節點上規則用得到的那幾類 syscall（例如 `execve`、`openat`、`connect`）都送到使用者空間，中間經過一塊叫 ring buffer 的緩衝區（步驟 2 會看到它的大小），再拿規則一條條比對。好處是不必事先指定看哪顆 pod；代價是節點上每一個 `execve` 都要送上來比對一次，不管最後有沒有告警。步驟 6 會量這筆資源。
+
+Falco 也能讀 Kubernetes 的稽核日誌（`k8saudit` 這個事件來源），但 AKS 的稽核日誌要另外經 Azure 的服務轉出來。本課只用 syscall 這個來源。
+
+## 步驟 1: 選 driver，而且不要讓它自己決定
+
+Falco 要拿到 syscall 事件，得先在核心裡放一段程式，把事件送到使用者空間，這段程式叫 **driver**。Falco 有三種 driver，受管的 AKS 節點上只有一種走得通：
 
 | driver | 怎麼運作 | 在受管節點上 |
 |---|---|---|
-| `kmod` | 載入一個 out-of-tree 核心模組 | 不可行——節點映像不讓你插自己的模組 |
-| `ebpf`(legacy) | 安裝時在節點上現場編譯 eBPF probe | 要對著節點的 GLIBC 編,節點映像換版就可能編不出來 |
-| `modern_ebpf` | CO-RE:一份預先編好的 probe,靠 BTF 在載入時自我重定位 | 可行——[Day 0](sprint2-day0-ebpf-concepts.md) 已經確認節點有 BTF |
+| `kmod` | 載入一個 out-of-tree 核心模組（不隨核心一起發布、另外編譯的模組） | 不可行，節點映像不讓你載入自己的模組 |
+| `ebpf`（legacy） | 安裝時在節點上現場編譯 eBPF probe | 要對著節點的 GLIBC（Linux 上的 C 標準函式庫）編譯，節點映像換版就可能編不出來 |
+| `modern_ebpf` | CO-RE（Day 0 講過的「編譯一次、到處執行」）：一份預先編好的 probe，靠 BTF 在載入時對上這台的核心結構 | 可行，[Day 0](sprint2-day0-ebpf-concepts.md) 已經確認節點有 BTF |
 
-Helm chart 的預設值是 `kind: auto`。auto 的問題不在於它一定選錯,而在於**它選了什麼要事後才知道**。所以把它釘死:
+Helm chart 的預設值是 `kind: auto`，由 Falco 安裝時自己挑。它挑了哪一種，要裝完去翻日誌才知道，而且 auto 允許退回 legacy `ebpf`。所以在 AKS 上直接寫死 `modern_ebpf`：
 
 ```bash
 cat > falco-values.yaml <<'EOF'
@@ -57,9 +54,25 @@ tolerations:
 EOF
 ```
 
-第三項不加會怎樣值得先說:DaemonSet 會**安安靜靜地只跑在沒有 taint 的節點上**,`kubectl get ds` 顯示 `DESIRED 1 / READY 1`,看起來完全健康——而你要觀察的那幾顆節點上根本沒有 Falco。這種失敗不報錯,只會讓實驗一直沒有資料。
+另外兩項也不是預設值：
 
-## 步驟 2: 安裝,以及它到底裝出了什麼
+- `tty: true`：Falco 的 stdout 沒接終端機時是整塊緩衝的，告警會壓在緩衝區裡，不會馬上出現在 `kubectl logs`。
+- `tolerations`：本課的 `ebpf` 節點池是 spot，節點帶著 `NoSchedule` 的 taint，而 chart 預設的 toleration 只涵蓋 control-plane 節點。少了這一段，DaemonSet 只會跑在沒有 taint 的節點上，`kubectl get ds` 照樣顯示 `DESIRED 1 / READY 1`，看起來完全健康，但你要觀察的節點上根本沒有 Falco。這種失敗不報錯，後面的實驗只會一直沒有資料。你的節點池如果不是 spot，這一段可以拿掉。
+
+後面的步驟要用 JSON 讀告警，也要用腳本數告警，所以再讓 Falco 輸出 JSON：
+
+```bash
+cat >> falco-values.yaml <<'EOF'
+
+falco:
+  json_output: true
+  json_include_output_property: true
+EOF
+```
+
+本課只實際裝過 `modern_ebpf`。`kmod` 和 legacy `ebpf` 走不通，是根據官方文件和節點映像的限制判斷的，沒有實際裝過；在受管的 AKS 上照著用 `modern_ebpf` 就好，節點映像升級後，用下一步的啟動日誌確認它還是選到這一種。
+
+## 步驟 2: 安裝，以及它裝出了什麼
 
 ```console
 $ helm repo add falcosecurity https://falcosecurity.github.io/charts && helm repo update
@@ -71,7 +84,7 @@ CHART: falco-9.1.0
 APP VERSION: 0.44.1
 ```
 
-30 秒從指令到 `--wait` 返回。裝出來的是一個 DaemonSet,每個 pod 三個容器:
+裝出來的是一個 DaemonSet。`get ds` 列出每顆 pod 的兩個常駐容器：
 
 ```console
 $ kubectl -n falco get ds falco -o wide
@@ -80,13 +93,15 @@ falco   3         3         3       falco,falcoctl-artifact-follow   falcosecuri
                                                                      falcosecurity/falcoctl:0.13.0
 ```
 
-| 容器 | 角色 |
-|---|---|
-| `falcoctl-artifact-install`(init) | 開機前把規則檔與 plugin 從 OCI registry 拉下來,放進 emptyDir |
-| `falco` | 本體:載入 eBPF probe、讀規則、比對事件、吐告警 |
-| `falcoctl-artifact-follow`(sidecar) | 常駐盯著 registry,規則有新版就下載換上 |
+另外還有一個 init 容器，pod 啟動前先跑完。三個容器各自的工作：
 
-**規則不在映像裡**,是開機時從 registry 拉的,而且會驗簽:
+| 容器 | 工作 |
+|---|---|
+| `falcoctl-artifact-install`（init） | 把規則檔與 plugin 從 OCI registry（存放容器映像的倉庫，Falco 把規則也當成一個檔案包放在那裡）拉下來，放進 pod 內的暫存目錄 |
+| `falco` | 本體：載入 eBPF probe、讀規則、比對事件、印出告警 |
+| `falcoctl-artifact-follow`（sidecar） | 持續檢查 registry，規則有新版就下載換上 |
+
+所以規則不在映像裡，是 pod 啟動時從 registry 拉的，而且會驗證簽章。看 init 容器的日誌：
 
 ```console
 $ kubectl -n falco logs -l app.kubernetes.io/name=falco -c falcoctl-artifact-install --tail=20
@@ -96,11 +111,11 @@ $ kubectl -n falco logs -l app.kubernetes.io/name=falco -c falcoctl-artifact-ins
 {"msg":"Signature successfully verified!"}
 ```
 
-所以規則的版本是 `falco-rules:5`,跟 Falco 本體的 0.44.1 是**兩條獨立的版本線**。之後追查「為什麼這條規則沒報」的時候,要問的是規則版本,不是 Falco 版本。
+第一行的 `falco-rules:5` 是規則的版本，跟 Falco 本體的 0.44.1 各自發版。之後追查「為什麼這條規則沒報」，要查的是規則版本，不是 Falco 版本。
 
-### driver 的證據
+### 確認 driver 真的是 modern eBPF
 
-`kind: modern_ebpf` 只是意圖,不是事實。事實要從 Falco 自己的啟動日誌拿:
+values 寫了 `kind: modern_ebpf`，只表示你要它用這一種；實際用了哪一種，要看 Falco 自己的啟動日誌：
 
 ```console
 $ kubectl -n falco logs -l app.kubernetes.io/name=falco -c falco --tail=30
@@ -114,7 +129,11 @@ $ kubectl -n falco logs -l app.kubernetes.io/name=falco -c falco --tail=30
 … [libs]: libpman: disabled BPF iterators (not running in the root PID namespace…)
 ```
 
-第二個佐證是 Falco 自己算出來的最終設定檔——values 經過模板之後長什麼樣,看這個最準:
+標了箭頭的 `Opening 'syscall' source with modern BPF probe.` 就是答案。往上兩行的 8 MB 是 **ring buffer** 的大小：核心裡的 probe 把事件寫進這塊環狀的緩衝區，Falco 從另一端讀出來。Falco 讀得比事件產生得慢，緩衝區滿了，新的事件就會被丟掉。
+
+最後那行 `disabled BPF iterators` 不是錯誤。BPF iterator 是用 BPF 程式一次列出核心裡所有行程的方法；Falco 跑在 pod 自己的 PID namespace 裡，所以不用它掃節點上既有的行程，改讀 `/proc`。功能沒少，只是啟動時多花一點時間建行程表。
+
+第二個佐證是 Falco 實際讀到的設定檔。values 經過 chart 模板之後長什麼樣，看這個最準：
 
 ```console
 $ kubectl -n falco exec <falco-pod> -c falco -- cat /etc/falco/falco.yaml
@@ -125,20 +144,11 @@ engine:
     cpus_for_each_buffer: 2
 ```
 
-`buf_size_preset: 4` 對上日誌裡的 8 MB:**每兩顆 CPU 一個 ring buffer**,2 vCPU 的節點就是一個 8 MB 的環形緩衝區。這個數字決定事件洪峰時會不會掉事件。
+`buf_size_preset: 4` 就是日誌裡那個 8 MB 的 ring buffer；`cpus_for_each_buffer: 2` 對上日誌的 `One ring buffer every '2' CPUs.`：每兩顆 CPU 共用一個 ring buffer，2 vCPU 的節點就只有一個 8 MB 的緩衝區。
 
-最後那行 `disabled BPF iterators` 不是錯誤:Falco 跑在 pod 的 PID namespace 裡,所以放棄用 BPF iterator 掃既有行程表,改用 `/proc`。功能沒少,只是啟動時多花一點時間建表。
+從 `helm install` 到日誌出現 `Opening 'syscall' source` 那一行，本課量到 26 秒。Falco pod 每次重建都會有這樣一段沒有監控的空檔，Day 4 改規則觸發滾動更新時會再遇到。
 
-### 從安裝到第一筆告警
-
-這個數字要分兩種問法回答,而且兩個答案差很多:
-
-| 問法 | 本課環境 |
-|---|---|
-| `helm install` → 掛上 probe、開始比對事件 | **26 秒** |
-| `helm install` → 日誌出現第一筆**告警** | **12 分 27 秒** |
-
-第二個數字看起來很難看,其實是本章最好的消息:中間那 12 分鐘什麼都沒發生,因為預設規則集在正常運作的叢集上真的不叫。第一筆告警出現的時間,就是有人動手的時間。步驟 6 有完整量測。
+裝完之後，確認每顆要觀察的節點上都有一顆 Running 的 Falco pod。節點 CPU 吃緊時，DaemonSet 的 READY 數不一定反映這件事，見[疑難排解：Falco pod 被搶佔，DaemonSet 卻顯示全部就緒](#mine-1)。
 
 ## 步驟 3: 讀懂預設規則 {#step-3}
 
@@ -150,17 +160,9 @@ $ kubectl -n falco exec <falco-pod> -c falco -- ls -la /etc/falco/
 -rw-r--r--  nonroot  nonroot  63642  falco_rules.yaml
 ```
 
-只有一個規則檔,63 KB。倒出來數(截至 2026-08,規則版本 `falco-rules:5`):
+只有一個規則檔，63 KB。用 `grep` 數，裡面有 25 條 rule、87 個 macro、49 個 list；25 條 rule 全部啟用，而且全部標著 `maturity_stable`。
 
-| 項目 | 數量 |
-|---|---|
-| `- rule:` | **25** |
-| `- macro:` | **87** |
-| `- list:` | **49** |
-| `enabled: false` | 0(25 條全開) |
-| maturity 標籤 | 25 條全部是 `maturity_stable` |
-
-25 條的全貌:
+maturity 是規則的成熟度。Falco 的規則分成 stable、incubating、sandbox 三級，預設只裝 stable 這一級，另外兩級要自己用 `falcoctl artifact install` 裝。所以手上就是這 25 條：
 
 ```text
  1 Directory traversal monitored file read      14 Packet socket created in container
@@ -178,13 +180,11 @@ $ kubectl -n falco exec <falco-pod> -c falco -- ls -la /etc/falco/
 13 Create Hardlink Over Sensitive Files
 ```
 
-優先級分布是 CRITICAL 3、WARNING 11、NOTICE 7、INFO 1。
+讀這份清單要注意它挑了什麼：每一條描述的都是一種已知的攻擊手法，例如載入核心模組、`release_agent` 容器逃逸、`memfd_create` 無檔案執行、翻找私鑰、清日誌。沒有一條在管「這個容器今天做了以前沒做過的事」，而那正是 Day 2 手工基線在做的事。步驟 5 會實際比一次。
 
-25 這個數字為什麼重要,見[地雷 2](#mine-2)。更值得先看的是這 25 條的**取捨**:全部都在描述**已知的攻擊手法**——載入核心模組、`release_agent` 容器逃逸、`memfd_create` 無檔案執行、翻找私鑰、清日誌。沒有一條在管「這個容器今天做了以前沒做過的事」。那正是 Day 2 手工基線在做的事,而 Falco 預設不做。步驟 5 會把這件事量出來。
+### 一條規則的五個欄位
 
-### 完整解剖一條規則
-
-拿等一下要觸發的那條。以下逐字取自執行中容器裡的 `/etc/falco/falco_rules.yaml`:
+拿步驟 4 要觸發的那條來看。以下逐字取自執行中容器裡的 `/etc/falco/falco_rules.yaml`：
 
 ```yaml
 - rule: Terminal shell in container
@@ -207,19 +207,19 @@ $ kubectl -n falco exec <falco-pod> -c falco -- ls -la /etc/falco/
   tags: [maturity_stable, container, shell, mitre_execution, T1059]
 ```
 
-五個欄位各有各的角色:
+以 `- rule:` 開頭的這一整個項目就是一條 **rule**。它的五個欄位各管一件事：
 
-| 欄位 | 角色 |
+| 欄位 | 管什麼 |
 |---|---|
-| `condition` | **要不要報**。一個布林運算式,欄位取自當下這個事件 |
-| `output` | **報什麼**。`%` 開頭的都是欄位取值,事件發生時填入 |
-| `priority` | **多嚴重**。決定 Falco 要不要輸出,以及下游怎麼路由 |
-| `tags` | **怎麼分類**。這裡同時帶了成熟度、作用範圍與 MITRE ATT&CK 對應 |
-| `desc` | 給人看的。這條的 `desc` 特別值得讀——它自己就寫明了 `container_entrypoint` 這個坑 |
+| `condition` | **要不要報**。一個布林運算式，欄位取自當下這個事件 |
+| `output` | **報什麼**。`%` 開頭的都是欄位，事件發生時填入當時的值 |
+| `priority` | **多嚴重**。決定 Falco 要不要輸出，以及下游怎麼分流 |
+| `tags` | **怎麼分類**。這裡同時帶了成熟度、作用範圍與 MITRE ATT&CK 的編號。MITRE ATT&CK 是一套公開的攻擊手法分類，`T1059` 是其中「透過命令直譯器執行指令」那一項 |
+| `desc` | 給人看的說明。這條的 `desc` 提到了 `container_entrypoint`，步驟 4 會用到 |
 
-### condition 怎麼一路收斂到 syscall 欄位
+### condition 裡的名字從哪來
 
-`condition` 裡的五個名字沒有一個是欄位,全是 macro。把它們展開:
+`condition` 的前三行 `spawned_process`、`container`、`shell_procs` 不是欄位，是 **macro**：一段取了名字的條件，可以被 rule 或其他 macro 引用。`shell_procs` 裡的 `shell_binaries` 則是 **list**：一組純資料，只列項目，不含邏輯。把它們一個個展開：
 
 ```yaml
 - macro: spawned_process
@@ -243,7 +243,7 @@ $ kubectl -n falco exec <falco-pod> -c falco -- ls -la /etc/falco/
   condition: (evt.num=0)
 ```
 
-展開後的完整條件是這樣:
+全部展開之後，`condition` 只剩欄位的比較：
 
 ```text
 evt.type in (execve, execveat)                       ← 有人執行了一支新的執行檔
@@ -255,60 +255,107 @@ and (not proc.pname exists or proc.pname in (runc, containerd-shim, …))
 and not (evt.num = 0)                                ← 使用者自訂例外(預設永不成立)
 ```
 
-三層結構,這是整個 Falco 規則語言的形狀:
+把這條規則的引用關係畫出來，由上往下依序是 rule、macro、list，最底下是事件的欄位：
 
-```mermaid
-flowchart TB
-    D["syscall 欄位<br/>evt.type · proc.name<br/>proc.tty · container.id"]
-    A["list — 純資料<br/>shell_binaries"]
-    B["macro — 具名條件片段<br/>shell_procs"]
-    C["rule — condition + output<br/>Terminal shell in container"]
-    D --> B
-    A --> B
-    B --> C
-    D --> C
-```
+![Terminal shell in container 這條 rule 引用五個 macro，圖上畫出其中四個：spawned_process、container、shell_procs、container_entrypoint，另外直接用到欄位 proc.tty；spawned_process 落到 evt.type，container 落到 container.id，shell_procs 經過 list shell_binaries 並落到 proc.name，container_entrypoint 落到 proc.pname](../assets/diagrams/s2d3-rule-layers.svg)
 
-`list` 是純資料(不含邏輯),`macro` 是具名的條件片段(可以互相引用),`rule` 是最終判斷。87 個 macro 對 25 條 rule,比例接近 3.5 比 1——**Falco 的規則庫主要不是規則,是為了讓規則讀得懂而存在的字彙表**。
+照著圖由上往下看：rule 的 `condition` 引用了五個 macro，另外直接寫了一個欄位 `proc.tty`。第五個 macro `user_expected_terminal_shell_in_container_conditions` 是留給使用者自訂例外的，預設永不成立，圖上沒有畫出來。前四個 macro 最後都落到某個欄位上，`shell_procs` 中間多經過一個 list。整份規則檔都是這個結構：25 條 rule 用到 87 個 macro 和 49 個 list，檔案裡大部分的內容是 macro 和 list，用來讓 `condition` 讀起來像一句話。Day 4 自己寫規則時，也是用這三層。
 
-至於欄位本身,來源分成兩類,這個區分在 Day 4 寫規則時很要緊:
-
-| 欄位家族 | 從哪來 | 例子 |
-|---|---|---|
-| `evt.*` / `proc.*` / `fd.*` / `user.*` | **核心事件本身**,probe 直接送上來 | `evt.type=execve`、`proc.tty=34816`、`fd.name=/etc/shadow` |
-| `container.*` / `k8s.*` | **container plugin 事後查出來的**,靠行程的 cgroup 反查容器執行期 | `container.id`、`k8s.pod.name` |
-
-[Day 2](sprint2-day2-bpftrace-kubernetes.md) 是自己動手做第二類:`cgroup` builtin 拿到 inode、`find -inum` 找出路徑、從路徑裡挖出 container id 與 pod uid、`crictl inspect` 換成 pod 名字。Falco 把這整條鏈包成了 `container@0.7.1` 這個 plugin,結果就是 `output` 裡的一個 `%container.id`。
-
-這也預告了它的極限:**第二類欄位仍然是靠 cgroup 查出來的,所以 [Day 2 的地雷 2](sprint2-day2-bpftrace-kubernetes.md#mine-2)(`nsenter` 換的是命名空間,不是 cgroup)在 Falco 身上同樣成立。** 步驟 5 會驗這件事。
-
-而 `proc.tty != 0` 這一行預告了另一件事:它讓「有沒有終端機」變成報不報警的分水嶺,而終端機是**呼叫端**決定的。這變成[地雷 3](#mine-3)。
+展開後的條件裡有兩行要先記下來，步驟 4 都會遇到：`proc.tty != 0` 要求 shell 接著一個終端機；`container_entrypoint` 要求 shell 的父行程是容器執行期（runc、containerd-shim 這類行程）。
 
 ## 步驟 4: 觸發第一條規則
 
-部署一顆被觀察的 pod。這裡沿用 [Day 2](sprint2-day2-bpftrace-kubernetes.md) 的 `baseline-nginx`,兩章比的才是同一個東西:
+部署被觀察的 pod，沿用 [Day 2](sprint2-day2-bpftrace-kubernetes.md) 的 `baseline-nginx`，兩章比的才是同一個對象。`nodeSelector` 與 toleration 讓它排到 `ebpf` 節點池，步驟 5 的特權 pod 也在那裡：
 
 ```bash
 kubectl create namespace ebpf-lab
 cat > baseline-nginx.yaml <<'EOF'
+# Baseline subject for Day 2.
+#
+# nginx is picked over a synthetic sleep-pod because its startup is genuinely
+# non-trivial: /docker-entrypoint.sh execs a chain of shell helpers before the
+# master process ever reads nginx.conf. The proxy_pass location gives the pod a
+# real upstream dependency, so a warm-up request produces an outbound TCP
+# connection inside the startup window -- otherwise the connection row of the
+# baseline would be empty and step 5's deviation test would have nothing to
+# deviate from.
+#
+# QoS is deliberately Burstable (requests only, no limits) so the pod lands in
+# kubepods-burstable.slice; a Guaranteed pod sits one level higher in the cgroup
+# tree and the level numbers quoted in the log would not match.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-baseline-conf
+  namespace: ebpf-lab
+data:
+  default.conf: |
+    server {
+        listen 8080;
+        server_name _;
+
+        location / {
+            return 200 "day2 baseline subject\n";
+        }
+
+        # real upstream dependency, literal IP so no resolver is needed
+        location /up {
+            proxy_pass http://1.1.1.1/;
+            proxy_connect_timeout 3s;
+        }
+    }
+---
 apiVersion: v1
 kind: Pod
 metadata:
   name: baseline-nginx
   namespace: ebpf-lab
+  labels:
+    app: baseline-nginx
 spec:
+  nodeSelector:
+    pool: ebpf
+  tolerations:
+  - key: kubernetes.azure.com/scalesetpriority
+    operator: Equal
+    value: spot
+    effect: NoSchedule
   containers:
-    - name: nginx
-      image: mcr.microsoft.com/mirror/docker/library/nginx:1.25
-      resources:
-        requests:
-          cpu: 20m
-          memory: 32Mi
+  - name: nginx
+    image: mcr.microsoft.com/mirror/docker/library/nginx:1.25
+    ports:
+    - containerPort: 8080
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+    volumeMounts:
+    - name: conf
+      mountPath: /etc/nginx/conf.d
+  volumes:
+  - name: conf
+    configMap:
+      name: nginx-baseline-conf
 EOF
 kubectl apply -f baseline-nginx.yaml
 ```
 
-接著開一個帶終端機的 shell,再讀一次 `/etc/shadow`:
+### 先確認 shell 拿得到終端機
+
+規則的第四行要求 `proc.tty != 0`，也就是 shell 要接著一個終端機（tty）。`kubectl exec` 給不給終端機，由下指令的那一端決定。先看腳本裡常見的 `-t` 寫法會得到什麼：
+
+```console
+$ kubectl -n ebpf-lab exec -t baseline-nginx -- bash -c 'echo "tty=$(tty)"'
+tty=not a tty                      ← -t 沒有生效
+```
+
+`-t` 要求在容器裡配置終端機，但 kubectl 要 `-i` 和 `-t` 一起用，而且自己的 stdin 本身是終端機，才會把這個要求送出去。在腳本、CI 或其他自動化工具裡，stdin 都不是終端機，`-t` 就被略過，而且不會有任何訊息。少了任何一個條件，開出來的 shell `proc.tty` 都是 0，規則的第四行不成立。
+
+要在腳本裡也拿到終端機，先用 `script` 在本機開一個虛擬終端機（pty），再讓 kubectl 在裡面跑 `-it`。下一節觸發用的第一個指令就是這樣寫的，它輸出的第一行 `tty=/dev/pts/0` 就表示終端機配到了。
+
+### 觸發
+
+開一個帶終端機的 shell，再從容器裡讀一次 `/etc/shadow`：
 
 ```console
 $ script -q /dev/null kubectl -n ebpf-lab exec -it baseline-nginx -- bash -c 'echo "tty=$(tty)"; id'
@@ -318,9 +365,7 @@ uid=0(root) gid=0(root) groups=0(root)
 $ kubectl -n ebpf-lab exec baseline-nginx -- bash -c 'cat /etc/shadow > /dev/null'
 ```
 
-`script -q /dev/null` 那一層不是裝飾,拿掉就不會報——原因見[地雷 3](#mine-3)。
-
-Falco 的輸出(JSON 版):
+Falco 的日誌裡多了兩筆告警。步驟 1 開了 JSON 輸出，所以每筆都是一個 JSON 物件，命中的規則在 `rule`，填入的欄位值在 `output_fields`：
 
 ```json
 {
@@ -364,20 +409,20 @@ Falco 的輸出(JSON 版):
 }
 ```
 
-一個動作,兩條規則。每個欄位都對得回剛才做的事:
+兩個指令各命中一條規則：開 shell 命中 `Terminal shell in container`，讀 `/etc/shadow` 命中 `Read sensitive file untrusted`。每個欄位都對得回剛才做的事：
 
 | 告警欄位 | 值 | 對應哪個動作 |
 |---|---|---|
 | `evt.type` | `execve` | `bash -c …` 這個執行動作本身 |
-| `proc.name` / `proc.exepath` | `bash` / `/usr/bin/bash` | 執行的是 bash,命中 `shell_binaries` |
-| `proc.cmdline` | `bash -c echo "tty=$(tty)"; id` | **逐字就是打進去的那一串** |
-| `proc.tty` | `34816` | `script(1)` 配出來的 pty。34816 = 136×256+0,major 136、minor 0,對上容器裡 `tty` 回報的 `/dev/pts/0` |
-| `proc.pname` | `containerd-shim` | `kubectl exec` 的行程是 containerd 生的,命中 `container_entrypoint` |
-| `user.loginuid` | `-1` | **沒有互動式登入**——這是 `kubectl exec` 與「有人 SSH 進節點」最直接的區分訊號 |
+| `proc.name` / `proc.exepath` | `bash` / `/usr/bin/bash` | 執行的是 bash，命中 `shell_binaries` |
+| `proc.cmdline` | `bash -c echo "tty=$(tty)"; id` | 逐字就是打進去的那一串 |
+| `proc.tty` | `34816` | `script` 配出來的 pty。34816 = 136×256+0，major 136、minor 0，對上容器裡 `tty` 回報的 `/dev/pts/0` |
+| `proc.pname` | `containerd-shim` | `kubectl exec` 的行程是 containerd 生的，命中 `container_entrypoint` |
+| `user.loginuid` | `-1` | 沒有經過互動式登入，`kubectl exec` 進來的行程是 -1 |
 | `fd.name` | `/etc/shadow` | 第二條規則抓到的那次 `openat` |
-| `proc.aname[2]` / `[3]` | `containerd-shim` / `systemd` | 祖先鏈,往上兩層與三層 |
+| `proc.aname[2]` / `[3]` | `containerd-shim` / `systemd` | 往上兩層與三層的祖先行程 |
 
-**認出 pod 的是這四個欄位**:
+告警裡用來辨認 pod 的是這四個欄位：
 
 ```text
 container.id   = 0cee1cad9371      ← container plugin 從行程的 cgroup 反查出來的
@@ -386,58 +431,26 @@ k8s.pod.name   = baseline-nginx    ← pod 名字
 k8s.ns.name    = ebpf-lab          ← namespace
 ```
 
-而 `hostname` 指出是哪顆節點上的 Falco 報的。**pod 身分是 Falco 自己查的**——從頭到尾沒有告訴過它任何 pod 的名字。Day 2 走五個步驟的那條鏈子,在這裡是一次 plugin 呼叫。
+`hostname` 則是報出這筆告警的 Falco 所在的節點。安裝與觸發時都沒有提供 pod 名字，這些資訊是 Falco 自己查出來的。
 
-順帶收一個 Day 2 的伏筆:[Day 2 的地雷 7](sprint2-day2-bpftrace-kubernetes.md#mine-7) 發現 `kubectl exec` 起的 bash,`execve` 事件裡的 `comm` 是**舊**行程的名字 `runc:[2:INIT]`。Falco 用的是 `proc.name`(新行程的名字)與 `proc.pname`(父行程),**避開了那顆地雷**。規則語言把「哪個欄位在什麼時候可信」這件事替你決定好了,這是規則引擎相對於手寫探針的價值之一。
+### pod 身分是查出來的
 
-## 步驟 5: 跟 Day 2 的手工基線正面對照
+告警裡的欄位有兩個來源，Day 4 寫規則時這個區分很要緊：
 
-同樣四個偏離動作,Day 2 用 bpftrace 加手刻基線比對,今天用 Falco 預設規則。
-
-| 偏離動作 | Day 2 手工基線 | Falco 0.44.1 預設規則 |
+| 欄位家族 | 從哪來 | 例子 |
 |---|---|---|
-| 容器內開互動式 shell | 抓到 | 抓到,具名 `Terminal shell in container` |
-| 讀 `/etc/shadow` | 抓到 | 抓到,具名 `Read sensitive file untrusted` |
-| 對 8.8.8.8:53 建立連線 | 抓到 | **沒報** |
-| 經 `nsenter` 進容器做同樣的事 | **一筆都沒有** | 有報,但指向錯的 pod |
+| `evt.*` / `proc.*` / `fd.*` / `user.*` | **核心事件本身**，probe 直接送上來 | `evt.type=execve`、`proc.tty=34816`、`fd.name=/etc/shadow` |
+| `container.*` / `k8s.*` | **container plugin 事後查出來的**，靠行程的 cgroup 反查容器執行期 | `container.id`、`k8s.pod.name` |
 
-前兩列 Falco 完勝,而且勝在**說得出名字**。Day 2 的產出是「多了一個沒見過的檔案 `/etc/shadow`」,需要人去判斷這是不是壞事;Falco 的產出是「`Read sensitive file untrusted`,MITRE T1555,credential access」——分類、嚴重度、對應的攻擊技法都是現成的。
+**plugin** 是 Falco 執行時載入的擴充模組，步驟 2 的啟動日誌裡那行 `Loaded plugin 'container@0.7.1'` 就是 container plugin。它做的事，[Day 2](sprint2-day2-bpftrace-kubernetes.md) 你親手做過一遍：`cgroup` builtin 拿到 inode、`find -inum` 找出路徑、從路徑裡取出 container id 與 pod uid、`crictl inspect` 換成 pod 名字。在 Falco 裡，這整串變成 `output` 裡的一個 `%container.id`。
 
-後兩列才是今天的重點,分別是[地雷 4](#mine-4) 與[地雷 5](#mine-5)。
+既然第二類欄位還是靠 cgroup 查出來的，Day 2 的[「從節點 nsenter 進去的動作沒有被記錄」](sprint2-day2-bpftrace-kubernetes.md#mine-2)在 Falco 身上也成立。步驟 5 會驗證它的後果。
 
-### 兩種偵測哲學
+Day 2 還有一個問題，在這裡沒有出現：[「kubectl exec 開的 shell 從紀錄裡消失」](sprint2-day2-bpftrace-kubernetes.md#mine-7)。Falco 的規則用的是 `proc.name`（新行程的名字）與 `proc.pname`（父行程），上面告警裡的 `proc.name` 是 `bash`，是正確的值。`proc.pname` 比較不可靠：行程用 `execve` 取代自己的那一刻，父行程欄位可能還留著舊的值，跟 Day 2 的 `comm` 是同一類問題，所以同一類動作，父行程有時記成 `containerd-shim`，有時記成 `runc`，不能拿它當可靠的行程血緣證據。
 
-第三列那個「沒報」不是漏抓,是設計。回頭看 25 條規則,跟網路有關的只有三條:連 API server、netcat 反向 shell、非標準埠的 SSH——**三條都在描述具體的已知手法,沒有一條在描述「這個容器以前沒連過這裡」**。
+### 撈告警的小腳本
 
-| | 抓什麼 | 誤報 | 漏抓 | 要維護什麼 |
-|---|---|---|---|---|
-| **基線比對**(Day 2) | 沒見過的行為 | 高 | 低,但只在抓過基線的那顆 pod 上 | 每個工作負載一份基線,改版就要重抓 |
-| **規則引擎**(Day 3) | 已知壞的行為 | 低 | **高——沒寫規則的事一律看不見** | 規則庫,但可以全叢集共用 |
-
-Day 2 列的七件缺失裡,「基線沒有『允許但罕見』的概念」這一件 **Falco 沒有關掉,而且方向相反**:Falco 連「罕見」這個概念都沒有,它只有「這件事在不在清單上」。**兩種方法互補而不互相取代**,這是今天最該帶走的一句話,也是 Day 4 要動手寫規則的理由。
-
-## 步驟 6: 噪音與資源的真實數字
-
-### 閒置告警率
-
-量測窗口 **8 分 28 秒**,三顆節點(其中一顆跑著 Sprint 1 完整的 KAI、HAMi、Prometheus 堆疊),期間沒有任何人為動作:
-
-```console
-$ ./falco-alerts.sh | wc -l
-0
-```
-
-**0 筆。** 整場實驗(約 15 分鐘、三顆節點)的全部告警是:
-
-```console
-$ ./falco-alerts.sh --rules
-   4 Terminal shell in container
-   2 Read sensitive file untrusted
-```
-
-6 筆,每一筆都對得上一個明確的人為動作,沒有一筆是背景噪音。
-
-抽告警的腳本很短,後面幾章都會用到:
+接下來要反覆從各節點的 Falco 日誌裡撈告警，先寫一支小腳本，後面幾章也會用到：
 
 ```bash
 cat > falco-alerts.sh <<'EOF'
@@ -465,51 +478,184 @@ EOF
 chmod +x falco-alerts.sh
 ```
 
-這個數字的適用範圍要老實講:**15 分鐘、三顆節點、工作負載很單純的實驗室叢集,不能外推到生產環境。** 真實叢集會有 CI 跑腳本、備份工具讀檔案、健康檢查開 shell。`Run shell untrusted` 的 `desc` 自己就寫了 "This rule can be noisier… Allocate time to tune this rule",光是它的排除清單就佔了規則檔三十幾行。
+不加參數印出最近一小時的每一筆 JSON 告警；`--rules` 改成依規則名稱計數；`--since` 縮小時間範圍。
 
-但這個數字仍然推翻了一個具體的誤解:**「Falco 一裝下去就淹沒在告警裡」對預設的 25 條 stable 規則不成立**,那個名聲屬於另外幾套要自己加裝的規則集。
+### 規則抓不到的那一層 shell
 
-### 資源:實測與保留
+回到 `condition` 的第五行 `container_entrypoint`：它要求 shell 的父行程是容器執行期。換句話說，只有容器執行期直接生出來的 shell 才會被報。容器裡已經在跑的程式再開一個 shell，父行程是那支程式，這條規則就不成立。
 
-`kubectl top` 每兩分鐘取樣一次,跨越整個閒置窗口:
+驗證這件事要先避開一個陷阱。用巢狀的 `bash -c` 測，會看到兩層都報（輸出是把告警整理成一行一筆的結果）：
+
+```console
+$ script -q /dev/null kubectl exec -n ebpf-lab -it baseline-nginx -- bash -c 'bash -c "echo inner-shell-ran"'
+Terminal shell in container   proc=bash pname=runc              cmd=bash -c bash -c "echo inner-shell-ran"
+Terminal shell in container   proc=bash pname=containerd-shim   cmd=bash -c echo inner-shell-ran
+```
+
+這個實驗測不到想測的東西。外層 `bash -c` 只有一個指令時，bash 不會 fork 子行程，而是直接 `execve` 成內層的 bash（implicit exec），內層的父行程仍然是容器執行期。兩筆的 `pname` 一個是 `runc`、一個是 `containerd-shim`，就是上一節說的父行程記錄不穩定，兩者都屬於容器執行期，所以都符合 `container_entrypoint`。要讓它真的 fork，加一個 `&`。下面第二個指令底下的內容，不是 `falco-alerts.sh` 原樣印出的 JSON，而是把告警整理成一行一筆，最後一行是對照執行次數後加上的註記：
+
+```console
+$ script -q /dev/null kubectl exec -n ebpf-lab -it baseline-nginx -- \
+      bash -c 'bash -c "echo forked-shell-ran" & wait; echo done'
+forked-shell-ran
+done
+
+$ ./falco-alerts.sh --since 25s
+Terminal shell in container   proc=bash pname=runc   cmd=bash -c bash -c "echo forked-shell-ran" & wait; echo done
+--- 1 alert(s); 2 bash execve happened ---
+```
+
+兩次 `bash` 的 `execve`，只有一筆告警。被 fork 出來的那個 shell，父行程是 bash，不在 `container_entrypoint` 的名單裡，所以不報。
+
+另一條 shell 規則 `Run shell untrusted` 也補不上，它把這種情況明確排除了：
+
+```yaml
+  condition: >
+    spawned_process and shell_procs and proc.pname exists
+    and protected_shell_spawner                        ← 父行程要在特定應用程式清單裡
+    and not proc.pname in (shell_binaries, …)          ← shell 生 shell 明確排除
+```
+
+實際的影響是：用 `kubectl exec` 進容器開 shell 會被抓到，但透過 web shell（攻擊者放進網站程式裡、能用 HTTP 請求執行指令的後門）、被竄改的 entrypoint，或任何已經能在容器裡執行程式的方式再開 shell，這條規則都不會報。這是規則刻意收窄的範圍，`desc` 裡寫了 `read container_entrypoint macro`，官方也建議把這條規則當成稽核用的通用規則，搭配同一個容器、同一個 tty 的其他告警一起看。規則能抓到什麼，就看 `condition` 寫了什麼，Day 4 會自己寫一條規則補上這一層。
+
+## 步驟 5: 跟 Day 2 的手工基線對照
+
+拿 Day 2 的四個偏離動作來測。Day 2 用 bpftrace 加上手工基線比對，今天用 Falco 的預設規則：
+
+| 偏離動作 | Day 2 手工基線 | Falco 0.44.1 預設規則 |
+|---|---|---|
+| 容器內開互動式 shell | 抓到 | 抓到，具名 `Terminal shell in container` |
+| 讀 `/etc/shadow` | 抓到 | 抓到，具名 `Read sensitive file untrusted` |
+| 對 8.8.8.8:53 建立連線 | 抓到 | **沒報** |
+| 經 `nsenter` 進容器做同樣的事 | **一筆都沒有** | 有報，但指向錯的 pod |
+
+前兩列兩邊都抓到，差別在 Falco 說得出這是什麼。Day 2 的產出是「多了一個沒見過的檔案 `/etc/shadow`」，要人去判斷這是不是壞事；Falco 的產出是「`Read sensitive file untrusted`，MITRE T1555，credential access」，分類、嚴重度、對應的攻擊手法都附在告警上。後兩列各用一節說明。
+
+### 連到沒連過的位址
+
+從容器連一個 nginx 平常不會連的位址：
+
+```console
+$ kubectl -n ebpf-lab exec baseline-nginx -- bash -c 'exec 3<>/dev/tcp/8.8.8.8/53 && echo connect-ok'
+connect-ok
+
+$ ./falco-alerts.sh --since 20s --rules
+（空）
+```
+
+連線成功，Falco 沒有任何告警。回頭看 25 條規則，跟網路有關的只有三條：`Contact K8S API Server From Container`（連 API server）、`Netcat Remote Code Execution in Container`（netcat 反向 shell）、`Disallowed SSH Connection Non Standard Port`（非標準埠的 SSH）。三條都在描述一種具體的手法，沒有一條在管「這個容器以前沒連過這裡」。Day 2 的基線抓得到，因為基線比的就是「有沒有見過」。
+
+兩種做法的取捨並排看：
+
+| | 抓什麼 | 誤報 | 漏抓 | 要維護什麼 |
+|---|---|---|---|---|
+| **基線比對**（Day 2） | 沒見過的行為 | 高 | 低，但只在抓過基線的那顆 pod 上 | 每個工作負載一份基線，改版就要重抓 |
+| **規則引擎**（Day 3） | 已知壞的行為 | 低 | **高——沒寫規則的事一律看不見** | 規則庫，但可以全叢集共用 |
+
+Day 2 那張表的第六列「基線沒有『允許但罕見』的概念」，Falco 也沒有解決：Falco 沒有「罕見」這個概念，只看事件符不符合清單上的某條規則。兩種做法各補對方的缺口，不能用一種取代另一種，這也是 Day 4 要自己寫規則的原因。
+
+### 從特權 pod 用 nsenter 進去
+
+Day 2 在這一項是一筆都沒抓到。這次要從節點上的特權 pod 進到 nginx 容器裡，所以先套用 [Day 0](sprint2-day0-ebpf-concepts.md#step-1) 的特權 DaemonSet（`hostPID: true`，`ebpf` 節點池每顆節點一顆）：
+
+```console
+$ kubectl apply -f 01-ebpf-lab-daemonset.yaml
+```
+
+用 `kubectl -n ebpf-lab get pods -o wide` 找出跟 `baseline-nginx` 在同一顆節點上的那顆特權 pod，下面寫成 `<privileged-pod>`。接著查 nginx 在節點上的 pid：先拿到 nginx 容器的 container id，再從特權 pod 裡掃節點的 `/proc`，找出 cgroup 路徑含有這個 id 的行程。印出的第一欄就是 `<nginx-pid>`：
+
+```console
+$ kubectl -n ebpf-lab get pod baseline-nginx \
+    -o jsonpath='{.status.containerStatuses[0].containerID}'
+$ kubectl -n ebpf-lab exec <privileged-pod> -- bash -c 'for p in /proc/[0-9]*; do
+    grep -qs <container-id> $p/cgroup && echo "$(basename $p) $(cat $p/comm)"; done'
+```
+
+`<container-id>` 填第一個指令輸出裡 `containerd://` 後面那一串。然後用 `nsenter` 進入 nginx 的命名空間，讀同一個檔案：
+
+```console
+$ script -q /dev/null kubectl -n ebpf-lab exec -it <privileged-pod> -- \
+      nsenter -t <nginx-pid> -m -u -i -n -p /bin/bash -c 'hostname; cat /etc/shadow > /dev/null'
+baseline-nginx           ← hostname 回報的是 nginx 容器
+```
+
+`hostname` 回報 `baseline-nginx`，讀到的也是 nginx 容器的 `/etc/shadow`。Falco 的告警是這樣（這裡只列相關欄位）：
+
+```text
+Warning  Read sensitive file untrusted
+    file=/etc/shadow  proc=cat  pname=bash
+    k8s.pod.name  = <privileged-pod>     ← 呼叫端的 pod
+    container.name = probe               ← 呼叫端的容器
+```
+
+這筆告警說明了兩件事。第一，Falco 看到了：Day 2 的過濾器掛在 pod 的 cgroup 上，`nsenter` 進來的行程不在那個 cgroup 裡，所以一筆都沒有；Falco 收的是整台節點的事件，沒有事先劃定範圍，也就沒有範圍外。
+
+第二，`k8s.pod.name` 是錯的。把兩種進入方式並排，看 container plugin 各查到什麼：
+
+![左邊是 kubectl exec 進 baseline-nginx：cat /etc/shadow 在 nginx 的命名空間裡，行程的 cgroup 屬於 baseline-nginx，container plugin 反查得到 k8s.pod.name = baseline-nginx；右邊是從特權 pod 用 nsenter 進去：命名空間同樣是 nginx 的，但行程的 cgroup 屬於特權 pod，所以反查得到 k8s.pod.name = 特權 pod](../assets/diagrams/s2d3-field-sources.svg)
+
+我們可以從圖上看到，兩邊的行程都在 nginx 的命名空間裡，差別在 cgroup。`nsenter` 只換命名空間，行程的 cgroup 仍然屬於特權 pod，container plugin 照 cgroup 反查，查到的就是特權 pod。
+
+所以告警指向的是發起動作的 pod，不是被讀檔的那一顆。照著 `k8s.pod.name` 去查，會看到一顆只跑著 `sleep infinity` 的特權容器，真正被讀檔的 `baseline-nginx` 在告警裡沒有出現。不過 `proc.name`、`proc.pname`、`fd.name` 這些核心事件帶上來的欄位都是對的，而且「特權容器裡執行 `nsenter`」本身就很可疑，只是預設的 25 條規則沒有一條在看 `nsenter`。這次也沒有觸發 `Terminal shell in container`，原因跟步驟 4 最後一節相同：shell 的父行程是 `nsenter`。
+
+## 步驟 6: 噪音與資源
+
+### 沒有人操作時有多少告警
+
+這個量測是在裝好 Falco、還沒做步驟 4 之前做的：在沒有任何人操作的 8 分 28 秒裡，三顆節點的告警數如下。如果你已經做完前面的步驟，先等一段時間不做任何操作，再用 `--since` 指定這段時間來數：
+
+```console
+$ ./falco-alerts.sh | wc -l
+0
+```
+
+0 筆。做完前面所有步驟後，整座叢集的告警依規則計數：
+
+```console
+$ ./falco-alerts.sh --rules
+   4 Terminal shell in container
+   2 Read sensitive file untrusted
+```
+
+6 筆都對得上本章做過的動作：步驟 4 的開 shell 與讀 `/etc/shadow` 各一筆、巢狀 `bash -c` 兩筆、fork 實驗一筆、`nsenter` 讀檔一筆。沒有一筆是背景的正常活動造成的。
+
+這個結果只適用於工作負載很單純的實驗叢集。正式環境會有 CI 跑腳本、備份工具讀檔案、健康檢查開 shell，`Read sensitive file untrusted` 與 `Run shell untrusted` 都可能被觸發。`Run shell untrusted` 的 `desc` 就寫了 "This rule can be noisier… Allocate time to tune this rule"，它的排除清單在規則檔裡佔了三十幾行。
+
+所以「Falco 一裝下去就被告警淹沒」這個說法，對預設的 25 條 stable 規則、在沒有自動化流量的叢集上不成立。incubating 與 sandbox 規則裝上去之後會多吵，本課沒有驗證。要放進正式環境，先在一座有真實流量的叢集上量一段時間，再決定要調哪幾條。
+
+### 實際用量與保留量
+
+用 `kubectl top` 每兩分鐘取樣一次，涵蓋整段閒置時間，再跟 chart 預設的 `requests`、`limits` 並排：
 
 | | CPU | 記憶體 |
 |---|---|---|
 | chart `requests` | 100m | 512Mi |
 | chart `limits` | 1000m | 1Gi |
-| **實測(閒置)** | **14–24m** | **84–90Mi**(含 sidecar 約 110Mi) |
+| **實測（閒置）** | **14–24m** | **84–90Mi**（含 sidecar 約 110Mi） |
 | 超額倍數 | 約 4–7 倍 | 約 5–6 倍 |
 
-兩個方向的觀察:
+這張表有兩件事要看：
 
-- **CPU 隨節點忙碌程度走。** 跑著 Sprint 1 整套東西的那顆節點,Falco 用量穩定比閒置節點高 50% 到 100%。這很合理——Falco 的工作量正比於節點上發生的 syscall 數量,跟有沒有告警無關。**沒有告警不等於沒有成本**,每一個 `execve` 都要進使用者空間比對 25 條規則。
-- **記憶體幾乎不動。** 全程平坦,因為主要是 ring buffer(8 MB)與行程表這些預先配置好的結構。
+- **CPU 用量跟著節點的忙碌程度走。** 三顆節點裡，跑的 pod 最多的那一顆，Falco 用量比另外兩顆高 50% 到 100%。Falco 的工作量跟節點上發生的 syscall 數量成正比，跟有沒有告警無關。沒有告警的那八分多鐘裡，每一個 `execve` 一樣要送上來比對規則。
+- **記憶體幾乎不動。** 主要是 ring buffer（8 MB）與行程表這類啟動時就配置好的結構。
 
-換算到規模:一座 100 節點的叢集,Falco 預設會**保留** 10 vCPU 與 51.2 GB 記憶體,實際用掉大約 2 vCPU 與 11 GB。這就是「裝一下 Falco」的真實帳單,而它跟 Day 2 那種「要用的時候才進去跑 bpftrace」的隨用做法是完全不同量級的承諾。反過來說,Day 2 那套的成本是**人的注意力**——必須剛好在看——那個成本才是真正貴的。
+`requests` 是向排程器保留的量，就算用不到也會被佔住。換算到一座 100 節點的叢集，Falco 預設會保留 10 vCPU 與 51.2 GB 記憶體，實際用掉大約 2 vCPU 與 11 GB。Day 2 那種要用時才進去跑 bpftrace 的做法不佔這些資源，代價是要有人剛好在看。
 
-## 誠實的差距
+## 收尾
 
-- **閒置零告警不能外推。** 那是 15 分鐘、三顆節點、工作負載很單純的實驗室數字。真實叢集的 CI、備份、健康檢查都會踩到 `Read sensitive file untrusted` 與 `Run shell untrusted`。
-- **k8saudit 不在本章範圍。** Falco 除了 syscall 之外還能吃 Kubernetes 稽核日誌,但受管的 AKS 沒有本機稽核日誌,官方路徑要接 Event Hub 加 Storage Account,是實打實的常駐費用。本課只教 syscall 規則。
-- **提高 priority 的效果沒有實測。** [地雷 1](#mine-1) 的結論是「priority 不會變出 CPU」,那是從節點的可配置資源推出來的;把 Falco 設成 `system-node-critical` 之後誰被踢掉,沒有實際做過——因為代價是 Sprint 1 的元件。
-- **只驗了一種 driver。** `kmod` 與 legacy `ebpf` 在受管節點上走不通的說法來自官方文件與節點映像的限制,沒有實際驗證。
+刪掉今天的測試 namespace，Falco 保留給 Day 4 使用：
 
-## 驗收 checkpoint
+```console
+$ kubectl delete namespace ebpf-lab
+```
 
-| 驗證 | 判準 | 本課環境的結果 |
-|---|---|---|
-| driver 真的是 modern eBPF | Falco 啟動日誌出現 `Opening 'syscall' source with modern BPF probe.`,且容器內 `falco.yaml` 的 `engine.kind` 是 `modern_ebpf` | 兩項都成立 |
-| DaemonSet 覆蓋到所有目標節點 | `kubectl get ds falco` 的 DESIRED 等於節點數,不是 1 | DESIRED 3 / READY 3 |
-| 規則載入無誤 | 啟動日誌每一個規則檔後面都跟著 `schema validation: ok` | `falco_rules.yaml \| schema validation: ok` |
-| **規則命中並指名 pod** | 告警的 `rule` 是具名規則,且 `k8s.pod.name` 等於被操作的那顆 pod | `Terminal shell in container` + `Read sensitive file untrusted`,兩筆都是 `baseline-nginx` |
-| 預設規則集的實際規模 | 數 `- rule:` 的出現次數 | 25 條(87 macro / 49 list) |
-| 閒置噪音 | 無人操作的窗口內告警數 | 8 分 28 秒 × 3 節點 = 0 筆 |
+節點池照前幾章的做法縮回 0。Day 4 把節點池拉回來時，Falco 的 DaemonSet 會自動在新節點上建立 pod，不需要重裝。
 
-## 地雷記錄
+## 疑難排解
 
-### 地雷 1:chart 不設 priorityClass,Falco 在滿載節點上是第一個被踢的 {#mine-1}
+### Falco pod 被搶佔，DaemonSet 卻顯示全部就緒 {#mine-1}
 
-裝完 40 秒後,某顆節點上的 Falco pod 不見了:
+**症狀**：裝完不久，某顆節點上的 Falco pod 不見了：
 
 ```console
 $ kubectl -n falco get events --sort-by=.lastTimestamp
@@ -519,7 +665,9 @@ Warning   FailedScheduling   pod/falco-jl5kz   0/3 nodes are available: 1 Insuff
                                                2 node(s) didn't satisfy plugin(s) [NodeAffinity]
 ```
 
-**根因**是兩件事疊起來。第一,那顆節點的可配置 CPU 已經被吃掉 99%:
+同一段時間，`kubectl get ds falco` 仍然顯示 `DESIRED 3 CURRENT 3 READY 3`。DaemonSet 的狀態不會告訴你有一顆節點沒有監控。
+
+**原因**：兩件事加在一起。第一，那顆節點可配置的 CPU 已經被既有的 pod 保留了 99%：
 
 ```console
 $ kubectl describe node <node-system>
@@ -528,7 +676,7 @@ Allocated resources:
   cpu     1885m (99%)
 ```
 
-第二,**誰該讓位是 priority 決定的**,而 Falco chart 預設不設 `priorityClassName`:
+第二，資源不夠時誰該讓出位置，由 pod 的 priority 決定，而 Falco chart 預設不設 `priorityClassName`：
 
 ```console
 $ kubectl get pods -A --field-selector spec.nodeName=<node-system> \
@@ -540,21 +688,17 @@ csi-azuredisk-node-hvn8c    system-node-critical   2000001000
 …
 ```
 
-priority 0 比每一個系統元件都低,在滿載的節點上它是搶佔演算法第一個挑中的犧牲者。
+priority 0 比每一個系統元件都低，節點滿載時，排程器要替其他 pod 騰出位置，第一個被搶佔（preempt）的就是它。搶佔它的 pod 跑完離開後，Falco 才排得回去。會遇到這種情況的，是 CPU 已經配置滿的節點，也就是工作負載最多的節點。
 
-**這次的破洞是 55 秒**(搶佔它的那顆 pod 跑完就走)。但要看清楚這個失敗的樣子:**破洞剛好開在整座叢集最忙、最該被監控的那顆節點上**,而 `kubectl get ds falco` 在事發當下顯示 `DESIRED 3 CURRENT 3 READY 3`——DaemonSet 的健康指標不會告訴你有一顆節點斷了監控。
+**修法**：把 Falco 的 priority 調高，例如設成 `system-node-critical`，可以讓它不被搶佔，但 CPU 不會變多，被擠掉的會換成節點上其他的工作負載；設定之後哪個元件會被擠掉，本課沒有實際驗證。比較實際的做法是讓節點有足夠的可配置 CPU 給 Falco：100m CPU 加 512Mi 記憶體在 2 vCPU 的節點上約佔 5%，而且這是保留量，不是實際用量（見[疑難排解：節點的 CPU 實際用量不高，Falco 卻排不進去](#mine-7)）。不管怎麼調，確認監控有沒有涵蓋每顆節點，要看每顆節點上的 Falco pod 是否 Running，不能只看 DaemonSet 的 READY 數。
 
-**修法**沒有漂亮的:提高 priority 不會變出 CPU,只是換一個受害者——在這座叢集上把 Falco 設成 `system-node-critical`,代價是踢掉 KAI 或 HAMi 的元件。誠實的結論是**這顆節點的規格不夠跑 Falco**。「每個節點多 100m CPU、512Mi 記憶體」聽起來很少,但在 2 vCPU 的節點上那是全部容量的 5%,而且是保留量不是用量([地雷 7](#mine-7))。
+### 確信該報的動作，Falco 沒報 {#mine-2}
 
-### 地雷 2:預設只有 25 條規則,而規則版本是另一條版本線 {#mine-2}
+**症狀**：做了一個確信會觸發告警的動作，Falco 什麼都沒報，於是懷疑安裝壞了。
 
-**症狀**:寫好一個測試動作、確信 Falco 應該要報,結果什麼都沒有,於是開始懷疑安裝壞了。
+**原因**：預設只裝 stable 這一級的 25 條規則，大多數「Falco 沒報」的情況，只是手上沒有那條規則（步驟 3）。規則版本（`falco-rules:5`）與 Falco 本體各自發版，升級 Falco 不代表規則也升級（步驟 2）。
 
-**根因**:Falco 的規則走成熟度分級(stable、incubating、sandbox),**預設只裝 stable 這 25 條**,其餘要另外 `falcoctl artifact install`。絕大多數「Falco 沒報」的情況,只是它沒有那條規則。
-
-再往下一層:規則的版本(`falco-rules:5`)跟 Falco 本體的版本(0.44.1)是**兩條獨立的版本線**,由 init 容器從 OCI registry 拉取。升級 Falco 不等於升級規則,反之亦然。
-
-**修法**:先確認手上有哪些規則,再判斷是不是 Falco 的問題:
+**修法**：先確認手上有哪些規則，再判斷是不是 Falco 的問題：
 
 ```console
 $ kubectl -n falco exec <falco-pod> -c falco -- \
@@ -562,9 +706,11 @@ $ kubectl -n falco exec <falco-pod> -c falco -- \
 25
 ```
 
-### 地雷 3:`kubectl exec -t` 配不到終端機,規則就靜靜地不報 {#mine-3}
+數字對得上之後，回到規則清單找有沒有描述這個動作的規則。沒有的話，要不是另外裝 incubating、sandbox 規則，就是像 Day 4 一樣自己寫。
 
-**症狀**:用看起來很合理的寫法觸發,零告警。
+### 用 `kubectl exec -t` 開 shell，Falco 沒報 {#mine-3}
+
+**症狀**：用看起來合理的寫法觸發，指令成功、bash 也確實在容器裡執行了，Falco 沒有告警：
 
 ```console
 $ kubectl -n ebpf-lab exec -t baseline-nginx -- bash -c 'id; hostname'
@@ -572,140 +718,74 @@ uid=0(root) gid=0(root) groups=0(root)
 baseline-nginx
 ```
 
-指令成功、bash 確實在容器裡執行了,Falco 一筆都沒有。
+**原因**：kubectl 要 `-i`、`-t` 一起用，而且自己的 stdin 是終端機，才會在容器裡配置終端機；少了任何一個條件，開出來的 shell `proc.tty` 都是 0，規則的第四行不成立（步驟 4）。
 
-**根因**不在 Falco。直接去問終端機:
-
-```console
-$ kubectl -n ebpf-lab exec -t baseline-nginx -- bash -c 'echo "tty=$(tty)"'
-tty=not a tty                      ← -t 沒有生效
-```
-
-`kubectl` 的 TTY 是 `-i` 與 `-t` **一起**才會協商成功的:`-t` 要求配置終端機,但 kubectl 需要 client 端的 stdin 本身是終端機才會把這個要求送出去。腳本、CI、自動化工具的 stdin 都不是終端機,於是 `-t` 被靜靜地降級。`proc.tty` 保持 0,規則 `condition` 的第四行不成立,不報——**而且沒有任何一行日誌說明發生了這件事**。
-
-**修法**:在本機先包一層 pty,`-it` 才有東西可協商。
+**修法**：用 `script -q /dev/null` 包一層 pty，再用 `-it`。先確認容器裡拿得到終端機：
 
 ```console
 $ script -q /dev/null kubectl -n ebpf-lab exec -it baseline-nginx -- bash -c 'echo "tty=$(tty)"'
 tty=/dev/pts/0
 ```
 
-**教訓**:這顆地雷的殺傷力在方向——它讓「規則沒報」看起來像 Falco 的問題,其實是觸發方式的問題。照文件寫自動化測試來驗證 Falco 裝好沒的人都會踩到,然後得出「Falco 不可靠」的結論,而 Falco 從頭到尾都是對的。反過來也要記住:**真人在終端機打 `kubectl exec -it` 一定會被抓,腳本裡的 `exec` 不會。**
+輸出 `/dev/pts/0` 這類路徑，就表示配到了。反過來說，真人在終端機打 `kubectl exec -it` 一定會被這條規則抓到，腳本裡的 `exec` 不會。
 
-### 地雷 4:預設規則沒有任何一條在管「新的對外連線」 {#mine-4}
+### 從容器連到沒連過的位址，Falco 沒報 {#mine-4}
 
-**症狀**:從容器連一個沒連過的位址,連線成功,Falco 零告警。
+**症狀**：從容器連一個從沒連過的位址，連線成功，Falco 沒有告警。
 
-```console
-$ kubectl -n ebpf-lab exec baseline-nginx -- bash -c 'exec 3<>/dev/tcp/8.8.8.8/53 && echo connect-ok'
-connect-ok
+**原因**：預設 25 條規則裡跟網路有關的三條，都在描述具體的攻擊手法，沒有一條在管「新的對外連線」（步驟 5）。
 
-$ ./falco-alerts.sh --since 20s --rules
-（空）
-```
+**修法**：自己寫規則，[Day 4](sprint2-day4-falco-custom-rules.md) 補的就是這一條。
 
-**根因**:這不是漏抓,是規則集的取捨。25 條裡跟網路有關的三條(`Contact K8S API Server From Container`、`Netcat Remote Code Execution in Container`、`Disallowed SSH Connection Non Standard Port`)**全都在描述具體的已知手法**,沒有一條在描述「這個容器以前沒連過這裡」。而 Day 2 的手工基線抓得到,因為基線的本質就是「沒見過」。
+### `nsenter` 進容器的告警，pod 欄位是發起端 {#mine-5}
 
-**修法**:規則引擎只看得見寫進規則的事,所以缺的規則要自己寫——[Day 4](sprint2-day4-falco-custom-rules.md) 補的就是這個洞。
+**症狀**：從特權 pod 用 `nsenter` 進入另一個容器讀敏感檔，Falco 有報，但 `k8s.pod.name` 與 `container.name` 是特權 pod 自己的。
 
-### 地雷 5:`nsenter` 進容器,Falco 看得見但認錯 pod {#mine-5}
+**原因**：`container.*` 與 `k8s.*` 是 container plugin 用行程的 cgroup 反查的，而 `nsenter` 不換 cgroup（步驟 5）。
 
-**症狀**:從一個特權 pod 用 `nsenter` 進到目標容器裡讀敏感檔,Falco 有報,但告警指向的是**呼叫端**。
+**修法**：告警的 pod 是特權 pod 時，不要只查那顆 pod。看 `proc.*` 與 `fd.*` 這些核心事件帶上來的欄位，並把「特權容器裡執行 `nsenter`」當成需要調查的訊號；預設規則沒有偵測 `nsenter`，要自己寫規則。
 
-```console
-$ script -q /dev/null kubectl -n ebpf-lab exec -it <privileged-pod> -- \
-      nsenter -t <nginx-pid> -m -u -i -n -p /bin/bash -c 'hostname; cat /etc/shadow > /dev/null'
-baseline-nginx           ← hostname 回報的是 nginx 容器
-```
+### 容器裡的程式再開 shell，`Terminal shell in container` 不報 {#mine-6}
 
-```text
-Warning  Read sensitive file untrusted
-    file=/etc/shadow  proc=cat  pname=bash
-    k8s.pod.name  = <privileged-pod>     ← 呼叫端的 pod
-    container.name = probe               ← 呼叫端的容器
-```
+**症狀**：同一次 `kubectl exec` 裡有兩次 `bash` 的 `execve`，Falco 只報一筆；用巢狀 `bash -c` 測卻兩筆都報。
 
-**兩件事同時為真。** 第一,**Falco 看見了**——[Day 2 那次是徹底的零筆](sprint2-day2-bpftrace-kubernetes.md#mine-2),Falco 至少報了一條。來源是架構差異:bpftrace 那套把過濾器掛在 pod 的 cgroup 上(在核心裡就過濾掉,所以省),Falco 收全節點的事件再到使用者空間比對(所以貴)。**只要事件不需要事先指定範圍,就沒有「範圍外」可以躲。**
+**原因**：`container_entrypoint` 要求 shell 的父行程是容器執行期，被 fork 出來的 shell 父行程是 bash；巢狀 `bash -c` 因為 implicit exec 沒有真的 fork（步驟 4）。
 
-第二,**但它認錯了 pod**。根因就是[步驟 3](#step-3) 埋的伏筆:`container.*` 與 `k8s.*` 不是核心事件帶上來的,是 container plugin 用行程的 cgroup 反查的,而 `nsenter` 換的是命名空間、不換 cgroup。行程的 cgroup 仍屬於特權 pod,所以查出來就是特權 pod。
+**修法**：驗證時加 `&` 讓 bash 真的 fork。要抓到這一層 shell，得自己寫規則，Day 4 會寫。
 
-**後果很具體**:告警指向的是攻擊的發起端,不是受害端。調查員照著 `k8s.pod.name` 去看,會看到一個什麼都沒有的容器,而真正被翻的那顆 pod 在告警裡完全沒出現。
+### 節點的 CPU 實際用量不高，Falco 卻排不進去 {#mine-7}
 
-好消息是**訊號沒有消失,只是被貼錯標籤**——`proc.name`、`pname`、`fd.name` 全都在,而且「一個特權容器裡冒出 `nsenter`」本身就是極強的指標。預設 25 條沒有任何一條在看 `nsenter`。
+**症狀**：節點的實際 CPU 用量看起來還有餘裕，Falco 卻因為 `Insufficient cpu` 排不進去，或被搶佔。
 
-### 地雷 6:`container_entrypoint` 讓 shell 規則只抓得到第一層 {#mine-6}
+**原因**：排程器看的是 `requests`，不是實際用量。Falco 實際只用 14–24m，卻向排程器要 100m（步驟 6），節點剩下的可配置 CPU 不到 100m 就排不進去。這就是[疑難排解：Falco pod 被搶佔](#mine-1)的直接原因。
 
-**症狀**:同一次 `kubectl exec` 裡發生兩次 `bash` 的 `execve`,Falco 只報一筆。
+**修法**：把 request 調低到貼近實測的值，能不能排進去要看節點剩下多少可配置 CPU；代價是事件量突然變大時，Falco 沒有預留的 CPU 可用，處理不及時 ring buffer 會滿，事件就被丟掉。調多少要看節點上的工作負載，沒有一個通用的值。
 
-**根因**:`Terminal shell in container` 的 `condition` 第五行是 `container_entrypoint`,展開後要求 `proc.pname` 是 runc、containerd-shim、conmon 這類容器執行期行程。字面意思是:**只有容器執行期直接生出來的 shell 才算數。**
+## 想一想
 
-驗證這件事有一個陷阱要先繞開。用巢狀 `bash -c` 測會得到「兩筆都報」的假答案:
+- 同事的 CI 每天用 `kubectl exec -t <pod> -- bash -c '…'` 進容器做檢查，他說「Falco 從來沒報過，可見它沒在看」。你會怎麼回答？要讓這支腳本開的 shell 也被 `Terminal shell in container` 抓到，要改哪裡？
+- 一筆 `Read sensitive file untrusted` 告警的 `k8s.pod.name` 是一顆只跑著 `sleep infinity` 的特權 pod，你進去看，裡面什麼可疑的東西都沒有。接下來你會看告警裡的哪些欄位，為什麼不能只相信 `k8s.pod.name`？
+- 一個 web 應用被植入了 web shell，攻擊者透過它在容器裡執行 `bash`。預設的 `Terminal shell in container` 會不會報？從 `condition` 的哪幾行可以判斷？
 
-```console
-$ script -q /dev/null kubectl exec -it baseline-nginx -- bash -c 'bash -c "echo inner-shell-ran"'
-Terminal shell in container   proc=bash pname=runc              cmd=bash -c bash -c "echo inner-shell-ran"
-Terminal shell in container   proc=bash pname=containerd-shim   cmd=bash -c echo inner-shell-ran
-```
+## 小結
 
-**這個實驗是無效的**:`bash -c '<單一指令>'` 會被 bash 的 implicit exec 最佳化掉,外層 bash 直接 `execve` 成內層 bash 而不是 fork,所以內層的父行程仍然是容器執行期行程。要真的 fork,加一個 `&`:
-
-```console
-$ script -q /dev/null kubectl exec -it baseline-nginx -- \
-      bash -c 'bash -c "echo forked-shell-ran" & wait; echo done'
-forked-shell-ran
-done
-
-$ ./falco-alerts.sh --since 25s
-Terminal shell in container   proc=bash pname=runc   cmd=bash -c bash -c "echo forked-shell-ran" & wait; echo done
---- 1 alert(s); 2 bash execve happened ---
-```
-
-**兩次 `execve`,一筆告警。** 被 fork 出來的那個 shell,父行程是 bash(不在 `container_entrypoint` 的名單裡),規則不成立。
-
-另一條 shell 規則 `Run shell untrusted` 補不上這個洞,它自己也把這種情況排除掉了:
-
-```yaml
-  condition: >
-    spawned_process and shell_procs and proc.pname exists
-    and protected_shell_spawner                        ← 父行程要在特定應用程式清單裡
-    and not proc.pname in (shell_binaries, …)          ← shell 生 shell 明確排除
-```
-
-**後果**:`kubectl exec` 進去會被抓,但那是攻擊者最不需要用的路徑。真正的入侵路徑——web shell、被入侵的 entrypoint、任何已經取得容器內執行權的東西——再開 shell 時,這條規則一筆都不會報。前面 `nsenter` 那次沒觸發這條規則也是同一個原因,它的 `proc.pname` 是 `nsenter`。
-
-**這不是 bug**。`desc` 裡 Falco 自己就寫了 "Parent process may have legitimately already exited and be null (read container_entrypoint macro)",而且建議這條規則與其當作獨立規則,不如當作稽核用的通用規則,配合同容器、同 tty 的其他告警一起看。這是為了壓低誤報而刻意收窄的條件——**規則引擎的偵測範圍就是 `condition` 那幾行字,不多也不少。**
-
-### 地雷 7:那個 request 不是用量,是保留量 {#mine-7}
-
-**症狀**:節點看起來還有餘力(實際 CPU 用量不高),Falco 卻排不進去。
-
-**根因**:**Kubernetes 排程看的是 `requests`,不是實際用量。** Falco 實際只用 14m,但它向排程器要 100m;節點只剩十幾 m 可配置,於是排不進去、被搶佔。這就是[地雷 1](#mine-1) 的直接成因。
-
-**修法與代價**:把 request 調成貼近實測(例如 50m)在這座叢集上就排得進去,但代價是事件洪峰時 Falco 沒有 CPU 餘裕,可能開始掉事件——`buf_size_preset: 4` 的 8 MB ring buffer 滿了就丟。這是一個要按叢集情況判斷的取捨,不是有標準答案的設定。
-
-## 帶得走的東西
-
-- **規則引擎的偵測範圍,就是 `condition` 那幾行字,不多也不少。** 讀不懂規則語言的人,不知道自己買到的保障有多寬——`Terminal shell in container` 看起來在管「容器裡有人開 shell」,實際上只管「容器執行期直接生的、帶終端機的第一層 shell」,而那個限制就寫在條件的第四、五行。
-- **基線抓「沒見過」,規則抓「已知壞」,兩者互補而不互相取代。** 基線誤報高、要逐個工作負載維護,但抓得到你沒想到的事;規則誤報低、可全叢集共用,但沒寫規則的事一律看不見。真實的防守兩邊都要。
-- **`container.*` 與 `k8s.*` 是查出來的,不是核心送上來的。** 這一個事實同時解釋了 Falco 的方便(pod 身分變成一個欄位)與它的極限(`nsenter` 會讓告警貼錯標籤)。凡是靠 cgroup 反查身分的工具,都繼承同一組限制。
-- **「沒有告警」不等於「沒有成本」。** Falco 的 CPU 用量正比於節點上發生的 syscall 數量,跟報不報警無關。閒置零告警的那 8 分鐘裡,它一樣在每一個 `execve` 上比對 25 條規則。
-- **DaemonSet 全綠不代表全節點都在監控。** 被搶佔的那 55 秒,`kubectl get ds` 從頭到尾顯示 READY 3/3。監控元件的健康,要用它自己的輸出來驗,不是用它的部署狀態。
+Falco 在每顆節點上把所有 syscall 事件送到使用者空間，逐條比對規則，命中就印出一筆附了規則名、嚴重度和 pod 身分的告警。報不報完全由規則的 `condition` 決定：預設只有 25 條 stable 規則，都在描述已知的攻擊手法；`Terminal shell in container` 只抓帶終端機、由容器執行期直接生出來的 shell；告警裡的 pod 欄位是 container plugin 用 cgroup 反查的，`nsenter` 會讓它指向發起端。之後遇到 Falco 該報卻沒報，先查手上有沒有那條規則，再把它的 `condition` 展開，看這次的動作卡在哪一行；報了卻指錯 pod，就改看核心事件帶上來的 `proc.*` 與 `fd.*` 欄位。
 
 ## 延伸閱讀
 
-想往下深挖,從這幾份開始:
+想再深入，可以從這幾份開始：
 
-- **[Falco 規則的三個基本元件](https://falco.org/docs/concepts/rules/basic-elements/)** —— 官方對 rule、macro、list 的定義,以及 `condition`／`output`／`priority`／`tags` 各自的角色,對得上步驟 3 的解剖。
-- **[核心事件來源與 driver 選擇](https://falco.org/docs/concepts/event-sources/kernel/)** —— 說明 modern eBPF probe 需要 BTF 與 ring buffer 支援,以及它靠 CO-RE 免去逐核心版本編譯,正是步驟 1 釘死 `modern_ebpf` 的依據。
-- **[預設規則清單與成熟度分級](https://falco.org/docs/reference/rules/default-rules/)** —— 官方明載「預設只載入 stable 規則」,incubating 與 sandbox 要另外安裝,這是地雷 2 的一手來源。
-- **[事件與條件可用的欄位總表](https://falco.org/docs/reference/rules/supported-fields/)** —— 寫規則時查欄位名稱用;`evt.*`／`proc.*` 與 `container.*`／`k8s.*` 分屬不同來源,在這裡看得最清楚。
-- **[Falco Helm chart 的參數表](https://github.com/falcosecurity/charts/tree/master/charts/falco)** —— `driver.kind` 預設 `auto`、`customRules` 的用法都在這份 README 的參數表裡,Day 4 會直接用到。
+- **[Falco 規則的三個基本元件](https://falco.org/docs/concepts/rules/basic-elements/)** —— 官方對 rule、macro、list 的定義，以及 `condition`／`output`／`priority`／`tags` 各自的角色，對得上步驟 3 的拆解。
+- **[核心事件來源與 driver 選擇](https://falco.org/docs/concepts/event-sources/kernel/)** —— 說明 modern eBPF probe 需要 BTF 與 ring buffer 支援，以及它靠 CO-RE 免去逐核心版本編譯，正是步驟 1 寫死 `modern_ebpf` 的依據。
+- **[預設規則清單與成熟度分級](https://falco.org/docs/reference/rules/default-rules/)** —— 官方明載「預設只載入 stable 規則」，incubating 與 sandbox 要另外安裝，對應步驟 3 數到的 25 條。
+- **[事件與條件可用的欄位總表](https://falco.org/docs/reference/rules/supported-fields/)** —— 寫規則時查欄位名稱用；`evt.*`／`proc.*` 與 `container.*`／`k8s.*` 分屬不同來源，在這裡看得最清楚。
+- **[Falco Helm chart 的參數表](https://github.com/falcosecurity/charts/tree/master/charts/falco)** —— `driver.kind` 預設 `auto`、`customRules` 的用法都在這份 README 的參數表裡，Day 4 會直接用到。
 
 ## 下一步
 
-今天找到兩個具體的空白:預設規則不管「沒連過的對外連線」([地雷 4](#mine-4)),也抓不到「容器裡已經在跑的東西再開 shell」([地雷 6](#mine-6))。兩個都不是 bug,是規則寫死的取捨——而規則是可以自己寫的。[Day 4](sprint2-day4-falco-custom-rules.md) 用今天學到的 `list`、`macro`、`rule` 三層結構,一條一條把這兩個洞補起來,然後面對寫規則真正困難的部分:誤報,以及調校誤報要付出的偵測力。
+今天在預設規則裡找到兩個空白：它不管「沒連過的對外連線」（[疑難排解：從容器連到沒連過的位址](#mine-4)），也抓不到「容器裡已經在跑的程式再開 shell」（[疑難排解：容器裡的程式再開 shell](#mine-6)）。兩者都是規則寫定的範圍，而規則可以自己寫。[Day 4](sprint2-day4-falco-custom-rules.md) 用今天讀過的 `list`、`macro`、`rule` 三層結構把這兩個空白補起來，再處理寫規則最花時間的部分：誤報，以及為了減少誤報而放掉的偵測範圍。
 
 ---
 
 !!! quote ""
-    Falco 標誌為 Falco 專案之官方資產(CNCF artwork),此處作社群教學用途。
+    Falco 標誌為 Falco 專案之官方資產（CNCF artwork），此處作社群教學用途。

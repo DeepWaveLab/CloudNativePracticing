@@ -2,105 +2,38 @@
 
 ![KAI Scheduler 官方標誌](../assets/logos/kai-scheduler-icon-color.svg){ align=right width="100" }
 
-> Day 1 收尾留了一道題:佇列和搶占處理的都是單顆 pod,但訓練工作不是單顆 pod——它是一組,缺一個都開不了工。今天就把這道題放上叢集:一份需要 3 顆 pod 的訓練工作,丟進只有 2 張卡的環境,先用預設排程器跑一次、看問題出在哪,再用 KAI 跑一次、比較差在哪裡。照著做的路上有幾顆雷,最陰的一顆長這樣:畫面上一切正常、沒有任何錯誤,但你以為有的保護,其實從頭到尾都沒生效。
+一份分散式訓練工作要 3 個 worker，各用一張 GPU。叢集只有兩張 T4。送出去之後，`kubectl get pods` 顯示 2 個 Running、1 個 Pending。看起來像是「已經在跑，只是慢一點」，其實兩張卡被佔著，卻一步都沒有算。
 
-!!! abstract "你在課程的哪裡"
-    - **Day 1**:KAI 已就緒,佇列、quota 與兩套優先權的心智模型建好了。
-    - **今天**:gang scheduling 的正反兩面。驗收:三缺一時全 Pending 且實體卡零佔用、搶占時整組同進退,外加一場親手觸發的 spot 回收時間軸。
-    - **Day 3**:離開排程層,把一張卡真的切開。
+Day 1 處理的都是單顆 pod：誰先拿到卡、誰會被擠掉。這一章處理「一組 pod 要一起拿到資源才有用」的情況。我們會在兩張 T4 上重現上面那個畫面，然後讓 KAI 把三個 worker 當成一個單位排程，再看這個單位遇到搶占、遇到 spot 節點被雲端收走時，會發生什麼事。
 
-## 原理與架構
+讀完之後，一份多 worker 的工作出現部分 Running、部分 Pending 時，你會知道該看 PodGroup 的 `minMember`，判斷它有沒有被當成一整組排程，也能預估它被搶占或節點被回收時，會不會整組重來。
 
-Day 1 的 queue 與 priority 回答的是「兩個工作搶同一張卡,誰先拿到」。今天換一個維度:**一個工作需要 N 張卡才有意義,拿到 N-1 張等於零**。
+## 少一個 worker，其他 worker 也動不了
 
-分散式訓練的每一步都要在所有 worker 之間做一次 all-reduce,少一個 worker,集合通訊就湊不齊,整個 job 一步都跑不動。把這種工作交給「一顆一顆各排各的」排程器,結果是**半啟動死鎖**:前幾顆搶到卡、跑起來、卡在等待同伴,最後一顆永遠等不到資源。此時那幾張卡處於最糟的狀態——被佔著、有 pod 在上面、但對誰都沒有產出,包括佔著它的人。
+分散式訓練會把一份工作拆給好幾個 process 同時算，每一個叫一個 **worker**，在 Kubernetes 上通常一個 worker 就是一顆 pod。每算完一步，所有 worker 要把各自算出的結果交換、加總，再一起進下一步；這個「大家把結果湊在一起」的動作叫 **all-reduce**。只要少一個 worker，all-reduce 就湊不齊，其他 worker 只能停在原地等。
 
-這個問題的解法叫 **gang scheduling**——gang 字面上就是「一夥人」,意思是把 N 顆 pod 當一夥看待:湊得齊就一起上,湊不齊就全部退出、把卡還給別人,不留任何一顆單獨佔資源。**資源利用率反而更高**,因為那幾張卡至少能被別的工作用掉。
+所以這類工作要的不是「盡量多給幾張卡」，而是「三張一起給，否則一張都不要」。下面把兩種排程方式並排比較，上面是每顆 pod 各排各的，下面是把三個 worker 當成一組：
 
-### 怎麼把一組 pod 宣告成 gang
+![兩種排程方式的對照：各排各的時，worker 1、2 各佔一張 T4 卻在等同伴，worker 3 等不到卡而 Pending，兩張卡沒有任何進度；gang scheduling 時三個 worker 一起 Pending，兩張 T4 空著可以給別的工作用](../assets/diagrams/s1d2-half-start.svg)
 
-KAI 的載體是 `PodGroup`,關鍵欄位是 `minMember`——低於這個數字就不排,也不留:
+我們可以從圖上看到兩件事：
 
-```mermaid
-flowchart TB
-    JOB["batch/v1 Job(parallelism 3)<br>annotations:<br>kai.scheduler/batch-min-member: 3"] --> PG["PodGroup(v2alpha2)<br>minMember: 3<br>queue: batch-eval"]
-    PG --> SCHED["kai-scheduler<br>折成一筆請求:3 GPU"]
-    SCHED --> OK["湊得齊:整組同一秒 Bound"]
-    SCHED --> NO["湊不齊:全部 Pending<br>零 GPU 佔用"]
-```
+1. 上面那一列，兩張卡都有人佔著，但沒有任何進度。前兩個 worker 等第三個，第三個等一張卡，而唯一能放出卡的就是前兩個。沒有人介入的話，這個狀態會一直維持下去。
+2. 下面那一列，三個 worker 都沒排上，看起來比較糟，但兩張卡是空的，別的工作可以先用。等卡夠了，三個再一起排上。
 
-送 workload 之前先確認欄位——直接查就有,不必靠記憶:
+下面那一列的做法叫 **gang scheduling**：gang 是「一夥人」，把一組 pod 當成一夥，湊得齊就一起上，湊不齊就一顆都不放。
 
-```console
-$ kubectl explain podgroup.spec --recursive
-GROUP:      scheduling.run.ai
-KIND:       PodGroup
-VERSION:    v2alpha2
+## 開始之前
 
-FIELD: spec <Object>
+這一章接著 Day 1 的環境：AKS 叢集、KAI Scheduler v0.16.8、`gpuspot` pool 兩台各帶一張 T4 的 spot 節點。Day 1 收尾時刪掉了測試佇列和 namespace，GPU pool 也縮回 0，所以先做三件事：
 
-FIELDS:
-  markUnschedulable	<boolean>
-  minMember	<integer>
-  minSubGroup	<integer>
-  preemptibility	<string>
-  enum: preemptible, non-preemptible
-  priorityClassName	<string>
-  queue	<string>
-  schedulingBackoff	<integer>
-  subGroups	<[]Object>
-```
+1. 照 [Day 1 步驟 1](sprint1-day1-kai-queue-basics.md) 把 `gpuspot` pool 拉回 2 台，等兩張 T4 出現在 `allocatable`。
+2. 用 Day 1 步驟 4 的 `01-queues.yaml` 重建佇列：`kubectl apply -f 01-queues.yaml`。底下 `inference-prod`（queue priority 200）和 `batch-eval`（queue priority 100）各保底一張卡。
+3. 重建 workload 用的 namespace：`kubectl create namespace kai-lab`。
 
-PodGroup 是 **`v2alpha2`**,而 Day 1 建立佇列時用的 Queue 是 **`v2`**——同一個 API group `scheduling.run.ai` 底下,兩個 kind 的版本並不同步。Day 1 步驟 3 清點元件時就看過 CRD 分屬 `scheduling.run.ai` 與 `kai.scheduler` 兩個 group;這裡再多一層:連同一個 group 內的版本也要個別確認。
+## 步驟 1:送一個 3 worker 的 Job
 
-### 組出一個 gang 的三種寫法
-
-| 方式 | 怎麼寫 | 適用 |
-|---|---|---|
-| 隱式(預設) | 送 `batch/v1` Job,由 `pod-grouper` 自動產生 PodGroup | 最常見——但**預設不給原子性**,見[地雷 1](#mine-1) |
-| `batch-min-member` 標註 | Job 資源上加 `kai.scheduler/batch-min-member: "N"` | 要「至少 N 個一起跑」,本章主線 |
-| 外部 PodGroup | 自建 PodGroup + pod 標註 `pod-group-name`、`kai.scheduler/skip-podgrouper: "true"` | 多個 workload 併入同一組,或由外部 controller 管生命週期 |
-
-### gang 不是一個開關,是四件事一起運作
-
-排程器的 action 順序決定了後面每一則事件該怎麼判讀:
-
-```console
-$ kubectl -n kai-scheduler get cm kai-scheduler-default -o jsonpath='{.data.config\.yaml}'
-actions: allocate, consolidation, reclaim, preempt, stalegangeviction
-...
-scenarioSearchBudgets:
-  maxGeneratorSearchDuration:
-    MultiNodeGang: 2m0s
-    NodeLocalGreedy: 30s
-tiers:
-- plugins:
-  ...
-  - name: sg-nodelocalgreedy
-  - name: sg-multinodegang
-```
-
-湊齊整組的邏輯由兩個 **scenario generator** plugin 撐起來:`sg-nodelocalgreedy`(先試單節點塞得下的貪婪解,預算 30 秒)與 `sg-multinodegang`(跨節點湊齊,預算 2 分鐘)。而 `stalegangeviction` 排在第五個 action——「組破了要收掉」是每輪排程週期的常規檢查,不是例外處理路徑。
-
-那「破了多久才收」是多久?寬限期的預設值寫在原始碼(`cmd/scheduler/app/options/options.go`):
-
-```go
-defaultStalenessGracePeriod = 60 * time.Second
-```
-
-本叢集的 ConfigMap 沒有覆寫 `globalDefaultStalenessGracePeriod`,吃的就是這 60 秒。這給了後面一個**可證偽的預測**:手動殺掉一個成員之後,若 KAI 真的做整組收斂,動作應該在約 60 秒後發生,而不是立刻。負值代表永不驅逐——那是「寧可半殘也不要重跑」的生產選項。
-
-### 今天要走的路
-
-在同一組 2×T4 的叢集上跑四場演練:**湊不齊**(3 個成員搶 2 張卡)、**湊得齊**(2 個成員剛好吃滿)、**拆散 gang**(手動殺一顆、以及被搶占)、**對照組**(同樣的需求交給 default kube-scheduler)。最後用 `az vmss simulate-eviction` 模擬一次 Azure spot 回收,看真實的節點消失如何觸發同一條收斂路徑。
-
-環境沿用 Day 1:AKS `<cluster>`(K8s v1.35.6)、KAI Scheduler v0.16.8、`gpuspot` pool 兩台 `Standard_NC4as_T4_v3`(各 1 張 T4)、佇列 `cnp-root` 底下 `inference-prod`(priority 200)與 `batch-eval`(priority 100),workload 全部丟在 `kai-lab` namespace。
-
-## 步驟
-
-### 步驟 1:送一個湊不齊的 gang——先確認它真的是 gang
-
-最直覺的寫法是一個 `batch/v1` Job,`parallelism: 3`、`schedulerName: kai-scheduler`、掛好佇列標籤,不加任何額外標註,期待 `pod-grouper` 依 `parallelism` 產生 `minMember: 3`:
+先用最直覺的寫法：一個 `batch/v1` Job，`parallelism: 3` 表示同時跑 3 顆 pod，`schedulerName: kai-scheduler` 讓它走 KAI，佇列標籤放 `batch-eval`，不加其他設定。
 
 ```bash
 cat > 02-gang3-job.yaml <<'EOF'
@@ -137,6 +70,12 @@ spec:
 EOF
 ```
 
+容器指令裡的 `trap 'exit 0' TERM` 讓 pod 收到停止訊號就立刻結束，不必等滿 30 秒的寬限期。這是 Day 1 的[「受害者被驅逐後,那張卡不會立刻交給搶占者」](sprint1-day1-kai-queue-basics.md#mine-6)提過的寫法：Kubernetes 停掉一顆 pod 時，先送 `SIGTERM` 訊號讓程式自己收尾，最多等一段寬限期（預設 30 秒）才強制結束，而 bash 不會把這個訊號轉給 `sleep`，沒有 `trap` 就會硬等滿寬限期。這一章所有 pod 都用這個寫法。它的副作用是：pod 被驅逐時也以 exit code 0 結束，Job 會把它當成正常完成，步驟 4 會實際看到。
+
+pod template 的 label 裡那行 `priorityClassName: train` 是 KAI 的寫法：KAI 從這個 label 讀 workload 的優先權，跟 Kubernetes 標準的 `spec.priorityClassName` 欄位不同（步驟 6 會用到標準的寫法）。
+
+送出去，看 pod 落在哪裡：
+
 ```console
 $ kubectl apply -f 02-gang3-job.yaml
 $ kubectl -n kai-lab get pods -o wide
@@ -146,7 +85,9 @@ gang3-b5mgg   1/1     Running   0          25s   aks-gpuspot-21249019-vmss000007
 gang3-fzwls   0/1     Pending   0          25s   <none>
 ```
 
-2 個跑起來、1 個 Pending——這正是 gang scheduling 要消滅的半啟動死鎖,而且它是**在裝了 KAI 的叢集上**發生的。原因不在資源,在 PodGroup:
+2 個 Running、1 個 Pending，就是開場那張圖的上半部。叢集裝了 KAI，結果卻跟各排各的一樣。
+
+Day 1 看過，走 KAI 的 pod 會先被收成一個 **PodGroup**：這是 KAI 排程的單位，同一份工作的 pod 共用一個。原因要從 PodGroup 找：
 
 ```console
 $ kubectl -n kai-lab get podgroups -o json \
@@ -155,7 +96,35 @@ $ kubectl -n kai-lab get podgroups -o json \
  "status":{"resourcesStatus":{"allocated":{"nvidia.com/gpu":"2"},"requested":{"nvidia.com/gpu":"3"}}}}
 ```
 
-`minMember: 1`。完整的診斷與修法見[地雷 1](#mine-1);結論是 gang 的開關要明寫在 Job 上——把上面那份複製成 `02b-gang3-minmember-job.yaml`,在 **Job 自己的 `metadata`**(不是 pod template 的那個)補上標註:
+三顆 pod 確實被收進同一個 PodGroup，但 `minMember` 是 1。**`minMember`** 是 PodGroup 的一個欄位，意思是「至少要幾顆 pod 同時排得上，才排這一組」。它是 1，就表示排得上一顆就放一顆，等於沒有 gang。`status` 裡的 `allocated: 2` 也對得上：已經佔了兩張卡。
+
+PodGroup 有哪些欄位，可以直接問叢集：
+
+```console
+$ kubectl explain podgroup.spec --recursive
+GROUP:      scheduling.run.ai
+KIND:       PodGroup
+VERSION:    v2alpha2
+
+FIELD: spec <Object>
+
+FIELDS:
+  markUnschedulable	<boolean>
+  minMember	<integer>
+  minSubGroup	<integer>
+  preemptibility	<string>
+  enum: preemptible, non-preemptible
+  priorityClassName	<string>
+  queue	<string>
+  schedulingBackoff	<integer>
+  subGroups	<[]Object>
+```
+
+（PodGroup 的版本是 `v2alpha2`，跟 Day 1 的 Queue 用的 `v2` 不同。自己寫 PodGroup 時，apiVersion 要照這裡的版本寫。）
+
+為什麼是 1？`pod-grouper`（KAI 裡負責替 workload 建 PodGroup 的元件）替 `batch/v1` Job 建 PodGroup 時，預設 `minMember` 就是 1，不會拿 `parallelism` 當 gang 的大小。KAI 的官方文件 `docs/batch/README.md` 第一段也寫了，這樣的 Job 裡的 pod 會 "scheduled separately"。PyTorchJob（Kubeflow 用來跑 PyTorch 分散式訓練的工作類型）、JobSet（Kubernetes 社群把多個 Job 組成一份工作的 API）這類本身就描述「幾個 worker」的工作類型，才會自動推出 gang；`batch/v1` Job 要自己講。
+
+講的方式是在 **Job 自己的 `metadata`**（不是 pod template 那一層）加上 **`kai.scheduler/batch-min-member`** 標註，值就是 gang 的大小。把上面那份複製成 `02b-gang3-minmember-job.yaml`，補上這兩行：
 
 ```yaml
 metadata:
@@ -165,7 +134,7 @@ metadata:
     kai.scheduler/batch-min-member: "3"
 ```
 
-只差這兩行,行為完全換一個樣子:
+刪掉舊的 Job，送新的：
 
 ```console
 $ kubectl -n kai-lab delete job gang3
@@ -177,7 +146,7 @@ gang3-8wtjf   0/1     Pending   0          30s   <none>
 gang3-8zjvx   0/1     Pending   0          30s   <none>
 ```
 
-三顆全部 Pending。PodGroup 的狀態把理由講得很完整:
+這次三顆全部 Pending，變成開場那張圖的下半部。PodGroup 的狀態說明了原因：
 
 ```console
 $ kubectl -n kai-lab get podgroups -o json | jq -c '.items[].status'
@@ -187,11 +156,16 @@ $ kubectl -n kai-lab get podgroups -o json | jq -c '.items[].status'
    "message":"PodSchedulingErrors: Resources were found for 2 pods while 3 are required for gang scheduling. Additional pods cannot be scheduled due to: no nodes with enough resources were found: 3 node(s) didn't have enough resources: GPUs.."}]}
 ```
 
-兩個訊號要記住。第一,訊息直接點名 gang——「Resources were found for 2 pods while 3 are required for gang scheduling」:KAI 知道自己找得到 2 張卡,就是因為湊不到 3 才一顆都不放。第二,`resourcesStatus` 裡**只有 `requested: 3`,沒有 `allocated` 欄位**;對照剛才沒有 gang 時的 `allocated: 2`,這一欄的有無就是「有沒有佔卡」最快的訊號。
+這段狀態有兩處要看：
 
-### 步驟 2:證明「零佔用」不是記帳好看,是卡真的空著
+1. 訊息寫「Resources were found for 2 pods while 3 are required for gang scheduling」。KAI 找得到 2 張卡，因為湊不到 3 張，才一顆都不放。
+2. `resourcesStatus` 只有 `requested: 3`，沒有 `allocated`。前一次沒有 gang 時是 `allocated: 2`。有沒有 `allocated` 這一欄，是看「這組有沒有佔卡」最快的地方。
 
-PodGroup 沒有 `allocated` 只是 KAI 自己的帳。要證明**實體 GPU 沒被鎖住**,就在 gang 卡住期間送一顆同佇列、同優先權、只要 1 張卡的無關 pod 進去插隊:
+判斷一份工作有沒有被當成 gang，看的是 PodGroup 的 `minMember`，不是 Job 的 `parallelism`，也不是 pod 跑不跑得起來。
+
+## 步驟 2:確認卡真的空著
+
+PodGroup 沒有 `allocated`，只是 KAI 自己的紀錄。要確認兩張 GPU 真的沒被鎖住，就在 gang 卡著的時候，送一顆同佇列、同優先權、只要一張卡的 pod 進去。這顆 pod 只是用來測試卡有沒有空，叫它探針 pod：
 
 ```bash
 cat > 03-prober-pod.yaml <<'EOF'
@@ -232,7 +206,7 @@ gang3-8wtjf   0/1     Pending   0          66s   <none>
 gang3-8zjvx   0/1     Pending   0          66s   <none>
 ```
 
-再從叢集角度清點誰真的握著 GPU:
+探針 pod 馬上排上了。再從整個叢集清點，哪些 pod 已經排到節點上、而且要了 GPU：
 
 ```console
 $ kubectl get pods -A -o json | jq -r '.items[]
@@ -242,9 +216,9 @@ $ kubectl get pods -A -o json | jq -r '.items[]
 kai-lab/gang-prober  node=aks-gpuspot-21249019-vmss000006  phase=Running
 ```
 
-整個叢集只有探針 pod 一個 GPU 持有者。三個 gang 成員等了 66 秒,一張卡都沒碰——這就是 gang 換來的東西:與其讓 2 個成員佔著卡空轉等第 3 個,不如全部退出讓路。
+整個叢集只有探針 pod 握著 GPU。三個 gang 成員等了一分多鐘，一張卡都沒碰。這就是 gang 的用處：與其讓兩個成員佔著卡等第三個，不如全部讓出來，讓別的工作先用。
 
-排程器日誌則說明了它把這一組當成什麼:
+KAI 的排程器日誌可以看出它把這一組當成什麼：
 
 ```console
 $ kubectl -n kai-scheduler logs deploy/kai-scheduler-default --since=110s | grep -iE "gang|pg-gang3"
@@ -257,11 +231,13 @@ preempt/preempt.go:105        Didn't find a preemption strategy for job <kai-lab
 stalegangeviction/stalegangeviction.go:30  Enter StaleGangEviction ...
 ```
 
-請求量印成 `resources: <[0 0 3 3 0 0 0]>`——**3 是整組的總和,不是單顆 pod 的 1**。從 allocate 到 preempt,排程器全程把它當成「一個要 3 GPU 的 job」處理,這就是 gang 的實作本質:把 N 顆 pod 摺疊成一筆不可分割的資源請求。另外每一輪都完整跑完五個 action,即使明知湊不齊也每秒重試一次。
+從上往下看，排程器依序試了幾種辦法：直接配置（allocate）、把正在跑的工作挪一挪騰出空間（consolidation，日誌寫的是 "consolidate running jobs in order to make room"）、搶占別人（preempt），三種都沒成功。consolidation 和搶占的差別在於：被搬的工作會換到別的節點重新跑，不會因此失去資源；preempt 和 Day 1 的 reclaim 則是把別人的卡拿走。最後一行的 StaleGangEviction 步驟 4 會講。
 
-### 步驟 3:湊得齊的時候,整組是同一秒上去的
+`resources: <[0 0 3 3 0 0 0]>` 是排程器內部記錄資源需求的格式，不必逐欄解讀，只要注意裡面的 3：整組三顆 pod 加起來要 3 張 GPU。排程器處理的單位是「一個要 3 張卡的工作」，不是三個各要 1 張的 pod。這就是 gang 的實際做法：把一組 pod 合成一筆不能拆開的資源需求。
 
-把 gang 縮成 2 個成員(同樣帶 `kai.scheduler/batch-min-member: "2"`),剛好等於叢集的兩張 T4:
+## 步驟 3:湊得齊的時候，整組一起排上
+
+把 gang 縮成 2 個成員，剛好等於叢集的兩張 T4。標註同樣要寫，值改成 2：
 
 ```bash
 cat > 04-gang2-job.yaml <<'EOF'
@@ -300,6 +276,14 @@ spec:
 EOF
 ```
 
+先刪掉探針 pod，騰出它佔的那張卡：
+
+```console
+$ kubectl -n kai-lab delete pod gang-prober
+```
+
+再刪掉卡住的 gang3，送 gang2：
+
 ```console
 $ kubectl -n kai-lab delete job gang3
 $ kubectl apply -f 04-gang2-job.yaml
@@ -309,7 +293,7 @@ gang2-8n57n   1/1     Running   aks-gpuspot-21249019-vmss000006
 gang2-d4psb   1/1     Running   aks-gpuspot-21249019-vmss000007
 ```
 
-事件的秒數比 pod 列表更有資訊量。把 events 依 `lastTimestamp` 排序、取時間/物件/原因/來源四欄(篩法同 Day 1 用過的 `-o custom-columns` 寫法;事件時間為 UTC,`08:xx` 對應台灣時間 `16:xx`):
+兩顆都跑起來了。要看「一起」排上，得看事件的時間。下面是把 events 依 `lastTimestamp` 排序後，取時間、物件、原因、來源四欄（寫法同 Day 1 用過的 `-o custom-columns`）：
 
 ```console
 08:04:25Z  gang2         SuccessfulCreate  job-controller
@@ -322,18 +306,51 @@ gang2-d4psb   1/1     Running   aks-gpuspot-21249019-vmss000007
 08:04:27Z  gang2-8n57n   Started           kubelet
 ```
 
-兩顆的 `Scheduled` 與 `Bound` 落在**同一秒**,不是一前一後。gang 滿足時的排程是一次爆發:KAI 先在記憶體裡把整組的放置方案算完,確定兩個位置都有著落,才一起送出綁定。所以 PodGroup 的 `allocated` 是從「不存在」直接跳到 `2`,中間沒有 `1` 這個狀態。
+兩顆的 `Scheduled` 和 `Bound` 都落在同一秒。這跟步驟 1 對得上：KAI 要等整組需要的資源都能滿足，才開始替這一組配置；只湊得到一部分時，一顆都不排。至於兩顆的綁定是不是一次完成、中間有沒有短暫只綁上一顆的時刻，事件時間只精確到秒，這一章沒有驗證，不能下結論。
 
-### 步驟 4:拆散 gang——手動殺掉一個成員
+## 步驟 4:成員少了一個，剩下的會怎樣
 
-兩顆正在跑,用 `--force --grace-period=0` 硬砍其中一顆(模擬節點失聯或 pod 意外死亡),看倖存者的命運:
+gang 排上之後，成員還是可能中途消失：pod 當掉、節點失聯。少了一個成員，剩下的成員又回到開場那個「佔著卡等同伴」的狀態。KAI 用 **StaleGangEviction** 處理這種情況：每一輪排程都檢查有沒有 PodGroup 的存活成員少於 `minMember`，有的話就把剩下的成員也驅逐，整組收掉、把卡還出來。步驟 2 日誌最後那行 `Enter StaleGangEviction` 就是這個檢查。
+
+不過它不會一發現就動手。寬限期的預設值寫在 KAI 原始碼的 `cmd/scheduler/app/options/options.go`：
+
+```go
+defaultStalenessGracePeriod = 60 * time.Second
+```
+
+這個值可以調：排程器的啟動參數是 `--default-staleness-grace-period`，在 KAI 的設定裡對應 `globalDefaultStalenessGracePeriod`；設成負值表示永遠不驅逐，寧可讓缺員的 gang 繼續佔卡。要確認自己的叢集有沒有改過，看 `kai-scheduler-default` ConfigMap 裡有沒有這個欄位：
+
+```console
+$ kubectl -n kai-scheduler get cm kai-scheduler-default -o jsonpath='{.data.config\.yaml}' | grep -i staleness
+```
+
+下面是不加 `grep` 時的完整設定。要看的是有沒有 `globalDefaultStalenessGracePeriod` 這一行；這份設定裡沒有，所以用的是預設值：
+
+```console
+$ kubectl -n kai-scheduler get cm kai-scheduler-default -o jsonpath='{.data.config\.yaml}'
+actions: allocate, consolidation, reclaim, preempt, stalegangeviction
+...
+scenarioSearchBudgets:
+  maxGeneratorSearchDuration:
+    MultiNodeGang: 2m0s
+    NodeLocalGreedy: 30s
+tiers:
+- plugins:
+  ...
+  - name: sg-nodelocalgreedy
+  - name: sg-multinodegang
+```
+
+沒有輸出，就是用預設的 60 秒。動手之前先想一想：殺掉一個成員之後，剩下那個會立刻被驅逐，還是等一陣子？
+
+兩顆 gang2 正在跑，用 `--force --grace-period=0` 直接刪掉其中一顆，模擬成員意外消失：
 
 ```console
 $ VICTIM=$(kubectl -n kai-lab get pods --no-headers -o custom-columns=':.metadata.name' | head -1)
 $ kubectl -n kai-lab delete pod $VICTIM --force --grace-period=0
 ```
 
-每 10 秒取樣一次 pod 與 PodGroup:
+接著每 10 秒取樣一次剩下的 pod 和 PodGroup。每列開頭的 `t+10s` 是從刪除那一刻起算的秒數，後面的時鐘是台灣時間；下面的事件用 UTC（結尾的 `Z`），兩者差 8 小時，事件的 08:05:32Z 換成台灣時間是 16:05:32，也就是刪除的那一刻。`mm` 是 `minMember`、`alloc` 是已配置的卡：
 
 ```text
 --- t+10s 16:05:42 ---  gang2-d4psb 1/1 Running   {"mm":2,"alloc":{"nvidia.com/gpu":"1"},"req":{"nvidia.com/gpu":"1"}}
@@ -341,6 +358,8 @@ $ kubectl -n kai-lab delete pod $VICTIM --force --grace-period=0
 --- t+50s 16:06:25 ---  gang2-d4psb 1/1 Running   {"mm":2,"alloc":{"nvidia.com/gpu":"1"},"req":{"nvidia.com/gpu":"1"}}
 --- t+60s 16:06:35 ---  No resources found        {"mm":2,"alloc":null,"req":null}
 ```
+
+前 50 秒，剩下的 `gang2-d4psb` 一直在跑，PodGroup 記著只佔一張卡；到第 60 秒，pod 和配置都沒了。對照事件和排程器日誌：
 
 ```text
 08:05:32Z  gang2-8n57n   Killing    kubelet         Stopping container main
@@ -352,18 +371,24 @@ $ kubectl -n kai-lab delete pod $VICTIM --force --grace-period=0
   Evicted task: <kai-lab/gang2-d4psb> due its job being a stale job, its status: <Releasing>
 ```
 
-原始碼推出的 60 秒預測完全命中:成員在 08:05:32 消失,倖存者在 08:06:32 被驅逐,剛好 60.0 秒。中間 KAI 先發 `StaleJob` 事件公告「1 pods are active, minMember is 2」,等滿寬限期才動手。這 60 秒是刻意留給短暫抖動(pod 重啟、節點瞬斷)的自癒空間——成員在 60 秒內回來,整組就不會被收掉。
+第一個成員 08:05:32 停掉，剩下的成員 08:06:32 被驅逐，正好 60 秒：不是立刻，而是等滿寬限期。中間 KAI 先發了一則 `StaleJob` 事件，寫明「1 pods are active, minMember is 2」，等寬限期滿才動手。這 60 秒是給短暫的中斷用的：pod 重啟、節點短暫斷線，只要成員在 60 秒內回來，整組就不會被收掉。
 
-KAI 的立場是**不容忍部分存活**:組破了就整組回收,把卡全部還出來。對分散式訓練這是正確的,少一個 worker 的 job 本來就跑不完,留著只是佔卡空轉。不過最後一行 `Job completed` 是個陷阱——被驅逐的 gang,Job controller 竟然當成正常完成,詳見[地雷 2](#mine-2)。
+KAI 的做法是不保留只剩一部分的 gang。對分散式訓練來說這是對的，少一個 worker 的工作本來就算不下去，留著只會佔卡。
 
-### 步驟 5:拆散 gang——搶占者只要一張卡
+要注意最後一行事件：`Job completed`。整組被驅逐，Job 卻記成正常完成。原因是開頭那段 `trap 'exit 0' TERM`，詳見[疑難排解：被驅逐的 gang 被記成「完成」](#mine-2)。
 
-重新拉起 gang2 佔滿兩張卡,然後送一顆同佇列(`batch-eval`)、`inference`(125,不可被搶占)、**只要 1 張卡**的搶占者。搶占者就是探針 pod 換個名字、換個優先權:
+## 步驟 5:搶占者只要一張卡
+
+步驟 4 的成員是被手動刪掉的。另一種會讓成員消失的情況是搶占。這次先刪掉步驟 4 已經結束的 gang2 Job（同名的 Job 重新 apply 不會產生新的 pod），重新送出一次讓它佔滿兩張卡，再送一顆同佇列（`batch-eval`）、優先權 `inference`（125，不會被搶占）、**只要一張卡**的 pod 當搶占者。它就是探針 pod 換個名字、換個優先權：
 
 ```bash
 sed -e 's/gang-prober/gang-preemptor/' \
     -e 's/priorityClassName: train/priorityClassName: inference/' \
     03-prober-pod.yaml > 05-gang-preemptor-inference.yaml
+```
+
+```console
+$ kubectl -n kai-lab delete job gang2
 ```
 
 ```console
@@ -374,7 +399,7 @@ NAME             READY   STATUS    NODE
 gang-preemptor   1/1     Running   aks-gpuspot-21249019-vmss000006
 ```
 
-10 秒後整個 gang 消失了,只剩搶占者:
+搶占者只要一張卡，10 秒後整個 gang 卻都不見了，只剩搶占者。事件如下：
 
 ```text
 08:09:05Z  pg-gang2-5a370b1d-...  Evict  kai-scheduler
@@ -385,11 +410,22 @@ gang-preemptor   1/1     Running   aks-gpuspot-21249019-vmss000006
 08:09:06Z  gang-preemptor  Bound      binder
 ```
 
-兩則 `Evict` 在**同一秒**發出,訊息都是 `was preempted by higher priority workload`——這是 preempt action 幹的,不是 StaleGangEviction(若是後者要等 60 秒,訊息也會是 stale job)。也就是說 KAI 挑受害者時,**直接把整個 PodGroup 當成一個不可分割的受害單位**,而不是先殺一顆、再讓它因為缺員被 stale 收掉。搶 1 張卡賠掉整組的代價與規避方式,見[地雷 3](#mine-3)。
+兩則 `Evict` 在同一秒發出，訊息都是 `was preempted by higher priority workload`。這是搶占造成的，不是 StaleGangEviction：如果是後者，要等 60 秒，訊息也會寫 stale job。也就是說，KAI 挑受害者時，**以整個 PodGroup 為單位**，而不是先殺一顆、再等剩下的那顆因為缺員被收掉。`Pipelined` 表示排程器已經替搶占者選好一張正在釋放的卡，等卡空出來就綁定，這次隔 1 秒就 `Bound`。
 
-### 步驟 6:同樣的需求交給 default kube-scheduler
+這個做法的代價是：搶占者只要一張卡，整組兩張都被收走，另一張就空著。gang 越大，代價越大。怎麼減少這種情況，見[疑難排解：搶 1 張卡，整個 gang 都被驅逐](#mine-3)。
 
-「為什麼不用預設排程器就好」這個問題,值得用完全相同的資源需求跑一次對照。拿掉 `schedulerName`、拿掉佇列標籤,其餘與步驟 1 相同:
+## 步驟 6:同樣的需求交給預設排程器
+
+為什麼不直接用 Kubernetes 預設的排程器？這一步用一樣的資源需求做兩組對照：先送和步驟 1 一樣的 3 個 worker，看預設排程器怎麼排；再做一次搶占，跟步驟 5 比較被驅逐的範圍。最後把兩個排程器的差異整理成一張表。
+
+先清掉步驟 5 留下的搶占者和 gang2 Job，讓兩張卡空出來：
+
+```console
+$ kubectl -n kai-lab delete pod gang-preemptor
+$ kubectl -n kai-lab delete job gang2
+```
+
+第一組對照：拿掉 `schedulerName`、拿掉佇列標籤，其餘與步驟 1 相同：
 
 ```bash
 cat > 06-default-sched-3pods.yaml <<'EOF'
@@ -429,7 +465,7 @@ nogang3-pbcq4 1/1 Running  aks-gpuspot-21249019-vmss000007
 nogang3-zd8fs 1/1 Running  aks-gpuspot-21249019-vmss000006
 ```
 
-2 跑 + 1 卡住,兩張 T4 被佔住不放,直到有人手動介入。default-scheduler 給的理由是:
+2 個 Running、1 個 Pending，兩張 T4 被佔住，直到有人手動處理。預設排程器給的理由是：
 
 ```text
 FailedScheduling  0/3 nodes are available: 3 Insufficient nvidia.com/gpu.
@@ -437,9 +473,9 @@ FailedScheduling  0/3 nodes are available: 3 Insufficient nvidia.com/gpu.
   1 Preemption is not helpful for scheduling, 2 No preemption victims found for incoming pod.
 ```
 
-這段訊息**只講這一顆 pod 的處境**——沒有節點有足夠 GPU。它不知道還有兩顆兄弟 pod 正佔著卡,更不知道三顆是一個整體。KAI 的訊息則會把整組的缺口講出來。
+這段訊息只講這一顆 pod：沒有節點有足夠的 GPU。它不知道另外兩顆是同一份工作、正佔著卡。KAI 在步驟 1 的訊息則會把整組的缺口講出來。
 
-還有一個容易被忽略的副作用:
+另外，這幾顆 pod 不在 KAI 的帳上：
 
 ```console
 $ kubectl -n kai-lab get podgroups
@@ -448,11 +484,17 @@ $ kubectl get queue batch-eval -o json | jq -c '.status'
 {}
 ```
 
-`pod-grouper` 沒有為這些 pod 建立 PodGroup,`batch-eval` 佇列的 `status` 是空物件——**KAI 的配額帳本完全看不到這 2 張已被吃掉的卡**。兩個排程器並存的叢集,KAI 的 queue 統計會低估實際用量,規劃 quota 時要把這塊盲區算進去。
+`pod-grouper` 沒有替它們建 PodGroup，`batch-eval` 佇列的 `status` 是空的，KAI 看不到這兩張已經被用掉的卡。同一個叢集裡兩個排程器並存時，KAI 佇列上的用量會比實際少，規劃 quota 時要把這部分算進去。
 
-搶占的部分也跑一次對照。刻意沿用 KAI 帶進來的 `train`(50)與 `inference`(125)兩個 PriorityClass——它們本來就是標準 K8s 物件,`preemptionPolicy: PreemptLowerPriority`,default-scheduler 認得:
+第二組對照是搶占。這次沿用 KAI 帶進來的 `train`（50）和 `inference`（125）兩個 PriorityClass。它們本來就是標準的 Kubernetes 物件，設定是 `preemptionPolicy: PreemptLowerPriority`，預設排程器也認得。
 
-兩顆受害者先把兩張 T4 佔滿,製造零空閒。注意優先權寫在 `spec.priorityClassName`,不是前面 KAI 那套 label:
+先刪掉第一組的 nogang3 Job，把卡空出來：
+
+```console
+$ kubectl -n kai-lab delete job nogang3
+```
+
+再用兩顆受害者 pod 佔滿兩張 T4。注意優先權寫在 `spec.priorityClassName`，不是前面 KAI 用的那個 label：
 
 ```bash
 cat > 07-default-sched-victim-train.yaml <<'EOF'
@@ -503,7 +545,7 @@ spec:
 EOF
 ```
 
-搶占者是同一份規格的單顆 pod,只改名字與優先權:
+搶占者是同一份規格的單顆 pod，只改名字和優先權：
 
 ```bash
 sed -e '/^---$/,$d' -e 's/nogang-victim-1/nogang-preemptor/' \
@@ -525,32 +567,36 @@ nogang-victim-1   Preempted  Preempted by pod d330a2f9-... on node aks-gpuspot-2
 08:13:35Z  nogang-preemptor  Started  kubelet
 ```
 
-原生搶占正常運作,而且**只殺一顆**(victim-1 死、victim-2 活)。這正是與步驟 5 的關鍵對照:同樣是「搶 1 張卡」,default-scheduler 的受害者是單顆 pod、傷害最小,KAI 面對 gang 時收掉整組。另外 `Preempted` 事件把搶占者印成 UID 而不是名字,事後追查要多一步反查;KAI 的訊息則直接給 workload 名稱。
+預設排程器的搶占正常運作，而且只驅逐一顆：victim-1 被驅逐，victim-2 照常執行。另外，`Preempted` 事件把搶占者印成 UID 而不是名字，事後追查要再反查一次；KAI 的訊息則直接寫出 workload 名稱。
 
-受害者 08:13:34 收到 `Killing`、搶占者 08:13:35 就 `Started`,**只花 1 秒**——Day 1 地雷 6 記錄的 31 秒空窗來自受害者沒有攔 `SIGTERM`、硬吃滿 30 秒寬限期;本日所有 pod 都寫了 `trap 'exit 0' TERM`,寬限期完全沒有發生。那個修法有效,代價是[地雷 2](#mine-2)。
+受害者 08:13:34 收到 `Killing`，搶占者 08:13:35 就 `Started`，只隔 1 秒。Day 1 那次空等了 31 秒，原因是受害者沒有處理 `SIGTERM`，硬等滿 30 秒寬限期；這一章的 pod 都寫了 `trap 'exit 0' TERM`，所以沒有這段等待。這個寫法的代價就是步驟 4 看到的 `Job completed`。
 
-把跑過的項目整理成對照表:
+把步驟 5 和這裡的搶占放在一起看：
 
-| 面向 | KAI Scheduler v0.16.8 | default kube-scheduler |
+![同樣是搶占者要 1 張卡、兩張卡都被 train 等級的 pod 佔著：預設排程器只驅逐 victim-1，victim-2 照常執行；KAI 遇到 gang 時，成員 A、B 同一秒都被驅逐，搶占者用掉一張，另一張空著](../assets/diagrams/s1d2-preempt-scope.svg)
+
+我們可以從圖上看到，差別不在搶占者，而在受害者是不是一組。預設排程器眼中每顆 pod 都是獨立的，所以只驅逐一顆。KAI 把 gang 當成一個單位，要嘛整組留下，要嘛整組離開，所以為了一張卡收走兩張。
+
+把這一章跑過的項目整理起來。看這張表時抓住一件事：KAI 的每一項差異，都來自它把一組 pod 當成一筆需求處理，預設排程器只看得到單顆 pod。
+
+| 面向 | KAI Scheduler v0.16.8 | 預設排程器（kube-scheduler） |
 |---|---|---|
-| 3 顆要 3 卡、只有 2 卡 | 加 `batch-min-member` 後三顆全 Pending、**零 GPU 佔用**,別的工作可用卡 | 2 跑 + 1 Pending,兩張卡被鎖住空轉 |
-| gang 的預設行為 | **預設沒有**:裸 Job 的 PodGroup 是 `minMember: 1`,要明寫標註 | 無此概念 |
-| 搶占受害者粒度 | 受害者是 **PodGroup(整組)**——搶 1 卡讓 2 成員 gang 全數被驅逐 | 受害者是**單顆 pod**——搶 1 卡只殺 1 顆 |
-| 缺員後的處理 | `StaleGangEviction`:成員掉了 60 秒內沒回來就整組收掉 | 無。剩下的 pod 繼續佔著卡 |
-| 排程器看到的單位 | 一個 job 一筆請求(`resources: <[0 0 3 3 0 0 0]>`,3 是整組總和) | 一顆 pod 一筆請求,彼此無關 |
-| 失敗訊息的資訊量 | 點名 gang 與缺口:「Resources were found for 2 pods while 3 are required for gang scheduling」 | 只講單顆處境:「3 Insufficient nvidia.com/gpu」 |
-| 混用時的帳 | 只記帳走 KAI 的 pod;default-scheduler 吃掉的卡在 queue `status` 中看不到 | —— |
+| 3 顆要 3 張卡、只有 2 張 | 加 `batch-min-member` 後三顆全 Pending、**不佔卡**，別的工作可以用 | 2 個 Running、1 個 Pending，兩張卡被佔住 |
+| gang 的預設行為 | **預設沒有**：裸 Job 的 PodGroup 是 `minMember: 1`，要明寫標註 | 沒有這個概念 |
+| 搶占時的受害者 | **整個 PodGroup**：搶 1 張卡，2 個成員的 gang 全部被驅逐 | **單顆 pod**：搶 1 張卡只驅逐 1 顆 |
+| 成員少了之後 | `StaleGangEviction`：60 秒內沒回來就整組收掉 | 不處理，剩下的 pod 繼續佔著卡 |
+| 排程器處理的單位 | 一組一筆需求（`resources: <[0 0 3 3 0 0 0]>`，3 是整組總和） | 一顆 pod 一筆需求，彼此無關 |
+| 排不上時的訊息 | 寫出整組缺口：「Resources were found for 2 pods while 3 are required for gang scheduling」 | 只講單顆：「3 Insufficient nvidia.com/gpu」 |
+| 兩個排程器並存時 | 佇列只記走 KAI 的 pod；預設排程器用掉的卡在 queue `status` 裡看不到 | —— |
 
-上表只涵蓋本章實際跑過的項目。沒有測的不寫:default-scheduler 的 `PodDisruptionBudget` 與 `nodeAffinity` 進階場景、K8s SIG 的 Coscheduling plugin,以及 KAI 的 GPU sharing、多節點拓撲、`subGroups`。
+## 步驟 7:讓 Azure 收走一台 spot 節點
 
-### 步驟 7:讓 Azure 真的收走一台 spot 節點
+步驟 4、5 的缺員都是我們自己製造的。這門課的 GPU 節點是 spot VM：Azure 用折扣價出租的閒置機器，Azure 需要時可以隨時收回。所以真實環境裡，成員消失最常見的原因是節點被收走。Azure 提供 `az vmss simulate-eviction`，可以隨時觸發一次回收，不必等它真的發生。
 
-前面的缺員是手動製造的。spot 節點被雲端商回收是**真實的**缺員來源,而整場 lab 都跑在 spot GPU 上。Azure 提供 `az vmss simulate-eviction` 可以隨時製造一次,不必等運氣。
-
-AKS 的節點實體落在受管 resource group(`MC_<rg>_<cluster>_<region>`),先對出 VMSS 與實例編號:
+這道指令要指定 VMSS 和實例編號。**VMSS**（Virtual Machine Scale Set）是 Azure 管理一群同規格 VM 的服務，AKS 的每個 node pool 底下就是一組 VMSS，每台節點是其中一個實例。這些 VM 不在你建叢集的那個 resource group 裡，而在 AKS 自動建立、專門放節點實體資源的 resource group，名字的格式是 `MC_<rg>_<cluster>_<region>`。先列出 VMSS 和實例：
 
 ```console
-$ az vmss list -g MC_<resource-group>_<cluster>_japaneast \
+$ az vmss list -g MC_<resource-group>_<cluster>_<region> \
     --subscription <subscription-id> \
     --query '[].{name:name,sku:sku.name,capacity:sku.capacity,priority:virtualMachineProfile.priority}' -o json
 [
@@ -558,35 +604,31 @@ $ az vmss list -g MC_<resource-group>_<cluster>_japaneast \
   {"capacity": 1, "name": "aks-system-35459509-vmss", "priority": null, "sku": "Standard_D2as_v5"}
 ]
 
-$ az vmss list-instances -g MC_<resource-group>_<cluster>_japaneast \
-    -n aks-gpuspot-21249019-vmss --subscription <subscription-id> \
+$ az vmss list-instances -g MC_<resource-group>_<cluster>_<region> \
+    -n <vmss-name> --subscription <subscription-id> \
     --query '[].{id:instanceId,name:osProfile.computerName}' -o json
 [{"id": "6", "name": "aks-gpuspot-21249019-vmss000006"},
  {"id": "7", "name": "aks-gpuspot-21249019-vmss000007"}]
 ```
 
-`virtualMachineProfile.priority: "Spot"` 是判斷 spot pool 最直接的欄位;instance id 與節點名稱尾碼一致,要打哪台可以直接對照,不必猜。
+`priority: "Spot"` 那一組就是 GPU pool，它的 `name` 就是下面指令裡的 `<vmss-name>`。實例編號跟節點名稱的尾碼一致，例如上面的 `6` 就是 `vmss000006`；要收走哪一台，就把那台的 id 填進 `<instance-id>`。如果不確定節點所在的 resource group 名稱，可以用 `az aks show -g <resource-group> -n <cluster> --query nodeResourceGroup -o tsv` 查。
 
-兩成員 gang 正在跑,砍掉其中一台的底層 VM:
+先刪掉步驟 6 留下的兩顆 pod。`gang2` Job 在步驟 6 開頭已經刪掉；如果還在，也要先刪，因為同名的 Job 重新 apply 不會產生新的 pod：
+
+```console
+$ kubectl -n kai-lab delete pod nogang-preemptor nogang-victim-2
+```
+
+再照步驟 3 送出 gang2，讓兩個成員各在一台節點上跑。然後挑其中一台的實例編號，把它收走：
 
 ```console
 $ az vmss simulate-eviction \
-    -g MC_<resource-group>_<cluster>_japaneast \
-    -n aks-gpuspot-21249019-vmss --instance-id 6 \
+    -g MC_<resource-group>_<cluster>_<region> \
+    -n <vmss-name> --instance-id <instance-id> \
     --subscription <subscription-id>
 ```
 
-指令無輸出、立即返回。接下來的兩分鐘,四個系統依序動作:
-
-```mermaid
-flowchart TB
-    A["08:17:34 下 simulate-eviction"] --> B["08:17:37 節點 condition VMEventScheduled<br>預告:08:18:16 GMT 被搶占"]
-    B --> C["08:17:43 kubelet 停掉成員 A<br>VM 還活著,AKS 主動疏散"]
-    C --> D["08:18:43 StaleGangEviction 收掉成員 B<br>從 pod 消失起算 60 秒"]
-    D --> E["08:19:11 node 物件才 NodeNotReady<br>08:19:21 DeletingNode"]
-```
-
-節點 condition 的原文:
+指令沒有輸出，立刻返回。接下來大約兩分鐘，節點收到回收預告、上面的 pod 被停掉、VM 被收走，最後 node 物件從叢集消失。最先出現的是節點上的一則 condition：
 
 ```text
 2026-08-03T08:17:37Z  aks-gpuspot-21249019-vmss000006  VMEventScheduled
@@ -595,15 +637,19 @@ flowchart TB
   For more information, see https://aka.ms/aks/scheduledevents EventId: 218E4ED7-..."
 ```
 
-三層結論,順序很重要:
+Azure 在回收或維護 VM 之前，會先發一則預告，叫 **scheduled event**。AKS 把這則預告寫成節點上的 **`VMEventScheduled`** condition，訊息裡的 `Preempt Scheduled: ... 08:18:16 GMT` 就是 VM 會被收走的時間。
 
-**Azure 有預告,而且 AKS 不會乾等。** 從 `VMEventScheduled`(08:17:37)到實際被搶占(08:18:16)有 **39 秒**預告期;AKS 收到 scheduled event 後 6 秒(08:17:43)就讓 kubelet 開始停容器。pod 是在 VM 還活著時被主動疏散的,不是隨 VM 一起被強制終止。這段時間就是 spot workload 寫 checkpoint 的**全部預算**。
+把整段過程依時間畫在一條軸上，上方是節點和 VM 的變化，下方是兩個 gang 成員的去向：
 
-**KAI 的 60 秒時鐘從「pod 消失」起算,不是從「節點消失」起算。** 成員在 08:17:43 沒了,倖存者在 08:18:43 被收掉,又是精準的 60 秒,與手動殺 pod 完全一致。KAI 對節點層級的故障沒有特殊處理路徑,它只看 PodGroup 的成員數——行為因此很好預測。
+![spot 回收的時間軸：08:17:34 下 simulate-eviction，08:17:37 節點出現 VMEventScheduled，08:17:43 kubelet 停掉成員 A，08:18:16 VM 被收走，08:18:43 KAI 收掉成員 B，08:19:11 node 變成 NotReady，08:19:21 node 物件被刪除；預告期 39 秒，寬限期 60 秒從 pod 消失起算，VM 不在之後 node 仍顯示 Ready 將近一分鐘](../assets/diagrams/s1d2-spot-timeline.svg)
 
-**節點物件比 VM 晚死很久。** VM 08:18:16 被搶占,K8s 的 node 物件到 08:19:11 才 `NotReady`、08:19:21 才被移除,落後將近 1 分鐘。這段期間 `kubectl get nodes` 仍顯示 `Ready`。**用 node Ready 狀態判斷 spot 節點還在不在,會慢一整分鐘**;要即時反應得盯 `VMEventScheduled` 這個 node condition。
+我們可以從時間軸上看到三件事：
 
-節點沒了之後,pool 也沒有自己補回來:
+1. **Azure 有預告，AKS 也會先動手。** 從預告（08:17:37）到 VM 被收走（08:18:16），這次量到 39 秒，Azure 只保證至少 30 秒。AKS 在預告後 6 秒（08:17:43）就讓 kubelet 停掉成員 A，pod 是在 VM 還在的時候被移走的。這段預告期就是 spot 上的工作能用來存 checkpoint（把訓練進度存下來，之後可以從這裡接著跑）的時間。
+2. **KAI 的 60 秒從 pod 消失起算，不是從節點消失起算。** 成員 A 在 08:17:43 停掉，成員 B 在 08:18:43 被收掉，跟步驟 4 手動刪 pod 一樣是 60 秒。KAI 不會因為是節點故障而走另一條路，它只看 PodGroup 還剩幾個成員，所以結果很好預測。
+3. **node 物件比 VM 晚將近一分鐘才反應。** VM 08:18:16 就不在了，Kubernetes 的 node 物件到 08:19:11 才變成 `NotReady`、08:19:21 才被刪除。這段時間 `kubectl get nodes` 還顯示 `Ready`。要盡早知道 spot 節點要被收走，該看的是 `VMEventScheduled`，不是 node 的 Ready 狀態。
+
+節點沒了之後，再看一次 node pool：
 
 ```console
 $ az aks nodepool show -g <resource-group> --cluster-name <cluster> -n gpuspot \
@@ -611,13 +657,13 @@ $ az aks nodepool show -g <resource-group> --cluster-name <cluster> -n gpuspot \
 {"count": 1, "provisioningState": "Succeeded"}
 ```
 
-觀察超過 3 分鐘,`count` 停在 1 且狀態是 `Succeeded`——Azure 認為這就是穩定狀態。叢集就這樣少了一半 GPU,沒有任何告警,原因與修法見[地雷 4](#mine-4)。手動補回去的那道指令,還帶出了本章最後一顆雷([地雷 5](#mine-5)):兩個操作者對同一個 node pool 各下各的期望值時會發生什麼。
+過了 3 分鐘以上，`count` 還是 1，狀態是 `Succeeded`，Azure 認為這就是穩定狀態。叢集少了一半的 GPU，沒有任何告警。原因和修法見[疑難排解：spot 節點被收走後，pool 不會補回來](#mine-4)。要繼續用兩張卡，就照 Day 1 步驟 1 的指令把 `--node-count` 設回 2，下完之後再用上面的 `nodepool show` 回查一次 `count`。
 
-把 spot 與 gang 疊在一起,風險是**相乘不是相加**:任何一台被回收,整組就在 60 秒後被回收;pool 又不會自癒,於是重跑時可能連湊齊 `minMember` 的節點數都沒有,直接卡在 Pending。要在 spot 上跑分散式訓練,三件事缺一不可——**開 cluster autoscaler**、**39 秒內寫得完 checkpoint**、**gang 大小留餘裕**(別讓 `minMember` 剛好等於全部節點數)。
+把 spot 和 gang 放在一起看：任何一台節點被收走，整組 gang 都會在 60 秒後被收掉；pool 又不會自己補回節點，重新送出時，可能連湊齊 `minMember` 的節點都不夠，整組卡在 Pending。所以要在 spot 上跑分散式訓練，需要三件事：開 cluster autoscaler（依工作需求自動增減節點數的元件）讓 pool 補回節點、讓訓練程式在預告期內存完 checkpoint（Azure 只保證至少 30 秒）、讓 gang 大小比節點總數小一點（`minMember` 不要剛好等於全部節點數）。
 
-### 步驟 8:收尾
+## 步驟 8:收尾
 
-刪掉測試 workload、佇列與 namespace,KAI 保留安裝(Day 3–4 的 HAMi 實驗接著用)。佇列用的是 [Day 1 步驟 4](sprint1-day1-kai-queue-basics.md) 那份 `01-queues.yaml`,內容原封不動:
+刪掉測試 workload、佇列和 namespace。KAI 的安裝保留，Day 3–4 的 HAMi 實驗還會用到。佇列用的是 [Day 1 步驟 4](sprint1-day1-kai-queue-basics.md) 那份 `01-queues.yaml`：
 
 ```console
 $ kubectl -n kai-lab delete job --all
@@ -630,108 +676,87 @@ queue.scheduling.run.ai "batch-eval" deleted
 namespace "kai-lab" deleted
 ```
 
-GPU pool 照 Day 0 的紀律縮回 0(指令同 Day 0 步驟 8)。本日模擬回收又補過節點,縮容後更要回查 `count` 確認最終狀態,別只看指令的回傳值——理由見[地雷 5](#mine-5)。
+GPU pool 照 Day 0 的做法縮回 0（指令同 Day 0 步驟 8）。scale 之後回查一次 `count`，確認真的是 0，不要只看指令的回傳：scale 指令回報成功時，pool 最後的 `count` 不一定是你要的數字，所以下完之後要再查一次。
 
-## 驗收 checkpoint
+## 參考：另一種組 gang 的寫法
 
-| 檢查項 | 指令 | 期待結果 |
-|---|---|---|
-| PodGroup 真的有 gang | `kubectl -n kai-lab get podgroups -o json \| jq '.items[].spec.minMember'` | 等於成員數,**不是 1** |
-| 湊不齊時零佔用 | 全叢集清點 `nvidia.com/gpu` 持有者 | 只有探針 pod,gang 成員一顆都不在 |
-| 湊得齊時整組同時上 | `kubectl -n kai-lab get events` | 兩顆的 `Scheduled` 與 `Bound` 落在同一秒 |
-| 缺員回收準時 | 砍一個成員後每 10 秒取樣 | 第 60 秒倖存者被驅逐,`allocated` 變 null |
-| 搶占粒度 | 送 1 張卡的 `inference` 搶占者 | 兩則 `Evict` 同一秒,整個 PodGroup 消失 |
-| 對照組失效模式 | 同需求交給 `default-scheduler` | 2 Running + 1 Pending,兩張卡鎖住 |
-| spot 預告時間 | 節點 condition `VMEventScheduled` | 有 `Preempt Scheduled` 時間戳,約 39 秒後生效 |
-| pool 會不會自癒 | `az aks nodepool show --query count` | 回收後停在 1——不會自己補 |
+除了本章用的 `batch-min-member` 標註，KAI 也可以用外部 PodGroup 組 gang：自己建一個 PodGroup，在 pod 加上 `pod-group-name` 標註和 `kai.scheduler/skip-podgrouper: "true"`。適合多個 workload 要併成同一組，或由外部 controller 管生命週期的情況。細節見延伸閱讀的批次工作文件。
 
-## 地雷記錄
+## 疑難排解
 
-### 地雷 1:裝了 KAI、Job 寫了 `parallelism: 3`,卻完全沒有 gang scheduling {#mine-1}
+### 裝了 KAI、Job 寫了 `parallelism: 3`，卻沒有 gang {#mine-1}
 
-**症狀**:`batch/v1` Job 設 `parallelism: 3`、`schedulerName: kai-scheduler`、掛好佇列標籤,送上去卻是 2 個 Running + 1 個 Pending——半啟動死鎖照樣發生,跟沒裝 KAI 一模一樣。
+照步驟 1 補上標註就不會遇到；這一項給你自己寫 Job 時對照。
 
-**根因**:`pod-grouper` 對**裸 Job 的預設是 `minMember: 1`**,不是 `parallelism`。KAI 只把 Job 的 pod 歸進同一個 PodGroup 方便記帳,預設並不賦予原子性。PyTorchJob、JobSet 這類本身就帶「幾個 worker」語意的 CRD 才會自動推導出 gang;`batch/v1` Job 沒有這個語意。答案其實寫在官方 `docs/batch/README.md` 的第一段——「will be scheduled **separately**」——只是很容易讀過去。
+**症狀**:`batch/v1` Job 寫了 `parallelism: 3`、走 KAI，送上去卻是 2 個 Running、1 個 Pending。
 
-**驗證法**:不要看 pod 跑不跑得起來,直接查 PodGroup:
+**原因**:裸 Job 的 PodGroup 預設 `minMember` 是 1，見步驟 1。
+
+**檢查方式**:不要看 pod 跑不跑得起來，直接查 PodGroup:
 
 ```console
 $ kubectl -n kai-lab get podgroups -o json | jq '.items[].spec.minMember'
 ```
 
-這個數字是 1 就代表沒有 gang,不管 Job 寫了多少 `parallelism`。
+這個數字是 1，就代表沒有 gang，不管 Job 寫了多少 `parallelism`。
 
-**修法**:在 Job 的 `metadata.annotations` 加 `kai.scheduler/batch-min-member: "3"`——下在 **Job 資源本身**,不是 pod template。
+**修法**:在 Job 本身（不是 pod template）的 `metadata.annotations` 加 `kai.scheduler/batch-min-member: "3"`。
 
-### 地雷 2:被驅逐的 gang,Job 卻回報「成功完成」 {#mine-2}
+### 被驅逐的 gang 被記成「完成」 {#mine-2}
 
-**症狀**:整組被 StaleGangEviction 收掉之後,`kubectl get job` 顯示 `succeeded: 2`、condition `Complete / CompletionsReached`、事件是 `Job completed`。從 Job 的角度看,這是一次圓滿的執行——真正的工作一秒都沒做完。
+**症狀**:整組被 StaleGangEviction 收掉之後，`kubectl get job` 顯示 `succeeded: 2`、condition `Complete / CompletionsReached`、事件是 `Job completed`。從 Job 來看是一次成功的執行，實際上工作沒有做完。
 
-**根因**:容器指令寫的是 `trap 'exit 0' TERM; sleep infinity & wait`,這是 Day 1 地雷 6 為了避開 30 秒寬限期而特地寫的。但收到 `SIGTERM` 就 `exit 0` 的代價是:被驅逐的 pod 對 Job controller 來說是**正常結束**(exit code 0 = Succeeded),於是 `completions: 2` 被判定達成,Job 標記為 Complete,也不會補建 pod。
+**原因**:容器指令寫的是 `trap 'exit 0' TERM; sleep infinity & wait`，為的是避開 Day 1 的[「受害者被驅逐後,那張卡不會立刻交給搶占者」](sprint1-day1-kai-queue-basics.md#mine-6)那 30 秒等待。但收到 `SIGTERM` 就 `exit 0`，被驅逐的 pod 在 Job controller 看來是正常結束（exit code 0 = Succeeded），於是 `completions: 2` 算是達成，Job 被標成 Complete，也不會補建 pod。
 
-**修法**:驅逐訊號要以**非零 exit code** 結束,Job 才會正確記為失敗並依 `backoffLimit` 重試:
+**修法**:收到停止訊號時，用**非零的 exit code** 結束，Job 才會記成失敗，並依 `backoffLimit` 重試:
 
 ```bash
 # 143 = 128 + SIGTERM(15); exits fast but keeps the failure semantics
 trap 'exit 143' TERM
 ```
 
-監控上也不能只看 Job 的 `Complete` condition 判斷訓練是否真的跑完,要另外看 workload 自己的 checkpoint 或 metrics。
+監控上也不能只看 Job 的 `Complete` condition 判斷訓練有沒有跑完，要另外看工作自己的 checkpoint 或 metrics。快速結束和非零 exit code 兩件事要一起做：前者讓卡盡快釋放，後者讓 Job 記對成敗。
 
-**教訓**:這與 Day 1 地雷 6 是一組取捨——優雅退出換來快速釋放 GPU,但會污染 Job 的成敗語意。兩個都要處理:**快速退出 + 非零 exit code**。
+### 搶 1 張卡，整個 gang 都被驅逐 {#mine-3}
 
-### 地雷 3:搶占 1 張卡,賠掉整個 gang——受害者粒度是「整組」不是「單顆」 {#mine-3}
+**症狀**:搶占者只要 1 張 GPU，2 成員的 gang 卻整組被驅逐，另一張卡空著（步驟 5）。
 
-**症狀**:搶占者只要 1 張 GPU,正在跑的是一個 2 成員 gang,結果兩個成員同時被驅逐,釋出 2 張卡卻只用掉 1 張,另一張空在那裡。
+**原因**:KAI 以 PodGroup 為單位挑受害者。Day 1 步驟 7 同樣搶 1 張卡，受害者是兩顆獨立的 pod，就只驅逐一顆。
 
-**根因**:KAI 的受害者選擇單位是 PodGroup(workload),不是 pod。gang 的原子性是雙向的——要嘛全上、要嘛全下。既然殺一顆就會讓整組變成 stale(無論如何都活不了),排程器索性整組一次回收。對照 Day 1 步驟 7:同樣搶 1 張卡,但當時的受害者是兩顆各自獨立的 `train` pod,就只死一顆。差別不在搶占者,在受害者有沒有 gang。
+**代價**:gang 越大，搶占收走的卡越多。一個 8 卡的 gang 會為了讓出 1 張卡而整組被驅逐，7 張卡上已經算完的部分都白費了。
 
-**代價**:搶占的爆炸半徑與受害 gang 的大小成正比。一個 8 卡 gang 會為了讓出 1 張卡而整組被驅逐,浪費 7 張卡的已完成計算。
+**修法**:(1) 把 gang 型的工作放進**獨立的佇列並給足 quota**：quota 內的資源受保護，搶占進不來（Day 1 的[「queue priority 200 打不贏 quota 內的 100」](sprint1-day1-kai-queue-basics.md#mine-4)講的就是這個保護）；(2) gang 工作一定要做 checkpoint，重跑的成本才有上限；(3) 如果需要只驅逐一部分，就不能用 gang，但對分散式訓練來說，少一個 worker 本來就跑不下去，通常不是選項。
 
-**修法**:(1) 把 gang 型工作放進**獨立佇列並給足 quota**——quota 內的資源受保護,搶占進不來(Day 1 地雷 4 的機制反過來用);(2) gang 工作務必做 checkpoint,重跑成本才可控;(3) 需要細粒度搶占就別用 gang——但那等於放棄分散式訓練的正確性,通常不是選項。
+### spot 節點被收走後，pool 不會補回來 {#mine-4}
 
-### 地雷 4:spot 節點被回收後,node pool 不會自癒——容量默默永久減少 {#mine-4}
+**症狀**:一台 spot 節點被 Azure 收走後，`az aks nodepool show` 的 `count` 從 2 變成 1，`provisioningState: Succeeded`，看起來一切正常。叢集少了一半 GPU，沒有任何告警。
 
-**症狀**:一台 spot 節點被 Azure 回收,`az aks nodepool show` 的 `count` 從 2 變成 1,`provisioningState: Succeeded`,看起來一切正常。叢集少了一半 GPU,沒有任何告警。
+**原因**:這個 pool **沒有開 cluster autoscaler**（Day 0 建立時刻意不開，避免它在 gang 示範中自動加節點）。沒有 autoscaler，就沒有元件負責把節點數補回來。VMSS 的 capacity 被 Azure 收走一台後直接減一，AKS 也把它當成新的 `count`。`count` 記的是現況，不是目標。
 
-**根因**:本 pool **沒有開 cluster autoscaler**(Day 0 建立時刻意不開,免得它在 gang 示範中自動擴充節點)。沒有 autoscaler 就沒有任何元件負責「把 count 補回期望值」——VMSS 的 capacity 被 Azure 回收後直接下修,AKS 也把它當成新的期望值。`count` 這個欄位是**現況**,不是**目標**。
+**修法**:(1) 正式環境的 spot pool 要開 cluster autoscaler（`--enable-cluster-autoscaler --min-count N --max-count M`），才會自動補節點；(2) 或者另外配一個隨需計價的 pool 當保底容量，spot 只用來接尖峰；(3) 監控要看 pool 的 `count` 和預期節點數的差，不能只看節點是不是 Ready。
 
-**修法**:(1) 生產環境的 spot pool 一定要開 cluster autoscaler(`--enable-cluster-autoscaler --min-count N --max-count M`),才會自動補節點;(2) 或搭配隨需 pool 做保底容量,spot 只吃尖峰;(3) 監控要盯 pool 的 `count` 與期望值的差,不能只盯節點 Ready。
+## 想一想
 
-### 地雷 5:兩個操作者動同一個 node pool——後寫入者靜默勝出,而 activity log 會晚幾分鐘才說實話 {#mine-5}
+- 一份 4 個 worker 的訓練工作用 `batch/v1` Job 送進 KAI，叢集有 4 張卡，4 個 worker 全部 Running。這樣能確定它被當成 gang 了嗎？你會怎麼確認？
+- 一個 8 卡的 gang 跑了三小時，一個只要 1 張卡的高優先權推論 pod 進到同一個佇列，整組訓練被驅逐。你會建議怎麼調整佇列或工作設定，讓這種事少發生？
+- 你的監控用 `kubectl get nodes` 的 Ready 狀態判斷 spot 節點還在不在，並在節點消失時觸發存檔。從這一章的時間軸來看，這樣設計會出什麼問題？
 
-**症狀**:`nodepool scale --node-count 2` 下完,中途查到 `count: 2 / Updating`(真實進度),最後卻收斂成 `count: 0 / Succeeded`。要 2 拿到 0,平台還回報成功。
+## 小結
 
-**根因(兩層)**:
-
-1. **node pool 的 `count` 是宣告式的期望值,沒有鎖、也沒有版本檢查**。兩個操作者先後下 scale,AKS 一律接受,最後一次寫入直接覆蓋前一次——不報衝突、不警告,兩道指令都回 `Succeeded`。這裡是另一個操作者的停機流程下了 `--node-count 0`,把你的 2 蓋掉。
-2. **Azure activity log 有數分鐘的傳播延遲**。事發當下查 log 只看得到自己那一道,對方的操作要 5 分鐘後才出現。「查了 log 沒看到別人,所以沒有別人」在事發後幾分鐘內不成立。而且兩人若共用同一組 Azure 憑證,`caller` 欄位完全相同,就算傳播完成也只能靠時間戳對照各自的操作紀錄。
-
-**修法**:(1) 共用叢集約定**單一收放權責**(誰負責開關機),或用 tag 標記「實驗進行中」;(2) 事故追查時,activity log 等 5–10 分鐘再下結論,先問人再怪平台;(3) 自動化腳本 scale 後一律回查 `count` 與實際節點數——不是因為平台會吃掉請求,而是別人可能覆蓋你。
-
-**教訓**:在分散式系統裡,「還沒出現」和「不存在」長得一模一樣。
-
-## 帶得走的東西
-
-- gang 的原子性是雙向的:「全上」的好處與「全下」的代價來自同一個機制。要前者就得為後者準備 checkpoint,沒有只享受一半的選項。
-- 判斷「有沒有 gang」只有一個可靠依據:PodGroup 的 `spec.minMember`。pod 跑得起來不代表沒有 gang,跑不起來也不代表有——`parallelism` 更是完全無關。
-- 半啟動死鎖的成本不是「慢」,是「卡被鎖住而且對誰都沒用」。全部退出讓路看起來像浪費,實際的叢集利用率反而更高。
-- 排程器的自癒視窗是可查的常數,不是玄學:60 秒寫在原始碼的預設值裡,可以先預測再驗證——這種「先讀原始碼再下實驗」的順序,比事後解釋現象可靠得多。
-- 兩個排程器並存,帳本就有盲區。KAI 的 queue `status` 只認自己排的 pod,別人吃掉的卡完全不記帳,規劃 quota 時會嚴重低估。
-- 雲端 API 的宣告式欄位沒有版本檢查,最後一次寫入的人贏;而 activity log 有傳播延遲,查不到不等於沒發生。
+一組要一起跑的 pod，如果被一顆一顆排程，就可能出現部分 Running、部分 Pending，卡被佔著卻沒有進度。KAI 用 PodGroup 的 `minMember` 決定一組至少要幾顆一起排上，但 `batch/v1` Job 預設是 1，要在 Job 上加 `kai.scheduler/batch-min-member` 才有 gang；有沒有 gang，看 PodGroup 的 `minMember`。gang 的好處和代價來自同一件事：湊不齊時一張卡都不佔，排得上時整組同時上；但成員少了一個，60 秒後整組被收掉，被搶占時也是整組被驅逐。在 spot 節點上，這代表任何一台被收走都會讓整組重來，所以要搭配 autoscaler、checkpoint，以及預留一點節點數。之後看到多 worker 的工作只跑起一部分，或整組突然消失，可以回來對照這一章。
 
 ## 延伸閱讀
 
-想往下深挖,從這幾份開始:
+想再深入，可以從這幾份開始：
 
-- **[KAI Scheduler 的批次工作與 gang 標註](https://github.com/NVIDIA/KAI-Scheduler/blob/v0.16.8/docs/batch/README.md)** —— `kai.scheduler/batch-min-member` 的官方說明與三種組 gang 的寫法,對應本章地雷 1。
-- **[KAI Scheduler 排程器啟動參數原始碼](https://github.com/NVIDIA/KAI-Scheduler/blob/v0.16.8/cmd/scheduler/app/options/options.go)** —— `defaultStalenessGracePeriod = 60 * time.Second` 與 `--default-staleness-grace-period` 旗標的定義處,60 秒預測的出處。
+- **[KAI Scheduler 的批次工作與 gang 標註](https://github.com/NVIDIA/KAI-Scheduler/blob/v0.16.8/docs/batch/README.md)** —— `kai.scheduler/batch-min-member` 的官方說明與三種組 gang 的寫法,對應本章步驟 1。
+- **[KAI Scheduler 排程器啟動參數原始碼](https://github.com/NVIDIA/KAI-Scheduler/blob/v0.16.8/cmd/scheduler/app/options/options.go)** —— `defaultStalenessGracePeriod = 60 * time.Second` 與 `--default-staleness-grace-period` 旗標的定義處,步驟 4 那 60 秒的出處。
 - **[Azure Scheduled Events](https://learn.microsoft.com/en-us/azure/virtual-machines/linux/scheduled-events)** —— spot 回收的 `Preempt` 事件、最短 30 秒預告時間,以及 VM 內查詢事件的 metadata 端點。
 - **[Pod 優先權與搶占 | Kubernetes](https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/)** —— 原生搶占如何挑受害者 pod、PodDisruptionBudget 與優雅終止的處理,對照本章 KAI 的整組粒度。
 
 ## 下一步
 
-排程層的兩個問題到此收斂:Day 1 解決「誰先拿到卡」,Day 2 解決「一次要拿幾張才算數」。但兩天下來的資源單位始終是**一整張 T4**——一顆只需要 2 GB VRAM 的推論服務,照樣要佔掉 16 GB 的卡。Day 3 換 HAMi 接手,把單張卡切給多個容器共用,並驗證 VRAM 上限是**硬隔離**還是君子協定。順帶要收 Day 1 留下的懸案:GPU Operator 到底是不是必要條件——整張卡配置時證明不需要, VRAM 切分的場景是否不同,Day 3 驗證。
+Day 1 處理「誰先拿到卡」，Day 2 處理「一次要拿幾張才算數」。但兩天下來，資源的單位都是一整張 T4：一個只需要 2 GB VRAM 的推論服務，照樣要佔掉 16 GB 的卡。Day 3 換 HAMi，把一張卡切給多個容器共用，並驗證 VRAM 上限是真的擋得住，還是只靠程式自己遵守。Day 1 留下的問題也會在那裡回答：整張卡配置時不需要 GPU Operator，切分 VRAM 時是否還是如此。
 
 ---
 

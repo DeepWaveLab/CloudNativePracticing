@@ -1,186 +1,195 @@
-# Day 10: Sprint 2 總結——四套工具的分工決策表
+# Day 10: Sprint 2 總結——bpftrace、Falco、Tetragon、Cilium 與 Hubble 各看得到什麼、擋得住什麼
 
 ![eBPF](../assets/logos/ebpf-logo.svg#only-light){ align=right width="110" }
 ![eBPF](../assets/logos/ebpf-logo-dark.svg#only-dark){ align=right width="110" }
 
-> 十天下來,同一批核心事件被四套工具用四種方式取用過。這一頁不動手,把散在十章裡的實測數字收攏成一張分工表——而收攏的過程會浮出一件各章各自看不到的事:**每一套工具看不見的東西,跟它把程式掛在哪裡,是同一件事的兩面。**
+假設你負責的叢集出了一件事：一顆有特權的 pod 被入侵，攻擊者沒有直接在那顆 pod 裡動手，而是用 `nsenter` 鑽進隔壁另一顆 pod，讀走它的 `/etc/shadow`，再從網路送出去。事後檢討時有人問：「前面試過的那幾套工具，該裝哪一套？哪一套抓得到這件事，哪一套擋得住？」
 
-!!! abstract "你在課程的哪裡"
-    - **Day 0–9**:eBPF 的地基、bpftrace 的即時追蹤、Falco 的規則引擎、Tetragon 的核心層攔截、Cilium 的網路資料平面與 Hubble 的流量觀測。十個動手日、十章、76 顆地雷。
-    - **今天**:不動手。把四套工具的位置、成本、失效模式擺成一張表,每一格都要能追溯到某一天的某一個量測。
-    - **接下來**:這一頁最後給三條可以自己走下去的路。
+這個攻擊在這個 sprint 裡做過好幾次：Day 2 對 bpftrace、Day 3 對 Falco、Day 5 和 Day 6 對 Tetragon、Day 8 對 Cilium、Day 9 對 Hubble，每一次的答案都不一樣。這一章不開新的 lab，把四套工具放在同一個問題前面比較。讀完之後，拿到一個需求（要診斷、要告警、要擋，還是要管誰能連誰），你能說出該交給哪一套，也能從那套工具掛在哪裡，推出它會漏掉哪一種攻擊。
 
-## 走過的路
+## 走完之後：四套工具掛在不同的位置
 
-```mermaid
-flowchart TB
-    A["Day 0–2 · 即時追蹤<br/>bpftrace:自己掛探針、自己算 pod 身分<br/>不用的時候成本是零"]
-    B["Day 3–4 · 規則引擎<br/>Falco:常駐比對、輸出具名告警<br/>沒寫規則的事一律看不見"]
-    C["Day 5–6 · 核心層攔截<br/>Tetragon:核心裡過濾,而且擋得住<br/>但守備範圍比觀察範圍小"]
-    D["Day 7–9 · 網路層<br/>Cilium + Hubble:換掉資料平面、寫政策、看流量<br/>看不見不經過 endpoint 的東西"]
-    A --> B --> C --> D
+Day 0 開場的問題是「eBPF 是什麼」，答案是核心多了一套受控的擴充介面：程式送進核心之前，先由 verifier 逐條檢查，通過之後掛到某個位置上執行。後面九天的四套工具都建立在這件事上，差別在於各自把程式掛在哪裡，以及掛上去之後把結果交給誰。
+
+下面這張圖由上往下分成三層：使用者空間（一般程式跑的地方）、核心，以及 pod 的網路介面。四個欄位是四套工具，每一格寫它在那一層做什麼，虛線框表示那一層它沒有東西。最下面一列是它最後交到你手上的東西。
+
+![四欄是 bpftrace、Falco、Tetragon、Cilium 加 Hubble，三層由上往下是使用者空間、核心、網路介面。bpftrace 在核心掛自己挑的探針，由人盯著終端機判斷，交付原始事件；Falco 在核心收 syscall 事件，送到使用者空間由規則引擎比對並輸出具名告警（以橘框強調），交付判斷；Tetragon 在核心的掛勾點上過濾並執行 Sigkill 或 Override，agent 匯出事件但不做判斷，交付事件與攔截；Cilium 在核心的 socket 層替 Service 轉址，在 veth 上用 tc BPF 執行政策並記 flow，Hubble relay 與 UI 讀 flow 紀錄，交付放行或丟棄加上 flow 紀錄](../assets/diagrams/s2d10-hooks.svg)
+
+我們可以從圖上看到兩件事：
+
+- **只有 Falco 交付判斷。** 它的事件來自核心，但比對規則、決定「這是一件壞事、嚴重度多少」是在使用者空間做的。告警帶著規則名與嚴重度，值班的人可以直接據此處理。其他三套交出來的東西，都要人再判斷一次。
+- **會動手擋的有兩處，都在核心裡。** Tetragon 在掛勾點上殺掉行程（`Sigkill`），或讓那一次操作回傳錯誤（`Override`）；Cilium 在 pod 的網路介面上丟掉封包。這個網路介面是 veth，也就是 pod 連到節點的那條虛擬網路線；Cilium 在上面掛的是 tc BPF，即掛在 Linux 流量控制層的 eBPF 程式。一個擋行程的動作，一個擋連線。
+
+回頭看 Sprint 開始的時候：核心事件裡只有 pid 和執行檔名稱，說不出事件屬於哪顆 pod；偵測要靠人盯著終端機；Service 背後怎麼轉址也看不到。走完十天，事件可以對回 pod、namespace 與映像；偵測可以交給常駐的規則引擎；攔截也做得到，而且量過「在操作前擋住」和「事後把行程殺掉」的差別；每套工具佔多少 CPU 與記憶體、改一條規則要多久，都有實測數字。
+
+## 同一個攻擊，四套工具的答案
+
+開場那個攻擊之所以值得拿來比較，是因為它剛好卡在各套工具認身分的方式中間。先複習 Day 2 講過的事：`nsenter` 讓一個行程換進另一顆 pod 的命名空間（網路、檔案系統掛載、行程編號這幾種隔離），但不會換掉它的 cgroup。cgroup 是核心替行程分組、計算資源用的那一層，也是這幾套工具把事件對回 pod 的依據。
+
+下面這張圖上半部是攻擊發生時的樣子，下半部依「工具用什麼認人」分成兩組，列出各自的結果。
+
+![上半部：攻擊者的特權 pod 屬於 cgroup A（以橘框強調），目標 pod 有 cgroup B 與命名空間 B。攻擊者的行程執行 cat /etc/shadow，用 nsenter 換進命名空間 B，但 cgroup 沒換，仍是 A。下半部左邊是依 cgroup 認人的工具：bpftrace 綁 pod 的過濾器完全看不到；Falco 與 Tetragon 的偵測看得到，但記在 A 名下；Tetragon 綁在 B 的攔截沒有觸發，檔案照樣被讀走。右邊是依網路介面認人的工具：Cilium 政策套用 B 的政策，B 權限較少時能做的事也變少；Hubble 把 flow 記在 B 名下，看不出是誰發的](../assets/diagrams/s2d10-nsenter.svg)
+
+先看左邊那一組。
+
+**依 cgroup 認人的工具，答案都跟著 cgroup A 走。** Day 2 的 bpftrace 過濾器綁在目標 pod 的 cgroup 上，攻擊者的行程不在那個 cgroup 裡，所以完全看不到（見 Day 2 的[疑難排解](sprint2-day2-bpftrace-kubernetes.md#mine-2)）。Falco 與 Tetragon 都對整顆節點開著探針，看得到這次讀取，卻都把它記在攻擊者那顆 pod 名下。兩者記身分的方法差很多：Falco 在使用者空間事後拿 cgroup 去問容器執行期，Tetragon 在 `execve` 發生的當下就由 BPF 程式把 cgroup id 寫進 map。結果卻一樣，因為核心事件裡只有 cgroup，「這是哪顆 pod」是從 cgroup 推出來的（見 Day 3 與 Day 5 的疑難排解：[Falco](sprint2-day3-falco-basics.md#mine-5)、[Tetragon](sprint2-day5-tetragon-basics.md#mine-6)）。
+
+影響最大的是 Tetragon 的攔截。Day 6 用 `TracingPolicyNamespaced` 保護一個命名空間裡的 `/etc/shadow`，這種策略選中的是那個命名空間裡各個 pod 的 cgroup。攻擊者從另一個命名空間的特權 pod 鑽進來，它的 cgroup 不在策略範圍裡：`cat` 正常結束，讀走 502 位元組，一筆攔截事件都沒有（Day 6 的[步驟 4](sprint2-day6-tetragon-enforcement.md#step-4)）。
+
+再看右邊那一組。
+
+**依網路介面認人的工具，答案跟著命名空間 B 走。** Cilium 的政策掛在 pod 的 veth 上，而 veth 屬於網路命名空間。攻擊者換進 B 的網路命名空間，封包就從 B 的 veth 出去，套用的是 B 的政策，連 identity 都是 B 的。所以這一招在 Cilium 上繞不過去：B 的權限比攻擊者原本那顆 pod 少的時候，鑽進去之後能做的事反而更少（見 Day 8 的[疑難排解](sprint2-day8-cilium-network-policy.md#mine-8)）。代價在紀錄那一側：Hubble 記下的那條 flow，跟 B 自己發出的請求逐欄相同，flow 裡沒有任何行程、PID 或 cgroup 欄位，事故報告會寫成是 B 發的（Day 9 的[探針 B](sprint2-day9-hubble.md#probe-b)）。
+
+把兩組答案放在一起，可以推出三件事：
+
+1. **在核心裡記錄，不會讓 pod 歸屬變準。** pod 是 Kubernetes 的概念，核心只知道 pid、命名空間和 cgroup。只要身分是從 cgroup 推出來的，記得再早，記到的都是發起者的 cgroup。
+2. **一套工具擋得住的範圍，等於它的執行點能圈出的範圍。** 執行點指工具真正掛上程式、做出判定的位置。Tetragon 的攔截圈的是 cgroup，攻擊者的 cgroup 不在範圍內就擋不到；Cilium 的政策圈的是網路命名空間，換進去反而被圈住。兩個結果都是照設計運作。
+3. **觀察範圍比攔截範圍大，中間那一塊就是攻擊者能走的路。** Day 6 那次繞過，Falco 報了告警，Tetragon 自己的底層事件也把 `nsenter` 連同參數逐行記了下來，只有攔截沒有觸發。同一套 Tetragon，對整顆節點都看得到，卻只對策略綁定的 cgroup 擋得住。如果只裝攔截、不留偵測，那次攻擊成功了也不會有任何人知道。
+
+所以要知道一套工具的盲點，先問它的執行點在哪、它用什麼認人。下一節選工具時，這個問題會一直用到。
+
+## 真的要做的時候：先問你要回答什麼問題
+
+四套工具回答的是四種不同的問題。拿到一個需求，先分清楚它屬於哪一種，再看那一套的代價你付不付得起。
+
+### 正在出事，要知道這一刻發生什麼：bpftrace
+
+bpftrace 不常駐，要用的時候才開，不用的時候成本是零。它適合診斷一個正在發生、而且你大概知道該往哪裡看的問題，例如哪支程式在開這個檔、哪個行程在往外連。它要你剛好在看：探針要先掛好才有資料，掛上去之前發生的事完全不存在，想看容器啟動時做了什麼，還得刻意讓容器重啟一次（[Day 2](sprint2-day2-bpftrace-kubernetes.md)）。
+
+探針掛在哪裡也決定了它有多貴。Day 0 有一支程式通過了 verifier 的檢查，只因為掛在每次 syscall 都會命中的位置，就讓受測的程式慢了 57%（[Day 0](sprint2-day0-ebpf-concepts.md)）。所以 bpftrace 適合拿來診斷，不適合當常駐的防線。
+
+### 已知的壞事發生時，要有人收到告警：Falco
+
+Falco 常駐在每顆節點上，把 syscall 事件拿去比對規則，輸出帶規則名、嚴重度與 MITRE 分類的告警。MITRE 分類指的是對應到 MITRE ATT&CK 攻擊技法清單的編號，例如讀敏感檔對應 T1555。Day 5 讓 Falco 與 Tetragon 同時看同一批四個可疑動作，Falco 報了 6 筆，Tetragon 匯出了 78 筆。Falco 那 6 筆每一筆都對得回一個動作，不需要人再篩一次。
+
+它的限制是沒寫規則的事一律看不見。預設只載入 stable 等級的規則，總共 25 條（Day 3 的[「確信該報的動作，Falco 沒報」](sprint2-day3-falco-basics.md#mine-2)），其中沒有一條在管新的對外連線（Day 3 的[「從容器連到沒連過的位址，Falco 沒報」](sprint2-day3-falco-basics.md#mine-4)）。自己補規則之後要調誤報，而調校一定會讓出一部分偵測力：Day 4 把每分鐘 180 筆誤報調到 0，代價是對 CoreDNS 和一個被豁免的 Service 開了兩條不會觸發告警的外送路徑（Day 4 的[「這兩條例外放行了什麼」](sprint2-day4-falco-custom-rules.md#mine-5)）。調完要把讓出去的部分寫進例外的名字裡，之後定期回頭檢查。
+
+另外，用 chart 部署時，改一條規則會讓整個 DaemonSet 滾動更新一次。三顆節點量到 71 秒，每顆節點輪到時有數十秒沒有監控，所以規則變更要當成一次部署來排時間，不要在處理事故的中途改（Day 4 的[「只改規則內容，整個 DaemonSet 也重啟一遍」](sprint2-day4-falco-custom-rules.md#mine-1)）。
+
+### 某個動作絕對不能發生：Tetragon
+
+Tetragon 的攔截回答的是「這個動作不准發生」。範圍圈得清楚的地方最適合用它，例如一個成分固定的工作負載命名空間，只允許清單上的執行檔啟動。Day 6 量過它真的擋得住：策略掛在 `security_file_permission` 上，這是讀取之前的權限檢查，就算把讀檔和送出壓進同一個 `sendfile` 呼叫，機密也一個位元組都送不出去。決定擋不擋得住的是掛勾點在操作之前還是之後；官方文件也提醒，送出訊號（`Sigkill` 是其中一種）不保證能阻止每一種操作，建議 `Signal` 配 `Override` 併用（Day 6 的[步驟 3](sprint2-day6-tetragon-enforcement.md#step-3)）。所以挑掛勾點時，選在操作發生之前的權限檢查。
+
+決定用它之前，要先想清楚三件事：
+
+- **攔截只保證這一個動作沒有發生。** Day 6 的攻擊者被擋了五次，只是少了五個行程，換一個路徑就繼續。要有人去處理這個攻擊者，得靠偵測那一側的告警。
+- **範圍圈不清楚的地方擋不住。** 上一節的 `nsenter` 就是例子：只要有人能在節點上建立特權 pod 鑽進來，命名空間範圍的策略就守不住。Day 6 的結論是這個洞要在 admission 層補，也就是 API server 決定誰能建立特權、`hostPID` pod 的那一關。
+- **寫錯的代價是應用壞掉，而且很安靜。** Day 6 從允許清單拿掉一支 `head`，工作負載有 82 秒輸出全錯，pod 一直是 `1/1 Running`、零重啟、沒有新事件（Day 6 的[步驟 5](sprint2-day6-tetragon-enforcement.md#step-5)）。好的一面是 Tetragon 的策略變更在 2 秒內生效，不重啟任何東西，寫錯了可以馬上拿掉。
+
+### 誰可以跟誰連線：Cilium 與 Hubble
+
+Cilium 回答的是「誰可以跟誰講話」，而且能細到 HTTP 方法，例如同一個服務允許 GET、拒絕 POST。它是四套裡唯一 `nsenter` 繞不過的執行點，但它的紀錄裡沒有行程，說不出連線是哪支程式發的。
+
+寫政策時有兩個行為要先知道。第一，多條政策取聯集，只會越加越寬。在一條「同命名空間全放行」上面再疊一條「只放行 8080」，9090 照樣通，要收緊只能改掉或刪掉那條寬的（Day 8 的[「加了一條更窄的規則，流量沒有變少」](sprint2-day8-cilium-network-policy.md#mine-5)）。第二，一條無效的政策是 fail-open，也就是失效時流量照常放行：`kubectl apply` 回 `created`，政策其實沒有生效，流量完全沒變（Day 8 的[「`ingress: []` 套上去成功，流量卻完全沒變」](sprint2-day8-cilium-network-policy.md#mine-3)）。
+
+另外，`hostNetwork: true` 的 pod 直接用節點的網路，不經過任何 pod 的 veth。本課環境保留本機 host 到 endpoint 的預設放行，所以能建立 hostNetwork pod 的人，可以連到同節點上受本課政策保護的目標（Day 8 的[「同節點的 hostNetwork pod 仍能連到受限服務」](sprint2-day8-cilium-network-policy.md#mine-9)）。這種流量在 Hubble 上的來源只有 `reserved:host`（Cilium 用來代表節點本身的身分），看起來跟 Cilium 自己的 Envoy（Day 8 用來執行 L7 政策的代理程式）轉發的流量一模一樣，本課用來「找違規」的過濾條件都濾不出來（Day 9 的[探針 C](sprint2-day9-hubble.md#probe-c)）。
+
+Hubble 是看這些流量的工具。它的資料來自每顆節點上 Cilium agent 的環狀緩衝區，滿了就覆蓋最舊的，Day 9 量到的歷史只有兩三分鐘，所以預設設定下沒辦法事後回頭查（Day 9 的[「UI 的 flow 表是空的，或找不到幾分鐘前的事件」](sprint2-day9-hubble.md#mine-1)）。要把 flow 存起來，得先處理另一件事：走 L7 政策的請求，flow 裡會有 HTTP 標頭的原文，包括 `Authorization` 和 `Cookie`（Day 9 的[「flow 裡看得到 `Authorization` 的原文」](sprint2-day9-hubble.md#mine-4)）。
+
+### 偵測和攔截要一起上
+
+最常被問的是「有了攔截，還需要偵測嗎」。兩邊都不能拿掉。攔截不能取代偵測，因為它的範圍比較小，上一節那次繞過只有偵測看到；偵測不能取代攔截，因為告警不會讓 `read()` 失敗。Day 6 驗收的那一次違規，Falco 的告警和 Tetragon 的攔截在同一毫秒發生，一邊留下一筆有名字的紀錄，一邊讓那個動作沒有完成。
+
+## 疑難排解
+
+這一節收的是好幾章都遇到過的兩種狀況。
+
+### 指令回報成功，工具卻沒有在做事
+
+`kubectl apply` 回 `created`、`helm upgrade` 回 `deployed`、DaemonSet 顯示 `READY 3/3`、pod 是 `Running`，工具卻沒有照你以為的方式運作。這個 sprint 裡出現過七次，可以分成三類。
+
+第一類是 DaemonSet 或 pod 看起來正常，節點上的 agent 卻沒在工作。Day 3 有一顆 Falco 被搶占，重新排回來之前那顆節點沒有監控，DaemonSet 卻一直顯示 `READY 3/3`；Day 6 的 Tetragon agent 冷啟動時退出過一次，pod 仍是 `Running`，`RESTARTS` 只多了一個 1，那段時間節點上沒有任何攔截（見 [Day 3](sprint2-day3-falco-basics.md#mine-1)、[Day 6](sprint2-day6-tetragon-enforcement.md#mine-1) 的疑難排解）。
+
+第二類是設定送進去了，執行者沒有照做。Day 4 的規則用了已淘汰的 `evt.dir`，`helm upgrade` 照樣回 `deployed`，寫成 `evt.dir = >` 的規則永遠不會觸發；Day 5 的 TracingPolicy `kubectl apply` 回 `created`，策略卻沒有載入；Day 8 的 CiliumNetworkPolicy 同樣回 `created`，政策無效，流量照常放行；Day 7 的 `az aks nodepool update` 回 `Succeeded`，taint 一點都沒改（見 [Day 4](sprint2-day4-falco-custom-rules.md#mine-2)、[Day 5](sprint2-day5-tetragon-basics.md#mine-4)、[Day 8](sprint2-day8-cilium-network-policy.md#mine-3)、[Day 7](sprint2-day7-cilium-kubeproxy.md#mine-7) 的疑難排解）。
+
+第三類是工具照設計運作，應用卻壞了。Day 6 那條少了 `head` 的允許清單，讓應用的 pod 在 `1/1 Running`、零重啟、沒有新事件的狀態下輸出錯了 82 秒（Day 6 的[步驟 5](sprint2-day6-tetragon-enforcement.md#step-5)）。
+
+原因都一樣：這些回傳值和狀態來自管理平面，也就是 API server 上的物件和 DaemonSet 的計數，只代表指令被接受、pod 有在跑。規則或策略有沒有真的載入，只有節點上的 agent 和核心裡的 BPF 程式知道。下面這張圖由上往下是一個設定從你下指令到真正執行會經過的四層。
+
+![四層由上往下：你下的指令（kubectl apply、helm upgrade，回報 created、deployed）、API 物件與 DaemonSet（kubectl get 看到 READY 3/3、Running、RESTARTS 0），這兩層屬於管理平面，全綠時下面兩層照樣可能沒在做事；虛線以下是執行者：節點上的 agent（以橘框強調，規則、策略真的載入了嗎）與核心裡的 BPF 程式與 map。右側列出往下問執行者的方法：Falco 看啟動日誌的 warning，Tetragon 看 tetra tracingpolicy list 的 STATE 欄，Cilium 看 cilium-dbg endpoint list 與 bpf policy get](../assets/diagrams/s2d10-ask-executor.svg)
+
+照著圖上的虛線看，驗收要問虛線以下的執行者。下面的指令都在前幾章跑過，`<tetragon-pod>`、`<endpoint-id>`、`<ns>` 換成你自己叢集裡的值：pod 名稱用 `kubectl -n tetragon get pods` 查，endpoint id 是 `cilium-dbg endpoint list` 第一欄的數字。
+
+Falco 看 pod 的啟動日誌，載入規則那一段不能有 warning 區塊：
+
+```bash
+kubectl -n falco logs -l app.kubernetes.io/name=falco -c falco | sed -n '/Loading rules from/,/syscall buffer/p'
 ```
 
-| Day | 主題 | 最重要的一件事 |
-|---|---|---|
-| [0](sprint2-day0-ebpf-concepts.md) | eBPF 是什麼 | verifier 保證程式會結束,**不保證程式便宜**——那支害機器慢 57% 的程式完全合法 |
-| [1](sprint2-day1-bpftrace-basics.md) | bpftrace 三支經典工具 | 三支工具加自寫的那支,**沒有任何一個欄位說得出事件屬於哪顆 pod** |
-| [2](sprint2-day2-bpftrace-kubernetes.md) | 接回 Kubernetes | cgroup id 換算回 pod 名字的五步鏈,**整條不碰 API server** |
-| [3](sprint2-day3-falco-basics.md) | Falco 與預設規則 | 預設只有 **25 條**規則,而閒置 8 分 28 秒 **0 筆告警** |
-| [4](sprint2-day4-falco-custom-rules.md) | 自訂規則與誤報調校 | 誤報 180 筆/分調到 0,**代價是兩條外洩通道,而且量得出來** |
-| [5](sprint2-day5-tetragon-basics.md) | Tetragon 與 TracingPolicy | 核心層過濾是真的(3000 次不符合,**0 筆出核心**),但底層 sensor 同窗口匯出 6016 筆 |
-| [6](sprint2-day6-tetragon-enforcement.md) | 從偵測到攔截 | SIGKILL 真的**擋住**了外洩(5/5、0 位元組),而理由是掛勾點在操作之前 |
-| [7](sprint2-day7-cilium-kubeproxy.md) | Cilium 與 kube-proxy replacement | 動手換掉之前,**kube-proxy 有一大半工作早就不是它在做了** |
-| [8](sprint2-day8-cilium-network-policy.md) | CiliumNetworkPolicy | 網路政策**只會放寬不會收緊**;一條無效的政策是 fail-open |
-| [9](sprint2-day9-hubble.md) | Hubble | 緩衝區只留**兩三分鐘**,而它看不見這座叢集最大的政策破口 |
+Tetragon 看 `STATE` 欄要是 `enabled`；冷啟動之後，再確認 `RESTARTS` 與 agent 日誌裡有沒有 `Loading sensor name=__base__`：
 
-## 開始與結束
+```bash
+kubectl -n tetragon exec <tetragon-pod> -c tetragon -- tetra tracingpolicy list
+```
 
-| | Sprint 開始時 | Sprint 結束時 |
-|---|---|---|
-| 對 eBPF 的認識 | 一個聽過的名詞 | 說得出載入路徑、verifier 拒絕什麼、CO-RE 為什麼能跨 kernel |
-| 看得到的事件身分 | 只有 pid 與 comm | pod、namespace、容器內 pid、image digest、workload kind |
-| 偵測的形式 | 人盯著終端機 | 常駐規則引擎,具名告警帶 MITRE 分類 |
-| 能不能擋 | 不能 | 能,而且量過「擋住」與「事後殺掉」的差別 |
-| 網路的可見度 | Service 是個黑盒 | 看得到 socket LB 的翻譯、政策的逐條命中計數、L7 的兩段連線 |
-| 對成本的認識 | 「裝一下而已」 | 每節點 CPU 與記憶體、事件量、緩衝深度、變更代價,全部有數字 |
-| 對這些工具的信任 | 官方文件說什麼就是什麼 | **驗收條件是量測,不是 `kubectl apply` 的退出碼** |
+Cilium 用 `endpoint list` 看各 endpoint 的政策是否在執行，用 `bpf policy get` 看那顆 endpoint 每條規則的命中計數；CiliumNetworkPolicy 本身則看 `VALID` 欄是不是 `True`：
 
-## 四套工具的分工表
+```bash
+kubectl -n kube-system exec ds/cilium -c cilium-agent -- cilium-dbg endpoint list
+kubectl -n kube-system exec ds/cilium -c cilium-agent -- cilium-dbg bpf policy get <endpoint-id>
+kubectl get cnp -n <ns>
+```
 
-每一格都對應到某一天的某一個量測,點得進去。
+`ds/cilium` 會挑 DaemonSet 裡的其中一顆 pod，節點不只一顆時，要改用該節點上的 cilium pod 名稱。
 
-### 位置與交付物
+### 監控元件被擠掉或掛掉，沒有任何指標會叫
 
-| | bpftrace | Falco | Tetragon | Cilium + Hubble |
-|---|---|---|---|---|
-| 形態 | 隨用隨開,非常駐 | 常駐 DaemonSet | 常駐 DaemonSet | 資料平面本身 |
-| 掛在哪 | 自選探針 | syscall | syscall、LSM | pod veth、socket、endpoint |
-| **交付什麼** | 原始事件 | **判斷**(規則名、嚴重度、MITRE) | **紀錄與動作** | **管制與流量圖** |
-| 沒設定時 | 什麼都沒有 | [25 條預設規則](sprint2-day3-falco-basics.md#mine-2) | [底層 sensor 永遠開著](sprint2-day5-tetragon-basics.md#mine-5) | 全通 |
-| 要人再判斷嗎 | 是 | 否 | **是** | 是 |
+四套工具的 chart 裡，只有 Cilium 的 agent 與 `cilium-envoy` 設了 `priorityClassName`（`system-node-critical`），因為 agent 掛掉整顆節點就斷網。其他元件的 priority 都是 0，在滿載的節點上，排程器要騰出空間時最先被搶占的就是它們。沒設 resources 的那幾個還是 BestEffort，節點記憶體不夠時最先被 OOM 結束。被擠掉的時候，各自的後果不同：
 
-### 同樣四個偏離動作,誰看到什麼
+- **Falco**：那顆節點少看到事件，DaemonSet 照樣顯示 `READY 3/3`（Day 3 的[「Falco pod 被搶佔，DaemonSet 卻顯示全部就緒」](sprint2-day3-falco-basics.md#mine-1)）。它的 requests 是 `100m/512Mi`，實際只用十幾到二十幾 m 的 CPU，在小節點上更容易排不進去（Day 3 的[「節點的 CPU 實際用量不高，Falco 卻排不進去」](sprint2-day3-falco-basics.md#mine-7)）。
+- **Falcosidekick**：事件照抓，但告警送不出去，Falco 這一側全部正常（Day 4 的[「sidekick 預設兩份副本、不給 resources，還會擠在同一顆節點」](sprint2-day4-falco-custom-rules.md#mine-6)）。
+- **Tetragon agent**：BPF 程式留在核心裡繼續跑，沒有人讀事件；如果掛著攔截策略，行程照樣被殺，紀錄卻一筆都沒有（Day 6 的[「agent 是 BestEffort，現在身上掛著會殺行程的策略」](sprint2-day6-tetragon-enforcement.md#mine-8)）。
+- **Hubble relay 與 UI**：看不到流量。它們是 priority 0 加 BestEffort，節點吃緊時會先被擠掉，而節點吃緊時往往也是需要查流量的時候。
 
-Day 5 讓 Falco 與 Tetragon 同時開著跑同一批動作,這是那次的結果:
+這些元件本身的用量不大，但要算進節點容量。課程裡量到的數字：Falco 每節點約 14–24m CPU、84–90Mi 記憶體；Tetragon 只監看時 5–11m、83–120Mi，掛上攔截策略後是 16–34m、164–224Mi；Cilium agent 做完 Day 8 的政策實驗後約 216Mi；Hubble relay 與 UI 兩顆合計 11m、48Mi。
 
-| 動作 | Falco | Tetragon |
-|---|---|---|
-| 有終端機的 fork shell | 2 筆具名告警 | 18 筆無名事件 |
-| **無終端機的 web shell** | **1 筆**(預設規則靜音,靠自訂規則) | 18 筆,**與上一列組成完全相同** |
-| `nsenter` 進目標 pod | 2 筆,**pod 認錯** | 34 筆,**pod 認錯** |
-| 直接讀敏感檔 | 1 筆 | 8 筆 |
-| **總數** | **6** | **78** |
+修法是部署時自己補上 `resources` 與 `priorityClassName`，requests 照實測用量設，不要沿用 chart 的預設值。Cilium agent 也要檢查：它的 Burstable 來自一個 init container 的 requests，記憶體 request 只有 10Mi，實測是 102Mi，排程器會少算這一段（Day 7 的[「`cilium` pod 是 Burstable，記憶體 request 卻只有 10Mi」](sprint2-day7-cilium-kubeproxy.md#mine-5)）。提高 priority 只決定誰先被搶占，不會讓節點多出 CPU；節點本身太小，就要換大一點的節點。
 
-那個「無終端機」的格子是分工的縮影:**Falco 有一個 Tetragon 沒有的欄位([tty](sprint2-day5-tetragon-basics.md#mine-7)),Tetragon 有一個 Falco 沒有的保證——它不做判斷,所以不會判斷錯。**
+## 這門課沒教的
 
-### 成本
+**Falco 的 k8saudit。** Falco 除了 syscall，還能讀 Kubernetes 的稽核日誌，例如誰建了特權 pod。AKS 這類受管叢集沒有節點上的稽核日誌，官方在 AKS 上的做法要另外接 Event Hub 與 Storage Account，而且要一直開著，所以課程只教 syscall 規則。
 
-| | 每節點 CPU / 記憶體 | requests | QoS | priority | 變更一條規則 |
-|---|---|---|---|---|---|
-| Falco | 14–24m / 84–90Mi | `100m/512Mi`([超額 4–7 倍](sprint2-day3-falco-basics.md#mine-7)) | Burstable | **0** | [71 秒滾動更新](sprint2-day4-falco-custom-rules.md#mine-1) |
-| Tetragon(monitor-only) | 5–11m / 83–120Mi | `{}` | **BestEffort** | **0** | **2 秒內,不重啟** |
-| Tetragon(**攔截狀態**) | **16–34m / 164–224Mi** | `{}` | **BestEffort** | **0** | 同上 |
-| Cilium agent(初裝) | 23–30m / 85–102Mi | `{}`([借來的](sprint2-day7-cilium-kubeproxy.md#mine-5)) | Burstable | **2000001000** | — |
-| Cilium agent(**跑完政策實驗**) | 22m / **216Mi** | 同上 | Burstable | **2000001000** | — |
-| Hubble relay + UI | 11m / 48Mi(兩顆合計) | `{}` | **BestEffort** | **0** | — |
+**Falco 的 incubating 與 sandbox 規則。** Day 3 量到預設只有 stable 的 25 條。官方規則庫另外有 incubating 與 sandbox 兩級，要自己裝。裝上之後重跑一次 Day 3 的閒置量測，就能知道多出來的規則在你的工作負載上會產生多少告警。
 
-**四套工具裡只有 Cilium 的 chart 替你設了 `priorityClassName`**,而那是因為它不是監控、是網路本身。其餘三套在滿載節點上都是搶佔演算法第一個挑中的。
+**Falcosidekick 的 Web UI。** 它會另外建一個 Redis 和一個 UI 的 Deployment，Day 4 的叢集節點資源已經很緊，課程裡沒有任何步驟需要它，所以跳過了。
 
-### 失效模式——這一列比效能欄位重要
+**Cilium 的 `ingressDeny`／`egressDeny`。** 前面講過多條政策取聯集，只會越加越寬。Cilium 有一組 deny 規則，可以表達「即使有其他政策允許也要擋」，課程沒有測。寫法見 Cilium 官方文件的網路政策章節。
 
-| | 元件掛掉的時候 | 有沒有指標會叫 |
-|---|---|---|
-| Falco | 少看到事件 | **不會**([DaemonSet 顯示 READY 3/3,而一顆節點斷了 55 秒](sprint2-day3-falco-basics.md#mine-1)) |
-| Falcosidekick | **事件照抓,但沒人收到** | **不會**([Falco 全綠](sprint2-day4-falco-custom-rules.md#mine-6)) |
-| Tetragon agent | **BPF 程式留在核心裡繼續跑,沒人讀 ring buffer** | **不會**([攔截情境下還會繼續殺行程](sprint2-day6-tetragon-enforcement.md#mine-8)) |
-| Cilium agent | 節點斷網 | 會(所以它才是 `system-node-critical`) |
-| Hubble | 看不到東西 | 不會,而且它**最容易在節點壓力最大時消失** |
+**Tetragon 的 `Signal` 配 `Override`。** 這是官方對「要確保操作不完成」建議的寫法，課程分別測了兩個動作，沒有測併用。Day 6 的結論只涵蓋掛在操作之前的檢查點；掛在其他位置時，照官方建議併用兩個動作。
 
-## 主題句:盲點就是執行點
+**host firewall、DNS 外送與 Hubble 匯出。** 這三件事在課程的環境裡都沒有處理。本課保留本機 host 的預設放行，hostNetwork pod 因而能連到同節點上受本課政策保護的目標。要堵這個洞，先限制誰能建立 hostNetwork pod：Kubernetes 內建的 Pod Security 標準裡，Baseline 等級就不允許 hostNetwork，一般工作負載的命名空間可以套用它，真正需要 hostNetwork 的系統元件另外放行。接著依流量路徑評估政策：本機 host 到 endpoint 的預設放行由 `--allow-localhost=policy` 交給 endpoint 政策控制；主機網路流量則另行評估 host firewall 與使用 `nodeSelector` 的叢集範圍政策。兩種設定不能混為一談，本課未驗證改動後的連通性或 Hubble 紀錄。FQDN 政策（用網域名稱而不是 IP 寫的對外連線規則）擋掉的域名照樣會被解析，要關掉這條路得把 DNS 比對樣式收成明確清單（Day 8 的[「被擋掉的網域照樣查得到、進了快取」](sprint2-day8-cilium-network-policy.md#mine-6)）。Hubble 的 flow 也沒有匯出到儲存，所以「接出去之後歷史有多深、成本多少」沒有實測答案。
 
-整個 sprint 只問了一個問題四次,而四次答案都不一樣——**從特權容器用 `nsenter` 進另一顆 pod 做壞事**。把四個答案排在一起,工具的差異就不再是功能表的比較,而是架構的推論:
+**規模與長時間運行。** Day 8、Day 9 是單節點，所以 Hubble relay 最主要的功能，也就是跨節點彙整，等於沒有測；規則與政策的數量也都在個位數，規則變多之後成本怎麼成長還看不出來。最長的連續攔截只跑了十幾分鐘，記憶體隨時間的變化只觀察了幾小時。延遲方面，Day 7 換掉 kube-proxy 之後的延遲改善沒有可信的結論（負載不對等，雜訊大於差距），Day 8 的 L7 政策成本則量得出來（[Day 8 步驟 6](sprint2-day8-cilium-network-policy.md#step-6)）。
 
-| 工具 | 執行點綁在哪 | `nsenter` 的結果 | 出處 |
-|---|---|---|---|
-| bpftrace | **cgroup**(過濾器綁 pod slice) | **完全看不到** | [Day 2 地雷 2](sprint2-day2-bpftrace-kubernetes.md#mine-2) |
-| Falco | 全節點探針,身分事後靠 cgroup 反查 | 看得到,**pod 認錯** | [Day 3 地雷 5](sprint2-day3-falco-basics.md#mine-5) |
-| Tetragon | 全節點探針,身分在核心裡記 cgroup id | 看得到,**pod 認錯**(機制完全不同,答案相同) | [Day 5 地雷 6](sprint2-day5-tetragon-basics.md#mine-6) |
-| Tetragon 攔截 | **cgroup** | **完整繞過**(rc=0,讀走 502 位元組,零攔截事件) | [Day 6 步驟 4](sprint2-day6-tetragon-enforcement.md#step-4) |
-| Cilium 政策 | **網路命名空間**(veth) | **繞不過,而且自投羅網**(鑽進去權限更少) | [Day 8 地雷 8](sprint2-day8-cilium-network-policy.md#mine-8) |
-| Hubble | **endpoint** | 看得到,但**逐欄記在受害者身上** | [Day 9 探針 B](sprint2-day9-hubble.md#probe-b) |
+**不重建叢集的 eBPF 資料平面。** Day 7 為了自己管 Cilium 新建了一座叢集，因為 AKS 的 `--network-plugin none` 只能在建立時指定。如果你的叢集不能重建，Calico 的 eBPF 資料平面可以在既有叢集上啟用，同樣能取代 kube-proxy，可以拿來和 Day 7 的做法對照。
 
-**三個結論從這張表直接讀得出來:**
+**把行程和連線對起來。** Hubble 說不出一條 flow 是哪個行程發的，Tetragon 說得出，但這兩份資料在四套工具裡沒有地方會合。要回答「這條被擋的連線是哪支程式發的」，得自己用時間與來源、目的位址和埠，把 Tetragon 的行程事件和 Hubble 的 flow 對起來。課程沒有做這個整合。
 
-**一、「在核心裡做」不會讓 pod 歸屬變準,因為 pod 不是核心的概念。** Falco 是使用者空間事後打執行期的 socket 反查,Tetragon 是 BPF 在 `execve` 當下就把 cgroup id 寫進 map——機制差得很遠,**錯誤一模一樣**。根因在更下面:`nsenter` 換命名空間、不換 cgroup。無論在核心裡記得多早,記到的都是發起者的 cgroup。
+## 想一想
 
-**二、擋得住的範圍,永遠等於執行點能界定的範圍。** Tetragon 的攔截綁 cgroup,所以換 cgroup 就繞過;Cilium 的政策綁 netns,所以 `nsenter -n` 反而是自投羅網。**兩者都不是 bug,是各自執行點的直接推論。**
+- 一個團隊說：「我們已經用 Tetragon 的命名空間策略把 `payments` 命名空間裡讀 `/etc/shadow` 的動作都擋掉了，Falco 可以拿掉省資源。」叢集裡有其他團隊能建立特權、`hostPID` 的 pod。你會怎麼回答？如果拿掉 Falco，Day 6 那次繞過會留下什麼紀錄？
+- 事故報告寫：「Hubble 顯示這條被 L7 政策拒絕的 POST 來自 `netlab/client`，所以 `client` 的程式有問題。」在下這個結論之前，你還需要排除哪一種可能？要排除它，該去看哪一套工具的資料？
+- 同事在一個多人共用的命名空間套了一條只放行 8080 的 CiliumNetworkPolicy，`kubectl apply` 回 `created`，他說好了。你會請他再確認哪兩件事，才能確定 9090 真的被擋住？
 
-**三、觀察範圍與攔截範圍不對稱,而那個差就是攻擊面。** Day 6 有一次攻擊 Falco 看到了、Tetragon 的底層 sensor 也逐行記下了,**而 Tetragon 的攔截沒有觸發**——同一套軟體,看得見的部分跟擋得住的部分不是同一個範圍。只裝攔截的話,那次攻擊是完全靜默的成功。
+## 小結
 
-### 地雷回顧:健康指標全綠而東西沒在運作
+這個 sprint 的四套工具，差別在它們把程式掛在哪裡、用什麼認人，以及最後交出什麼：bpftrace 交原始事件給正在看的人，適合診斷；Falco 在使用者空間比對規則，交出有名字的告警；Tetragon 在核心的掛勾點上過濾，能在操作發生前把它擋下；Cilium 在 pod 的網路介面上決定誰能連誰，Hubble 讓你看到這些連線。依 cgroup 認人的工具會被 `nsenter` 騙過，依網路介面認人的工具不會被繞過，卻說不出是哪個行程。之後遇到一套新的執行期安全或網路工具，先問它的執行點在哪裡，就能推出它的盲點；裝好之後，記得去問節點上的執行者，而不是只看 `kubectl` 的回傳。
 
-這是第二個貫穿全 sprint 的形狀,在十章裡出現了七次,而且七次的「綠燈」都不一樣:
+## 延伸閱讀
 
-| 教訓 | 地雷(綠的是什麼 → 實際狀態) | 出處 |
-|---|---|---|
-| `kubectl get ds` READY 3/3 | 一顆節點 55 秒沒有監控 | [Day 3 地雷 1](sprint2-day3-falco-basics.md#mine-1) |
-| `helm upgrade` STATUS: deployed | 規則用了淘汰欄位,可能永遠不報 | [Day 4 地雷 2](sprint2-day4-falco-custom-rules.md#mine-2) |
-| `kubectl apply` created,CRD 無 status | **策略根本沒載入** | [Day 5 地雷 4](sprint2-day5-tetragon-basics.md#mine-4) |
-| pod Running,RESTARTS 那個「1」 | 冷啟動 panic,**31 秒沒有任何攔截** | [Day 6 地雷 1](sprint2-day6-tetragon-enforcement.md#mine-1) |
-| ARM 回 `Succeeded` | taint 一個字都沒改 | [Day 7 地雷 7](sprint2-day7-cilium-kubeproxy.md#mine-7) |
-| `kubectl get cnp` 列得出來 | 政策無效,**fail-open** | [Day 8 地雷 3](sprint2-day8-cilium-network-policy.md#mine-3) |
-| pod 1/1 Running、RESTARTS 0、無事件 | 82 秒輸出全錯的靜默故障 | [Day 6 步驟 5](sprint2-day6-tetragon-enforcement.md#step-5) |
+想再深入，可以從這幾份開始：
 
-**共通的解法只有一句:驗收條件要問執行者本身,不要問管理平面。** Falco 問啟動日誌有沒有 warning 區塊、Tetragon 問 `tetra tracingpolicy list` 的 `STATE`、Cilium 問 agent 的 `endpoint list` 與 policy map 的逐條計數器,網路政策問 `.status.conditions` 的 `Valid`。
+- **[Tetragon 的強制執行機制](https://tetragon.io/docs/concepts/enforcement/)** —— 覆寫回傳值與送出訊號兩種做法的官方說明，包含「SIGKILL 不保證阻止操作」的警告與 `Signal` 配 `Override` 的建議。
+- **[本機 host 與 endpoint 的政策](https://docs.cilium.io/en/stable/security/policy/layer3/#access-to-from-local-host)** —— 本機來源的預設放行與 allow-localhost 設定。
+- **[Host Policies](https://docs.cilium.io/en/stable/security/policy/host/)** —— 主機網路流量的政策選取範圍，與前一份的 endpoint 政策分開評估。
+- **[Falco 預設規則清單與成熟度分級](https://falco.org/docs/reference/rules/default-rules/)** —— 預設只載入 stable 規則，incubating 與 sandbox 要另外安裝；這裡列出每一級有哪些規則。
+- **[Calico 啟用 eBPF 資料平面](https://docs.tigera.io/calico/latest/operations/ebpf/enabling-ebpf)** —— 在既有叢集上切換到 eBPF 資料平面、取代 kube-proxy 的步驟（連結為 latest 版）。
 
-## 帶得走的判斷
+## 下一步
 
-**什麼時候用哪一個**,只用量到的東西講:
+Sprint 2 到這裡結束。四套工具都在處理同一件事：容器在節點上實際做了什麼、能不能管住它。
 
-- **即時追蹤(bpftrace)**:回答「現在這一秒發生什麼」。成本是人的注意力——[必須剛好在看](sprint2-day2-bpftrace-kubernetes.md)。適合診斷一個正在發生的具體問題,不適合當防線。
-- **規則引擎(Falco)**:回答「有沒有已知壞事」。誤報低、可全叢集共用,**代價是沒寫規則的事一律看不見**。它交付的是**判斷**,所以它是唯一一個「有人會被叫醒」的工具。
-- **核心層攔截(Tetragon)**:回答「這個動作不准發生」。範圍能被界定清楚時很強(成分固定的工作負載命名空間),範圍界定不了時無效。**攔截交付的是「這個動作沒有發生」,不是「這個攻擊者被處理了」**——五次攔截成功對攻擊者的代價只是五個行程。
-- **網路層(Cilium + Hubble)**:回答「誰可以跟誰講話」,而且做得到 HTTP 方法這一層。它是唯一一個**繞不過**的執行點,但它的稽核軌跡**沒有行程身分**。
-
-**四套之間最重要的一句話**:偵測與攔截不能互相取代。**攔截不能取代偵測,因為守備範圍比較小;偵測不能取代攔截,因為告警不會讓 `read()` 失敗。** Day 6 那一格 Falco 的告警與 Tetragon 的攔截在**同一毫秒**發生,一個留下紀錄,一個留下 0 位元組。
-
-## 誠實的差距——這份清單是地圖,不是遺憾
-
-**沒有教到的:**
-
-- **k8saudit 沒有做。** Falco 除了 syscall 還能吃 Kubernetes 稽核日誌,但受管叢集沒有本機稽核日誌,官方路徑需要額外的常駐雲端資源。
-- **Falcosidekick UI 跳過了。** 它需要一台帶特定模組的 Redis,而實驗叢集的節點資源已經吃緊。**這是本 sprint 唯一一個「有 UI 卻沒教」的缺口。**
-- **`ingressDeny` / `egressDeny` 沒有測。** [Day 8 地雷 5](sprint2-day8-cilium-network-policy.md#mine-5) 的結論是「加規則永遠不會收緊」,而 Cilium 有一組 deny 規則可以表達「即使有人允許也要擋」。整層沒碰。
-- **`Signal` 配 `Override` 沒有試。** 那是官方對「要確保操作不完成」的建議寫法,本課分別測了兩個動作,沒有測併用。
-
-**留在環境裡沒有堵的洞:**
-
-- **host firewall 從頭到尾沒開。** [Day 8 地雷 9](sprint2-day8-cilium-network-policy.md#mine-9):任何 `hostNetwork` pod 完全豁免所有網路政策,而 [Day 9 探針 C](sprint2-day9-hubble.md#probe-c) 證明 Hubble 也看不出那是繞過。**這是本課環境最大的破口,而且是開著的。** 它的修補位置在 admission 層(誰能建 hostNetwork pod),不在網路層。
-- **DNS 外洩通道沒有關。** FQDN 政策擋掉的域名照樣被解析並進快取。要關得把比對樣式收成明確清單,而那跟 FQDN 政策的初衷打架。
-- **Hubble 沒有接出去。** 緩衝區只留兩三分鐘,所以「事後去查」在預設設定下不成立;而一旦寫入儲存,存下來的就是含認證標頭的原文([Day 9 地雷 4](sprint2-day9-hubble.md#mine-4))。
-
-**規模上的限制:**
-
-- **叢集最多三顆節點、最少一顆。** Cilium 那三天是**單節點**,所以 Hubble relay 最重要的功能(跨節點聚合)等於沒測;規則與政策的數量也都在個位數,線性成長的代價還沒開始顯現。
-- **沒有長時間運行。** 最長的連續攔截狀態是十幾分鐘。所有「記憶體隨叢集歷史成長」的觀察都只涵蓋數小時。
-- **延遲的宣稱只有一項站得住。** [Day 7 明確放棄](sprint2-day7-cilium-kubeproxy.md)(負載不對等、雜訊大於訊號),[Day 8 的 L7 成本敢講](sprint2-day8-cilium-network-policy.md#step-6)(訊號是雜訊的 20 倍)。**同一門課裡兩種結論並存是刻意的。**
-
-## 三條可以自己走下去的路
-
-**一、不換 CNI 也能走 eBPF 資料平面。** Day 7 為了自管 Cilium 新建了一座叢集,因為 `--network-plugin none` 只能在建立時指定。如果你的叢集不能重建,[Calico 的 eBPF 資料平面](https://docs.tigera.io/calico/latest/operations/ebpf/enabling-ebpf)是另一條路——它可以在**既有叢集**上啟用,而且同樣會取代 kube-proxy。拿它跟本課 Day 7 的數字對照,是一個現成的比較題。
-
-**二、把 Falco 的規則庫打開。** [Day 3](sprint2-day3-falco-basics.md#mine-2) 量到預設只有 25 條,而[官方規則庫](https://github.com/falcosecurity/rules)明講 stable 是唯一預設綁進去的,另外還有 incubating 與 sandbox 兩級。裝上去之後重跑一次 Day 3 的閒置量測,就會知道「Falco 很吵」這個名聲到底屬於哪一級。
-
-**三、把兩條資料線接起來。** 本 sprint 最明確的一個缺口:[Hubble 說不出一條 flow 是哪個行程發的](sprint2-day9-hubble.md),而 Tetragon 說得出。這兩份資料在本課的四套工具裡**沒有任何一個地方會合**。要回答「這條被擋的連線是哪支程式打的」,得自己把 Tetragon 的行程事件與 Hubble 的 flow 用時間與五元組對起來——這是一個真實存在、而且值得做的整合題。
-
-## 結語
-
-Day 0 的第一個問題是「什麼是 eBPF」,而那一章的答案是:核心多長出了一套受控的擴充介面,程式送進去之前會被逐條檢查。
-
-十個動手日之後,最後一個動作是在瀏覽器上點開一筆流量,看到 `Verdict: dropped` 和它下面那行 `Unknown drop reason`。
-
-中間這一段學到的東西,如果只能留一句,是這個:**這些工具沒有一個能看見全部,而它們各自看不見的部分不是缺陷,是它們把程式掛在哪裡的直接後果。** 知道一套工具的執行點在哪,就知道它的盲點在哪——**這比記住任何一條規則語法都有用,因為規則語法會改版,而這個推論不會。**
+下一個 sprint 換一個方向，看另一種執行單位：WebAssembly。Sprint 3 從它是什麼、它的能力沙箱怎麼限制程式能碰的東西，以及 Kubernetes 怎麼執行它開始。[Sprint 3 Day 0](sprint3-day0-wasm-concepts.md)
 
 ---
 

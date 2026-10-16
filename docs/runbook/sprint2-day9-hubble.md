@@ -1,17 +1,16 @@
-# Day 9: Hubble——流量觀測與它的三個盲點
+# Day 9: Hubble——用 flow 追查被擋下的流量，以及它記錯或記不到的地方
 
 ![Cilium 官方標誌](../assets/logos/cilium-icon-color.svg){ align=right width="95" }
 
-> [Day 8](sprint2-day8-cilium-network-policy.md) 留下兩種被擋下的流量:L4 丟包(沉默,呼叫端只看到逾時)與 L7 拒絕(403,而被保護的應用一行日誌都沒有)。今天換上 Hubble,問一個很直接的問題——**這些東西看得見嗎?** 答案是「一個漂亮、一個難看、一個很難看」,而最後那個難看的答案是本 sprint 最值得帶走的一句話。
+假設同事來問你：某個服務對 `echo7` 發 POST，一直拿到 403，可是 `echo7` 的日誌一行都沒有，他想知道是誰在打、為什麼被擋。[Day 8](sprint2-day8-cilium-network-policy.md) 已經看過原因：L7 政策的拒絕是 Cilium 的 Envoy 回的，請求根本沒到應用，所以應用日誌查不到。要回答「誰在打」，得到網路層找紀錄。
 
-!!! abstract "你在課程的哪裡"
-    - **Day 7–8**:自管的 Cilium 資料平面、kube-proxy 已換掉,以及一組從命名空間隔離寫到 HTTP 方法的網路政策。
-    - **今天**:開 Hubble 的 CLI 與 UI,在 UI 上找到 Day 8 那條被 L7 擋掉的流量並用 CLI 印出對應事件。然後拿它去問前幾天留下的三個懸案。
-    - **接下來**:Sprint 2 的動手部分到今天為止,剩下的是四套工具的分工總結。
+這一章打開 Cilium 內建的觀測工具 Hubble，用它的 CLI 和網頁介面找到那筆被擋的請求，再拿 Day 8 留下的三種情況去測它：請求被 Envoy 截下、攻擊者鑽進別人的網路命名空間發請求、hostNetwork 的 pod 繞過全部政策。讀完之後，拿到 Hubble 上的一筆紀錄（或一張空表）時，你能判斷它能不能當證據：事件還在不在 Hubble 的緩衝區裡、記下的來源是不是真正發出請求的程式、繞過政策的流量會不會出現在你過濾的視圖裡。
 
-## 「開 Hubble」這個說法並不準確
+## Hubble 從 Day 7 起就在記錄
 
-先講一件會改變你對這一天的預期的事:**Day 7 裝好 Cilium 的那一刻起,每一顆 agent 就一直在記 flow 了。**
+Day 7 裝好 Cilium 之後，每一顆節點上的 cilium-agent 除了執行政策，也會把資料平面上發生的網路事件記下來。一筆紀錄叫一個 **flow**：哪個來源連到哪個目的、哪個埠、這個封包被放行還是丟掉。Hubble 就是讀取這些 flow 的工具。
+
+在還沒做任何變更之前，進 cilium-agent 問一下狀態。`cilium-dbg` 是 agent 容器裡的除錯工具，這一章出現的 `cilium-dbg` 指令都要透過 `kubectl -n kube-system exec ds/cilium -c cilium-agent -- cilium-dbg …` 在 agent 容器裡執行，下面的區塊省略了前面這一段：
 
 ```console
 ### helm upgrade 之前,什麼都還沒改
@@ -19,24 +18,19 @@ $ cilium-dbg status | grep -i hubble
 Hubble:   Ok   Current/Max Flows: 2285/4095 (55.80%), Flows/s: 19.36   Metrics: Disabled
 ```
 
-`hubble.enabled` 在 chart 裡預設就是 `true`。今天的 Helm 變更只加了兩個**消費端**:relay(把各節點的 agent 聚合起來)與 UI。所以今天要走的路是:
+`Hubble: Ok`，而且已經存了 2285 筆 flow。Cilium 的 Helm chart 裡 `hubble.enabled` 預設就是 `true`，所以 Day 7、Day 8 那兩天 agent 一直在記，只是沒有人去讀。這一章要加的是讀取的那一端，Helm 變更不會碰到 agent 記錄的方式。
 
-| 步驟 | 做什麼 |
-|---|---|
-| 1 | 復原,並重驗兩道前幾天的驗收 |
-| 2 | 開 relay 與 UI,量它的成本——以及那個**決定它有沒有用的數字** |
-| 3 | `hubble observe`:正常請求、L7 被擋、L4 丟包各長什麼樣 |
-| 4 | **驗收:UI 上找到那條被擋的流量,CLI 印出對應事件** |
-| 5 | 三個探針:前幾天的三個懸案 |
-| 6 | service map:它擅長什麼、會誤導你哪裡 |
+`Current/Max Flows` 後面那個 4095 是這一章最要緊的數字，步驟 2 會回來量它。
 
-## 步驟 1: 復原,並重驗兩道前幾天的驗收
+## 步驟 1: 確認 Day 8 的環境還在
 
-**kube-proxy replacement 第三次撐過停機重啟。**
+這一章接在 Day 8 之後，用同一座叢集、同一組政策。叢集如果停機重啟過，裸 Pod（`client`、`probe`、`nsenter-box`）不會自己回來，要照 Day 7、Day 8 的 manifest 重新 apply；Deployment 與 DaemonSet 會自己回來。
+
+先確認 Day 7 換掉 kube-proxy 的修改還在：
 
 ```console
 $ kubectl -n kube-system get ds kube-proxy -o custom-columns=…
-kube-proxy   0   0   0   map[lab.local/no-kube-proxy:true]     ← 修改存活了(第三次)
+kube-proxy   0   0   0   map[lab.local/no-kube-proxy:true]
 
 $ cilium-dbg status --verbose | grep -A3 KubeProxyReplacement
 KubeProxyReplacement:   True
@@ -44,9 +38,9 @@ Host firewall:          Disabled          ← 步驟 5 的探針 C 要用到這�
   Socket LB:            Enabled
 ```
 
-三次觀察、三次存活。這只是三次觀察,不是保證——**版本升級之後仍然要重驗**,因為它本來就是受管控制面的行為,而那不在你的變更紀錄裡。
+kube-proxy 的 DaemonSet 仍是 0 顆，`KubeProxyReplacement: True`。這個節點選擇器的修改改的是 AKS 受管的附加元件，AKS 升級版本時可能被蓋回去，所以每次升級後都要再查一次。輸出裡的 `Host firewall: Disabled` 先記著，步驟 5 會用到。
 
-**Day 8 的政策也還在,而且還在執行:**
+再確認 Day 8 的政策還在。下面的輸出只列出兩條，Day 8 另外還有一條 `multiport-8080-only`，步驟 3 打 `multiport:9090` 會被丟掉就是靠它，用 `kubectl get cnp -A` 確認你的叢集裡三條都在：
 
 ```console
 $ kubectl get cnp -A
@@ -55,24 +49,45 @@ netlab      default-deny-ingress   36m   True
 netlab      echo7-get-only         31m   True
 ```
 
-`AGE` 是真相——那個時間點是 Day 8 結束前建立的,**這些物件不是重建的,是同一批**。不過「物件在」不等於「在執行」([Day 8 地雷 3](sprint2-day8-cilium-network-policy.md#mine-3) 的教訓),所以要打一次:
+網路政策是存在 API server 裡的 CRD 物件，停機重啟後還在，不必重建。物件列得出來不代表政策在執行（見 Day 8 的[「`ingress: []` 套上去成功，流量卻完全沒變」](sprint2-day8-cilium-network-policy.md#mine-3)），所以用 Day 8 步驟 6 的 curl 指令（`-w 'http_code=%{http_code}'`）從 `client` 對 `echo7` 各打一次 GET 和 POST。下面是整理過的結果，`$` 後面的 `GET`、`POST` 是請求方法，不是要輸入的指令：
 
 ```console
 $ GET  http_code=200
 $ POST http_code=403   body: Access denied   header: server: envoy
 ```
 
-**今天要在 UI 上找的,就是這一筆。**
+GET 通過、POST 拿到 Envoy 回的 403，跟 Day 8 結束時一樣。這一章要在 Hubble 上找的，就是這筆 POST。
 
-## 步驟 2: 開 relay 與 UI
+## 步驟 2: 加上 relay 與 UI
+
+flow 存在每顆節點的 agent 裡，要從叢集外讀，還需要兩個元件：
+
+- **hubble-relay**：一個 Deployment，向每顆節點的 agent 要 flow，合成一個叢集層級的讀取端點。少了它，CLI 只看得到你直接連上的那一顆節點。
+- **hubble-ui**：網頁介面，本身不存資料，畫面上的東西都是向 relay 要來的。
+
+下圖把這幾個元件由上往下排，最上面是你的電腦，最下面是節點：
+
+![你的電腦上的 hubble CLI 經 port-forward 4245 連到 hubble-relay，瀏覽器經 port-forward 12000 連到 hubble-ui，hubble-ui 再向 relay 要 flow；relay 透過 gRPC 4244 向每顆節點上的 cilium-agent 讀取，agent 把每個事件寫進預設 4095 筆、滿了會蓋掉最舊資料的環狀緩衝區](../assets/diagrams/s2d9-hubble-parts.svg)
+
+照著箭頭從上往下看：CLI 和瀏覽器都不直接碰節點，一律經過 relay；真正存資料的只有最下面那塊緩衝區。本課的叢集只有一顆節點，所以 relay 跨節點合併資料這件事，這一章沒有驗證到。
+
+Helm values 用 Day 7 那份 values 檔，把下面這一段附加在檔案最後，另存成 `cilium-values-hubble.yaml`：
+
+```yaml
+hubble:
+  enabled: true
+  relay:
+    enabled: true
+  ui:
+    enabled: true
+```
 
 ```console
 $ helm upgrade cilium cilium/cilium --version 1.20.0 -n kube-system -f cilium-values-hubble.yaml
 Release "cilium" has been upgraded.  REVISION: 3
-（從指令到 relay 與 UI 都就緒:27 秒）
 ```
 
-而**沒有**發生的事更重要:
+接著看 Cilium 自己的 pod 有沒有因為這次升級重啟：
 
 ```console
 $ kubectl -n kube-system get pods -o custom-columns=N:…,RESTARTS:…
@@ -80,32 +95,51 @@ cilium-mvrd5           0
 cilium-envoy-xxbzc     0
 ```
 
-**cilium-agent 一次都沒有重啟,資料平面完全沒有被碰到。** 這跟 Day 7 開 kube-proxy replacement 是完全不同的操作等級——那次改的是 BPF 程式的行為,今天只是多兩顆讀取端的 Deployment。
+cilium-agent 和 cilium-envoy 的重啟次數都是 0。這次變更只多了兩個讀取端的 Deployment，負責執行政策的資料平面沒有被動到。Day 7 開 kube-proxy replacement 時改的是 agent 載入的 BPF 程式，風險完全不同；Day 3 的 Falco 要裝核心驅動、Day 5 的 Tetragon 要換 agent，也都比這次重。
 
-**開觀測面不需要冒動資料平面的險**,而這是它跟前面兩套工具都不一樣的地方:Falco 要裝核心驅動、Tetragon 要換 agent。
+### relay 和 UI 的資源設定
 
-### chart 有沒有替你想過 resources 與 priorityClassName
+Day 3、5、7 都檢查過 chart 有沒有替 pod 設 `resources` 和 `priorityClassName`。這次的結果是：chart 沒有替 relay 和 UI 設 requests，也沒有設 `priorityClassName`，所以兩者的 QoS 是 BestEffort、priority 是 0；同一張 chart 裡的 agent 和 envoy 則是 `system-node-critical`。節點資源吃緊時，kubelet 先驅逐 BestEffort 的 pod，所以節點忙到資源不夠時，Hubble 的讀取端可能先被移走，需要時自己補 `resources` 和 `priorityClassName`。實際用量很小：relay 加 UI 合計 11m CPU、48Mi 記憶體。
 
-Day 3、5、7 都問過同一組問題,今天的答案**跟同一張 chart 上的 agent 完全相反**:
+### 緩衝區留得住多久 {#buffer-depth}
 
-| | requests | QoS | priority |
-|---|---|---|---|
-| `cilium` agent(Day 7) | `{}`(但有 init container 借來的) | Burstable | **2000001000** |
-| `cilium-envoy`(Day 7) | `{}` | — | **2000001000** |
-| **`hubble-relay`** | `{}` | **BestEffort** | **0** |
-| **`hubble-ui`** | `{}` | **BestEffort** | **0** |
+回到開頭那個 4095。agent 把 flow 存在一個**環狀緩衝區**裡：容量固定，滿了就用新的蓋掉最舊的，不寫進磁碟，也不送到別處。容量由 `hubble.eventBufferCapacity` 決定，而且是每顆節點各一份。
 
-**同一個 Helm chart、同一個維護團隊,agent 是 `system-node-critical`,relay 與 UI 是 priority 0 加 BestEffort。**
+升級後再問一次 agent：
 
-這個差別其實是對的——**agent 掛掉節點斷網,relay 掛掉只是看不到東西**。但後果要講清楚:在滿載節點上,搶佔演算法第一個挑中的就是 BestEffort 加 priority 0,**也就是 Hubble 最容易在節點壓力最大的時候消失,而那正是你最需要它的時候**。
+```console
+$ cilium-dbg status | grep -i hubble
+Hubble:   Ok   Current/Max Flows: 2508/4095 (61.25%), Flows/s: 19.49
+```
 
-資源本身很便宜:relay 2m CPU / 20Mi,UI 兩個容器合計 9m / 28Mi,**兩者加起來 11m CPU、48Mi**。對照同一顆節點上的 agent 是 28m / 222Mi。
+`Flows/s` 是每秒寫進多少筆。本課的叢集只有一顆節點、八顆 pod、沒有業務流量，每秒仍有將近 20 筆，從上面的六成填到滿只花了約一分半鐘，從節點開機算起約 7 分鐘就滿了。滿了以後，數字會一直停在 4095，這時要問的是「最舊的那一筆離現在多久」，也就是緩衝區實際留得住多長的歷史：
 
-### 那個決定 Hubble 有沒有用的數字
+| 情境 | **歷史深度** |
+|---|---|
+| 閒置（八顆 pod，無業務流量） | **3 分 02 秒** |
+| 加一顆每 5 秒三個請求的 pod | **2 分 24 秒** |
 
-見[地雷 1](#mine-1)。這是本章最重要的一段,而它不在任何一份入門文件的第一頁。
+只多一顆每 5 秒發三個請求的 pod，可回查的時間就少了約五分之一。照同樣的算法，一顆每秒處理幾百筆 flow 的節點，4095 筆只夠十幾秒。
 
-## 步驟 3: 三種 flow 各長什麼樣
+這個數字決定了 Hubble 在你的事故流程裡能做什麼：
+
+- 預設設定下，Hubble 適合看「現在正在發生的事」。等你收到告警、連上叢集、開好 port-forward，事件多半已經被蓋掉了，事後回查不能靠它。
+- 要拿來事後回查，就得把 flow 送出節點：`hubble.export` 把逐筆 flow 寫成節點上的檔案；`hubble.metrics` 送到 Prometheus，但那是聚合後的數字，不是逐筆 flow，查不到某一次請求。兩者都是另外的 Helm 設定和儲存成本，本課沒有開，所以送出去之後能留多久、要花多少，這一章沒有答案。
+- `Current/Max Flows` 到 100% 不代表健康，代表新的 flow 正在蓋掉舊的。
+
+chart 1.20.0 的 `values.yaml` 裡，這個參數是一行註解掉的 `# eventBufferCapacity: "4095"`，所以 `helm show values` 只看得到這行註解；沒有另外設定時就是 4095，跟實測一致。要確認自己叢集的容量，看 `cilium-dbg status` 的 `Current/Max Flows` 斜線後面的數字，升級 Cilium 或改了這個參數之後再看一次。
+
+## 步驟 3: 讀懂三種 flow
+
+先把 relay 接到本機。本機要有 `hubble` CLI（本課用 1.19.4，連 1.20.0 的 relay 沒有問題）：
+
+```console
+$ kubectl -n kube-system port-forward svc/hubble-relay 4245:80 &
+$ export HUBBLE_SERVER=localhost:4245
+$ hubble status
+```
+
+接著用 `hubble observe --follow` 盯著 `netlab` 命名空間，從 `client` 依序發三個請求：一次會放行的 GET、一次會被 L7 政策擋下的 POST、一次打 `multiport:9090` 的 L4 丟包。每一行是一筆 flow，最後一欄是 **verdict**，也就是 Cilium 對這個事件的判定：`FORWARDED`（轉送）、`DROPPED`（丟掉）、`REDIRECTED`（轉給 Envoy 這類 proxy）。以 `policy-verdict` 開頭的行是 Cilium 套用政策時記下的事件，後面的 `ALLOWED`／`DENIED` 是政策判定的結果，冒號後面的 `none` 這一章用不到。
 
 ### 一次成功的 GET
 
@@ -119,7 +153,7 @@ $ hubble observe --follow --namespace netlab -o compact
 09:27:35.118  client:52314 <- echo7:8080  http-response FORWARDED (HTTP/1.1 200 1ms)
 ```
 
-**一次 `curl` 在 Hubble 上是 15 筆 flow,而且是兩段連線。** `10.244.0.69` 那幾筆是 Envoy 代理出去的那一段——**這件事在客戶端與應用端都完全看不到,只有在這裡看得到。**(那個 `to-proxy` 事件型別,就是 [Day 8](sprint2-day8-cilium-network-policy.md#step-6) 那條 `PROXY PORT 12286` 在觀測面的樣子。)
+這裡只節錄了幾行，完整的一次 `curl` 在 Hubble 上有 15 筆。看第二行的 `to-proxy`：連線先被送進 Envoy，也就是 Day 8 [步驟 6](sprint2-day8-cilium-network-policy.md#step-6) 那條 `PROXY PORT 12286` 在 Hubble 上的樣子。再看帶箭頭註解的那一行，來源換成 `10.244.0.69`，這是 Envoy 自己發出、轉給 `echo7` 的第二條連線。客戶端和應用各自只看得到其中一段，兩段同時出現的地方只有 Hubble。
 
 ### 一次被 L7 擋掉的 POST
 
@@ -130,9 +164,13 @@ $ hubble observe --follow --namespace netlab -o compact
 09:27:35.126  client:52324 <- echo7:8080  http-response FORWARDED (HTTP/1.1 403 0ms)
 ```
 
-**只有 10 筆,而且沒有 `10.244.0.69 → echo7` 那一段。** 步驟 5 的探針 A 會回來用這個形狀。
+這次完整只有 10 筆，而且找不到任何 `10.244.0.69 -> echo7` 的行。下圖把兩次請求並排：
 
-另外注意第一行:**同一條連線的 L4 判定是 `ALLOWED`,L7 判定才是 `DROPPED`。** 一個只看「有沒有連線被拒」的儀表板,會把這次違規算成正常連線。
+![上半是放行的 GET：client 連到 cilium-envoy（10.244.0.69）是第一段，Envoy 再連到 echo7 是第二段，Hubble 上兩段都有。下半是被 L7 政策擋下的 POST：client 只連到 cilium-envoy，Envoy 直接回 403，沒有轉送給 echo7；這筆 403 是 Envoy 產生的，Hubble 卻記在 echo7 名下](../assets/diagrams/s2d9-two-segments.svg)
+
+我們可以從圖上看到兩件事。第一，被擋的 POST 少了整個第二段，請求停在 Envoy，`echo7` 沒有收到；步驟 5 的探針 A 會用這個差別當證據。第二，那筆 403 在 Hubble 上記成 `client <- echo7` 的 `http-response`，看起來像 `echo7` 回的，實際上是 Envoy 產生的。
+
+再看 POST 的第一行：同一條連線，L4 的判定是 `ALLOWED`，到 L7 才是 `DROPPED`。如果儀表板只統計「被拒絕的連線」，這次違規會被算成一條正常的連線。
 
 ### 一次 L4 丟包
 
@@ -142,36 +180,93 @@ $ hubble observe --follow --namespace netlab -o compact
 09:27:36.177  …（TCP 重送,同樣兩筆）×3
 ```
 
+L4 丟包沒有回應，客戶端只能重送，所以同樣的兩行每隔一秒出現一次。用 `-o json` 印出完整欄位，可以看到丟包的原因：
+
 ```json
 { "verdict": "DROPPED", "Type": "L3_L4",
   "drop_reason": 133, "drop_reason_desc": "POLICY_DENIED" }
 ```
 
-同一個欄位在 L7 那筆上不存在,那是[地雷 2](#mine-2)。
+`drop_reason_desc` 是 **drop reason**，說明封包為什麼被丟。compact 輸出裡的 `Policy denied` 就是它。被 L7 擋下的那筆 POST 沒有這個欄位，下一步在 UI 上會看到後果。
 
-## 步驟 4: 驗收——UI 半邊與 CLI 半邊
+## 步驟 4: 在 UI 上找到那筆 POST，再用 CLI 印出來
 
-打開 UI 之前有兩個純操作的坑:網址寫法([地雷 3](#mine-3)),以及**必須先有人在發流量**,否則表是空的([地雷 1](#mine-1) 的直接後果)。本課為此加了一顆每 5 秒發三個請求的 pod,剛好產出三種不同顏色的 flow。
+### 先讓緩衝區裡有東西
 
-### UI 半邊
+緩衝區只留兩三分鐘，打開 UI 時如果沒有人在發流量，畫面會是一張空表。所以先放一顆持續發請求的 pod，每 5 秒發三個請求，剛好對應步驟 3 的三種 flow。它掛 `app: client` 標籤，Day 8 寫給 `client` 的政策會一樣套到它身上：
 
-![Hubble UI 的服務圖與 flow 表:echo7:8080 是紅色虛線(GET 過、POST 擋),multiport:9090 是紅色實線(全擋)](../assets/screenshots/sprint2-day9/05-service-map-l7-dashed-vs-l4-solid.png)
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flowgen
+  namespace: netlab
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: client, role: flowgen}
+  template:
+    metadata:
+      labels: {app: client, role: flowgen}
+    spec:
+      containers:
+        - name: gen
+          image: nicolaka/netshoot:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              while true; do
+                curl -s -o /dev/null -m 5 http://svc-echo7.netlab/ || true
+                curl -s -o /dev/null -m 5 -X POST -d ping=1 http://svc-echo7.netlab/ || true
+                curl -s -o /dev/null -m 3 http://svc-multiport.netlab:90/ || true
+                sleep 5
+              done
+          resources:
+            requests: {cpu: 5m, memory: 16Mi}
+            limits: {memory: 64Mi}
+```
 
-服務圖上那兩條線的**顏色本身就有資訊**:`echo7:8080` 是**虛線**(有通有不通),`multiport:9090` 是**實線紅**(全擋)。
+```console
+$ kubectl apply -f flowgen.yaml
+```
 
-點開 flow 表裡那筆 `→ POST / 0ms` 的列:
+它多了一個 `role: flowgen` 標籤，所以 identity 跟 `client` 不同（Day 8 教過，identity 是由整組標籤決定的）；但政策的 `fromEndpoints` 只要求含有 `app: client`，照樣選得到它。
 
-![Flow Details 側欄:Verdict 是 dropped,而 Drop reason 寫著 Unknown drop reason](../assets/screenshots/sprint2-day9/06-flow-detail-l7-unknown-drop-reason.png)
+### UI 這一半
 
-`Verdict: dropped` ——**驗收的 UI 半邊過了**。而它下面那一格寫著 `Unknown drop reason`,那是[地雷 2](#mine-2),對照組長這樣:
+把 UI 也接到本機，網址要用 `?namespace=` 帶命名空間：
 
-![同一個側欄,L4 被擋的那筆寫的是 Policy denied,還帶 TCP flags](../assets/screenshots/sprint2-day9/07-flow-detail-l4-policy-denied.png)
+```console
+$ kubectl -n kube-system port-forward svc/hubble-ui 12000:80 &
+```
 
-**同一個 UI、同一個面板,L4 那筆說得出理由(`Policy denied`),L7 那筆說不出。**
+```text
+http://localhost:12000/?namespace=netlab
+```
 
-側欄裡**沒有**的東西也值得記:它有判定、丟棄原因、identity、標籤、IP、埠、流量方向,**但沒有 HTTP 的方法、URL 或 header**。表格的 `L7 info` 欄只給 `→ POST / 0ms`。**要看那次請求長什麼樣,只能回 CLI。**
+直接打 `http://localhost:12000/netlab` 會得到 404，打根目錄只會看到選命名空間的頁面，見[疑難排解：UI 網址打 `/netlab` 得到 404](#mine-3)。
 
-### CLI 半邊
+畫面上半是 **service map**（服務圖）：Hubble 把緩衝區裡的 flow 按「誰連到誰的哪個埠」合併成一條條線；下半是逐筆的 flow 表。
+
+![Hubble UI 的服務圖與 flow 表：echo7:8080 是紅色虛線（GET 過、POST 擋），multiport:9090 是紅色實線（全擋）](../assets/screenshots/sprint2-day9/05-service-map-l7-dashed-vs-l4-solid.png)
+
+服務圖上兩條線的樣子就帶著資訊：`client → echo7:8080` 是紅色虛線，表示這條線上有放行也有被擋的流量；`client → multiport:9090` 是紅色實線，表示全部被擋。
+
+在 flow 表裡找到 L7 info 欄寫著 `→ POST / 0ms` 的那一列，點開它：
+
+![Flow Details 側欄：Verdict 是 dropped，而 Drop reason 寫著 Unknown drop reason](../assets/screenshots/sprint2-day9/06-flow-detail-l7-unknown-drop-reason.png)
+
+右側的 Flow Details 寫著 `Verdict: dropped`，就是那筆被 L7 政策擋下的 POST。它下面的 `Drop reason` 卻寫 `Unknown drop reason`。對照一筆 L4 丟包的側欄：
+
+![同一個側欄，L4 被擋的那筆寫的是 Policy denied，還帶 TCP flags](../assets/screenshots/sprint2-day9/07-flow-detail-l4-policy-denied.png)
+
+同一個面板，L4 那筆寫得出 `Policy denied`，L7 那筆寫不出原因，因為步驟 3 看過的 `drop_reason` 欄位在 L7 的 flow 上根本不存在。這會影響你怎麼分類和告警，見[疑難排解：UI 上 L7 被擋的那筆寫 Unknown drop reason](#mine-2)。
+
+側欄裡有判定、丟棄原因、identity、標籤、IP、埠、流量方向，但沒有 HTTP 的方法、URL 或 header；表格的 L7 info 欄也只有 `→ POST / 0ms`。想知道那次請求的內容，要回到 CLI。
+
+### CLI 這一半
+
+用三個過濾條件把範圍縮到「`netlab` 裡、HTTP 層、被丟掉的」：
 
 ```console
 $ export HUBBLE_SERVER=localhost:4245
@@ -181,7 +276,7 @@ Aug  7 13:02:19.180: netlab/flowgen-…:39002 (ID:51695)
     http-request DROPPED (HTTP/1.1 POST http://svc-echo7.netlab/)
 ```
 
-完整 JSON(節錄):
+這裡印出的是 `flowgen` 發的 POST。改用 `-o json` 印出 `client` 那一筆的完整內容（節錄）：
 
 ```json
 {
@@ -198,30 +293,45 @@ Aug  7 13:02:19.180: netlab/flowgen-…:39002 (ID:51695)
 }
 ```
 
-**兩半都過。** 而那個 `headers` 欄位藏著今天最後一顆地雷([地雷 4](#mine-4))。
+`Type: L7`、來源 pod、目的 Deployment、HTTP 方法和 URL 都在這裡。開場那位同事的問題，到這裡可以回答一半：被擋的是 `client` 發的 POST，原因要對照 Day 8 的 `echo7-get-only` 政策。另一半是「`client` 真的是發出請求的那支程式嗎」，步驟 5 的探針 B 會回答。
 
-## 步驟 5: 三個探針
+`l7.http.headers` 這一欄存的是 header 原文，包括認證用的 token，見[疑難排解：flow 裡看得到 `Authorization` 的原文](#mine-4)。
 
-### 探針 A:L7 的拒絕在應用日誌裡真的一行都沒有 {#probe-a}
+## 步驟 5: 拿 Day 8 的三種情況測 Hubble
 
-[Day 8 地雷 7](sprint2-day8-cilium-network-policy.md#mine-7) 的宣稱是推論出來的(「請求在 proxy 就被截了」)。今天直接量:打三次 POST、兩次 GET,應用日誌**一行都沒有增加**。
+### 探針 A：被 L7 擋下的請求，應用真的沒收到 {#probe-a}
 
-**誠實記一筆**:被測的那支程式預設不記存取日誌,所以那兩次成功的 GET 也沒有留下痕跡——**這個對照本身不能證明「只有被擋的看不到」。**
+Day 8 的[「應用日誌查不到被拒絕的請求」](sprint2-day8-cilium-network-policy.md#mine-7)說應用日誌查不到被擋的請求，那時是從「請求在 proxy 就被截下」推論出來的。這次直接測：從 `client` 打三次 POST、兩次 GET，前後比對 `echo7` 的日誌行數，一行都沒有增加。
 
-真正乾淨的證據在 flow 的形狀裡:
+不過這個測試的對照組不完整。`echo7` 跑的程式預設不記存取日誌，所以連成功的 GET 也沒有留下紀錄，光看日誌不能證明「只有被擋的看不到」。
+
+證據要回到步驟 3 那張圖的兩段連線：
 
 | | `client → proxy` 那一段 | `proxy → echo7` 那一段 |
 |---|---|---|
-| GET(放行) | 有 | **有**(5 筆) |
-| POST(被擋) | 有 | **完全沒有** |
+| GET（放行） | 有 | **有**（5 筆） |
+| POST（被擋） | 有 | **完全沒有** |
 
-**Hubble 用「第二段不存在」證明了應用真的沒有收到那個請求。** 這比查日誌強得多:**查日誌只能得到「沒看到」,這裡得到的是「它沒被送過去」。**
+日誌只能告訴你「沒看到」；Hubble 上第二段整段不存在，說明 Envoy 沒有把請求轉給 `echo7`。被 proxy 截下的請求，客戶端和應用各自只看得到一半，要看全貌只能來 Hubble。
 
-順帶一個 Day 8 沒注意到的細節:那筆 403 在 Hubble 上記成 `<- netlab/echo7-… http-response FORWARDED`。**`echo7` 從來沒有產生過這個回應,是 Envoy 產的**,但 flow 的方向與來源都掛在 `echo7` 名下。看報表的人會得到「echo7 回了 403」這個結論,而 `echo7` 完全無辜。
+這裡也要記住步驟 3 的第二個觀察：那筆 403 在 Hubble 上記成 `<- netlab/echo7-… http-response FORWARDED`。看報表的人會以為是 `echo7` 回了 403，但 `echo7` 從頭到尾沒收到請求。
 
-### 探針 B:Hubble 分不出誰違規,而且會指名受害者 {#probe-b}
+### 探針 B：攻擊者發的請求，被記在 client 名下 {#probe-b}
 
-條件對齊到逐字相同——都用 pod IP、都是 POST,一次由 `client` 自己發,一次由攻擊者 `nsenter` 進 `client` 的網路命名空間之後發。兩筆 flow 在 Hubble 上:
+Day 8 示範過，攻擊者可以用 `nsenter` 鑽進 `client` 的網路命名空間發請求。這次讓 `client` 自己發一次 POST，再讓攻擊者鑽進去發一次，兩次都打 pod IP、都是 POST：
+
+```console
+$ kubectl -n netlab exec client -- curl -X POST -d who=client   http://<echo7-pod-ip>:8080/
+client POST=403
+
+$ kubectl -n attacker exec nsenter-box -- nsenter -t <client-pid> -n -- \
+    curl -X POST -d who=attacker http://<echo7-pod-ip>:8080/
+attacker-in-client-netns POST=403
+```
+
+`<echo7-pod-ip>` 用 `kubectl -n netlab get pod -o wide` 查 `echo7` 那一列的 IP。`<client-pid>` 是 `client` 那顆 pod 的行程在節點上的 PID，找法跟 Day 8 一樣：在攻擊者 pod 裡逐一 `nsenter -t <pid> -n` 進去，比對 eth0 的位址和 `client` 的 pod IP。
+
+兩筆 flow 在 Hubble 上並排：
 
 ```console
 time      : …09:29:50.541Z            time      : …09:29:53.168Z
@@ -232,26 +342,26 @@ time      : …09:29:50.541Z            time      : …09:29:53.168Z
   行程欄位: 無                           行程欄位: 無
 ```
 
-**逐欄相同。** 唯一不同的是 `Content-Length`,而那是兩次 payload 字數不同的巧合,不是歸屬資訊。整份 flow JSON 的頂層欄位裡**沒有任何一個與行程、PID、cgroup 或執行檔有關**。
+這是從兩筆 flow 的 JSON（`hubble observe --protocol http -o json`）挑出來源相關欄位並排整理的結果。除了時間，每一欄都一樣。完整 JSON 裡唯一不同的是 HTTP header 中的 `Content-Length`（10 對 12），那只是 `who=client` 和 `who=attacker` 長度不同，不能拿來分辨是誰發的。整份 flow JSON 的頂層欄位裡，沒有任何一個和行程、PID、cgroup 或執行檔有關。
 
-Day 8 對這件事的說法是「光看丟包分不出誰違規」。今天要說得更重:**Hubble 不是保持沉默,它是主動把攻擊者的請求記名在 `netlab/client` 身上。** 事故報告上那一行「是 client 幹的」會是錯的,UI 上那個標籤會是錯的,而**工具本身沒有任何表達「我不確定」的方式**。
+Day 8 的說法是「光看丟包分不出誰違規」。在 Hubble 上，攻擊者的請求被記成 `netlab/client` 發的，UI 上也標成 `client`，flow 裡沒有任何欄位可以標示來源不確定。只根據這筆紀錄寫事故報告，結論會是「`client` 發了這個請求」。
 
-這也把本 sprint 四套工具的分工釘死了:
+把這個情境放回本 sprint 用過的四套工具：
 
 | | 看得到 `nsenter` 這個動作 | 擋得住這個封包 | 說得出是**誰**做的 |
 |---|---|---|---|
-| Falco(Day 3–4) | ✅ | ❌ | ✅ 行程 |
-| Tetragon(Day 5–6) | ✅ | ✅ 但被繞 | ✅ 行程 |
-| Cilium 政策(Day 8) | ❌ | ✅ 繞不過 | ❌ |
-| **Hubble(Day 9)** | ❌ | — | ❌ **而且會給錯名字** |
+| Falco（Day 3–4） | ✅ | ❌ | ✅ 行程 |
+| Tetragon（Day 5–6） | ✅ | ✅ 但被繞 | ✅ 行程 |
+| Cilium 政策（Day 8） | ❌ | ✅ 繞不過 | ❌ |
+| **Hubble（Day 9）** | ❌ | — | ❌ **而且會給錯名字** |
 
-**Hubble 看的是網路 flow,不是行程。** 要把一條 flow 對應到一個行程,需要的是 Tetragon 那條線的資料,而**這兩份資料在本 sprint 的四套工具裡沒有任何一個地方會合。**
+Hubble 記的是網路 flow，不是行程。要知道一條 flow 是哪個行程發的，得對照 Falco 或 Tetragon 這類看得到行程的資料，而本 sprint 的四套工具之間沒有把兩種資料接起來的地方。
 
-### 探針 C:政策層最大的破口,在監控上長得像合法轉發 {#probe-c}
+### 探針 C：hostNetwork 的繞過，在 Hubble 上像正常轉發 {#probe-c}
 
-[Day 8 地雷 9](sprint2-day8-cilium-network-policy.md#mine-9):`Host firewall: Disabled` 之下,任何 `hostNetwork` pod 穿透全部網路政策。今天問:Hubble 看得到嗎?
+Day 8 的[「同節點的 hostNetwork pod 仍能連到受限服務」](sprint2-day8-cilium-network-policy.md#mine-9)：在本課保留本機 host 預設放行的環境，`hostNetwork: true` 的 pod 能連到同節點上受本章政策保護的目標。步驟 1 的 host firewall 也是 `Disabled`，但那個開關不能單獨解釋 endpoint 的放行。這次照 Day 8 步驟 7 第 0 組的做法：`nsenter-box` 本身就是 hostNetwork 的 pod，不需要 `nsenter`，直接在它裡面用 curl 對 `echo7` 發 GET 和 POST、再連 `multiport` 的 9090 埠。結果跟 Day 8 一樣，POST 拿到 200、9090 連得上。發請求之前先記下當時的時間，下面過濾條件裡的 `<mark>` 就換成這個時間（`--since` 也接受 `5m` 這類相對時間）。
 
-**看得到封包,看不出那是繞過。** 三個過濾器全部失手:
+接著用維運最常用的三個過濾條件找：
 
 ```console
 ### 1) 維運找「哪個命名空間在亂打」會這樣濾
@@ -267,26 +377,32 @@ $ hubble observe --protocol http --since <mark>
 0 筆                      ← 沒經過 Envoy 就沒有 L7 事件,那次 POST 在 HTTP 視圖裡不存在
 ```
 
-不加任何過濾、只用時間才看得到,而來源欄位是:
+三個都找不到。拿掉所有過濾、只按時間範圍列出來，才看得到那幾筆，而它們的來源欄位是：
 
 ```json
 "source": { "identity": 1, "labels": ["reserved:host"] }
 ```
 
-**沒有 pod 名稱、沒有命名空間、沒有容器——只有 `reserved:host`。** 而那個位址:
+沒有 pod 名稱、沒有命名空間，只有 `reserved:host`。這是 Cilium 給節點本身的保留身分，identity 固定是 1；hostNetwork 的 pod 用的是節點的網路，所以 Cilium 把它的流量當成節點的流量。來源 IP 是 `10.244.0.69`，再問 agent 一次這個位址是誰：
 
 ```console
 $ cilium-dbg status | grep -i "proxy status"
 Proxy Status:   OK, ip 10.244.0.69, 1 redirects active on ports 10000-20000
 ```
 
-**那正是 Cilium 自己 Envoy proxy 的位址。** 也就是說,步驟 3 裡那幾筆「Envoy 把合法 GET 轉給應用」的 flow,和這裡「攻擊者繞過全部政策打進去」的 flow,**在 Hubble 的來源欄位裡是同一個位址、同一個 identity、同一組標籤。**
+`10.244.0.69` 也是 Cilium 的 Envoy proxy 用的位址，步驟 3 那個第二段的來源就是它。下圖把兩種來源放在一起：
 
-**這座叢集最大的政策破口,在監控工具上長得跟 Cilium 自己的合法轉發一模一樣,而且不會出現在任何一個「找違規」的視圖裡。**
+![左邊兩個來源：cilium-envoy 把放行的 GET 轉給 echo7，以及 hostNetwork 的攻擊者 pod attacker/nsenter-box；兩者在 Hubble 上記下的來源都是 10.244.0.69、identity 1、reserved:host，再連到 echo7。下方三個常用過濾器 --namespace attacker、--verdict DROPPED 都是空，--protocol http 是 0 筆](../assets/diagrams/s2d9-host-bypass.svg)
 
-這不是因為它壞了,而是因為**它的視角就是 endpoint 的視角,而那個破口的定義就是「不經過 endpoint 政策」**。工具的盲點跟它的執行點是同一件事的兩面——Day 6 的 Tetragon 是 cgroup、Day 8 的政策是網路命名空間、今天的 Hubble 是 endpoint。
+照著圖從左往右看：Envoy 的合法轉發和攻擊者的繞過，在 Hubble 上是同一個 IP、同一個 identity、同一組標籤。而且繞過的流量判定是 `ALLOWED`／`FORWARDED`，不會出現在任何找違規的視圖裡。
 
-## 步驟 6: service map——它擅長什麼,會誤導你哪裡
+這些流量其實有經過 `echo7` 的 endpoint 政策，也有判定：不加過濾列出來時，那幾筆是 `(host) -> echo7 … policy-verdict:none … ALLOWED`。原因在 Day 8 看過的 policy map：這次環境保留本機 host 的預設放行，每顆 endpoint 的 policy map 第一行是 `Allow Ingress reserved:host`，對 `reserved:host` 無條件放行。所以判定是 `ALLOWED`，不是 `DROPPED`。被繞過的是你寫的那些規則，不是 Hubble 的記錄；Hubble 照實記下了這次放行，只是放行本身就是那條無條件規則造成的。
+
+要控制本機 host 到 endpoint 的連線，Day 8 區分了 `--allow-localhost=policy` 搭配 endpoint 政策，以及另行管理主機流量的 host firewall。應先依流量路徑選擇設定、保留必要連線，再驗證拒絕結果與 Hubble 紀錄。本課沒有實作這些修法，不能保證只開一個旗標就會出現 `DROPPED`。
+
+## 步驟 6: service map 適合回答什麼
+
+步驟 4 的服務圖，資料就是緩衝區裡的 flow。UI 沒有匯出按鈕，所以本課用 `hubble observe --last 4000 -o json` 取出最近 4000 筆 flow，再用一小段腳本按「來源、目的、埠」加總，得到跟服務圖一樣的內容。腳本沒有放進本章，你可以用自己習慣的工具（例如 `jq`）做同樣的加總。下面節錄其中幾列，完整結果還有其他 `reserved:host` 開頭的列：
 
 ```console
 SOURCE                      DESTINATION                        PORT    FLOWS  VERDICTS
@@ -297,110 +413,77 @@ reserved:host               kube-system/hubble-relay           4222      136  FO
 netlab/flowgen              netlab/multiport                   9090      106  DROPPED=106
 ```
 
-**擅長什麼**:`flowgen → echo7:8080` 那一列同時有 `FORWARDED=153` 與 `DROPPED=17`,一眼看得出「這條邊有通有不通」——**這是靜態讀政策讀不出來的,因為政策寫的是規則,這裡寫的是實際發生的事**。同理 `multiport:9090` 那列全部 DROPPED 且沒有任何 FORWARDED,代表那條政策確實在擋、而且有人一直在撞它。要回答「這條規則刪掉會不會出事」,service map 是最快的路。
+先看它擅長的事。`flowgen → echo7:8080` 那一列同時有 `FORWARDED=153` 和 `DROPPED=17`，代表這條線上有放行也有被擋的流量；`multiport:9090` 那一列全部是 `DROPPED`，代表那條政策確實在擋，而且持續有流量被它擋下。只讀政策 YAML 看得到規則，看不到實際發生了什麼。想知道「這條規則刪掉會不會出事」，從這裡開始查最快。
 
-**會誤導你哪裡**,四件:
+再看它容易誤導的地方：
 
-1. **只有最近說過話的東西才在圖上。** 這份匯出裡完全沒有 `client`、`probe`、`svc-backend`——它們全都還活著,只是最近兩分鐘沒發流量。**service map 是「最近的通聯紀錄」,不是「拓撲」。** 把它當拓撲用,就會刪掉一個每天只跑一次的批次任務所需要的規則。而「最近」有多近由[地雷 1](#mine-1) 決定。
-2. **會被節點噪音淹沒。** 排名第一的是節點自己對外的流量,前十名裡有六列是 `reserved:host` 出發的。**應用流量在自己的服務圖上是少數。**
-3. **觀測工具會出現在自己的圖上。** relay、UI、metrics-server 加起來佔掉可觀的篇幅,**而且同時在消耗那個本來就很淺的緩衝區**。
-4. **`reserved:host` 是個黑洞。** 探針 C 的全部繞過流量都聚在那一列裡,跟 Envoy 的合法轉發混在一起,verdict 全是 FORWARDED。**在服務圖上,那次繞過看起來就是節點在正常工作。**
+1. **只有最近有流量的東西才在圖上。** 這份結果裡沒有 `client`、`probe`、`svc-backend`（Day 7 建的測試服務），它們都還在叢集裡，只是最近兩分鐘沒發流量。服務圖是最近的連線紀錄，不是完整的拓撲；把它當拓撲用，可能會刪掉一個每天只跑一次的批次工作需要的規則。「最近」有多近，由步驟 2 量到的緩衝區深度決定。
+2. **節點自己的流量佔大多數。** 排第一的是節點對外的流量，完整結果的前十列裡有八列來源是 `reserved:host`。應用之間的流量反而是少數。
+3. **觀測工具自己也在圖上。** relay、UI、metrics-server 都佔了好幾列，它們的流量也在消耗同一個只有 4095 筆的緩衝區。
+4. **`reserved:host` 底下什麼都混在一起。** 探針 C 的繞過流量都併進這一列，和 Envoy 的合法轉發混在一起，判定全是 `FORWARDED`。在服務圖上，那次繞過看起來就是節點在正常工作。
 
-## 誠實的差距
+## 清理
 
-- **緩衝區容量的預設值,文件與實測對不上。** 見[地雷 1](#mine-1)。本課只能確定「這座叢集是 4095」,不能宣稱那是所有版本的預設。
-- **沒有開匯出。** 要把 Hubble 當事後鑑識工具就得把 flow 寫入儲存或送 Prometheus,兩者都是額外的 Helm 變更與儲存成本,本課刻意沒開(會改資料平面設定,而且要另外驗證)。**所以「接出去之後歷史有多深、成本多少」這題沒有實測答案。**
-- **探針 A 的對照組不完整。** 被測程式預設不記存取日誌,所以「成功的請求有沒有留下日誌」這一半沒有對照。結論只涵蓋「被擋的請求在應用端沒有痕跡」。
-- **host firewall 從頭到尾沒開。** 探針 C 的破口在本課環境是開著的,而堵法(`hostFirewall.enabled=true` 加叢集範圍政策)沒有實作也沒有驗證。
-- **單節點。** relay 的價值是把多個節點的 agent 聚合起來,而這座叢集只有一顆節點——**跨節點聚合這件事等於沒測。**
-
-## 驗收 checkpoint
-
-| 驗證 | 判準 | 本課環境的結果 |
-|---|---|---|
-| 前幾天的驗收仍成立 | kube-proxy 仍為 0,Day 8 的 L7 政策仍在執行 | 第三次存活;GET 200 / POST 403 |
-| 開 Hubble 不動資料平面 | cilium-agent 的重啟次數 | **0**,relay 與 UI 27 秒就緒 |
-| 緩衝區深度可量化 | 現在時間與緩衝區裡最舊那筆的差 | 閒置 **3 分 02 秒**;加一顆小流量 pod 後 **2 分 24 秒** |
-| **驗收:UI 半邊** | 在 UI 上指出那條被 L7 拒絕的流量 | Flow Details 顯示 `Verdict: dropped`,擷圖入庫 |
-| **驗收:CLI 半邊** | 印出同一筆的事件 | `http-request DROPPED (HTTP/1.1 POST …)`,JSON 含 method 與 URL |
-| 探針 A | 應用日誌的行數變化,以及 flow 的段數 | 日誌 0 增加;放行有兩段、被擋只有一段 |
-| 探針 B | 兩種來源的 flow 欄位是否可區分 | **逐欄相同**,且無任何行程欄位 |
-| 探針 C | 三個常用過濾器能否找到繞過流量 | **三個全部回空** |
-
-## 地雷記錄
-
-### 地雷 1:緩衝區只有幾千筆、per-node、環狀覆蓋——實測歷史只有兩三分鐘 {#mine-1}
-
-**這是本章最重要的數字,而它不在任何一份入門文件的第一頁。**
-
-事件的來源是每顆 cilium-agent 自己的環狀緩衝區,滿了就覆蓋最舊的,**不寫入儲存、不外送**。容量要在自己的叢集上問 agent,不要相信文件上的預設值——實測值可能跟官方參考文件差一個數量級:
+`flowgen` 會一直發請求、佔用緩衝區，用完就刪掉，並關掉前面放到背景執行的兩個 port-forward（relay 的 4245 和 UI 的 12000）：
 
 ```console
-$ cilium-dbg status | grep -i hubble
-Hubble:   Ok   Current/Max Flows: 2508/4095 (61.25%), Flows/s: 19.49
+$ kubectl -n netlab delete deploy flowgen
 ```
 
-**這個數字要現場量、不要二手轉述(包括本章在內)**,本身就是第一個結論。實測填充速度(節點剛開機、八顆 pod、沒有業務流量):緩衝區約 7 分鐘就從六成填到 100%。滿了之後直接量歷史深度(現在時間對緩衝區裡最舊那一筆):
+## 疑難排解
 
-| 情境 | **歷史深度** |
-|---|---|
-| 閒置(八顆 pod,無業務流量) | **3 分 02 秒** |
-| 加一顆每 5 秒三個請求的 pod | **2 分 24 秒** |
+### UI 的 flow 表是空的，或找不到幾分鐘前的事件 {#mine-1}
 
-**一顆每 5 秒發三個 curl 的 pod,就把整座叢集的可觀測歷史砍掉四分之一。** 換算到真實環境:一個中等忙碌的節點跑幾百 flows/s,緩衝區的深度是**十幾秒**。
+**原因**：flow 存在每顆節點固定 4095 筆的環狀緩衝區裡，滿了就蓋掉最舊的；在本課幾乎沒有流量的叢集上也只留得住兩三分鐘。量法和影響見[步驟 2 的「緩衝區留得住多久」](#buffer-depth)。
 
-**三個實務結論:**
+**修法**：打開 UI 前先讓叢集裡有持續的流量（步驟 4 的 `flowgen`）；要事後回查，就得把 flow 匯出到儲存，本課沒有驗證這部分。
 
-1. **「出事了去 Hubble 看一下」在預設設定下不成立。** 從被叫醒、連上網、port-forward 到打開瀏覽器,時間早就超過緩衝區深度了。**Hubble 預設是即時儀表板,不是事後鑑識工具。**
-2. **要當鑑識工具就得接出去**(把 flow 寫入儲存或送指標系統),而那是額外的設定與儲存成本。
-3. **`Current/Max Flows: 100%` 不是健康指標,是溢位指標。** 它的意思是「你正在丟資料」,但它長得像進度條。
+### UI 上 L7 被擋的那筆寫 Unknown drop reason {#mine-2}
 
-### 地雷 2:L7 的拒絕沒有丟棄原因,UI 上直接寫「Unknown drop reason」 {#mine-2}
+**症狀**：Flow Details 寫著 `Verdict: dropped`，`Drop reason` 卻是 `Unknown drop reason`；L4 丟包的同一個欄位寫得出 `Policy denied`。
 
-L4 丟包的 JSON 有完整的原因:
+**原因**：L4 丟包的 JSON 帶著完整的原因：
 
 ```json
 { "verdict": "DROPPED", "Type": "L3_L4", "drop_reason": 133, "drop_reason_desc": "POLICY_DENIED" }
 ```
 
-L7 拒絕的同一份 JSON:
+L7 拒絕的 JSON 裡，這兩個欄位整個不存在：
 
 ```console
 drop_reason      : (不存在)
 drop_reason_desc : (不存在)
 ```
 
-**`verdict: DROPPED` 有,`Type: L7` 有,`drop_reason` 整個欄位不存在。** UI 誠實地把這件事寫出來——那兩張並排的擷圖就是證據:同一個面板,L4 那筆寫 `Policy denied`,L7 那筆寫 `Unknown drop reason`。
+`verdict: DROPPED` 和 `Type: L7` 都在，只是沒有 `drop_reason`，UI 就照實寫成「不知道」。
 
-**後果分兩層:**
+**影響與修法**：
 
-- **追查上**:L4 丟包可以照原因分類統計,**L7 拒絕全部擠在同一個「不知道」桶裡**——是方法不合、路徑不合、還是 header 不合,flow 上都沒寫,你得自己回去讀政策。
-- **告警上**:任何「按丟棄原因分流」的規則都會**漏掉全部的 L7 拒絕**,而 L7 拒絕正是最需要有人看的那一種——它代表有東西正在敲你明確禁止的介面。
+- 追查時，L4 丟包可以按原因分類統計，L7 拒絕全部落在同一個「不知道」裡；是方法、路徑還是 header 不符合，flow 上沒有寫，要回去對照政策。
+- 告警規則如果按 drop reason 分流，會漏掉全部的 L7 拒絕，而 L7 拒絕代表有人在打你明確禁止的介面。要抓它，改用 `Type: L7` 或 `--protocol http --verdict DROPPED`（步驟 4 的 CLI 那一半）來篩。
 
-### 地雷 3:UI 的網址要用 `?namespace=`,而且過濾狀態不在網址裡 {#mine-3}
+### UI 網址打 `/netlab` 得到 404 {#mine-3}
 
-直覺的 `http://localhost:12000/netlab` 會得到:
+**症狀**：把命名空間放在路徑裡，`http://localhost:12000/netlab` 得到：
 
 ```text
 Unexpected Application Error!
 404 Not Found
 ```
 
-根目錄也不是答案——它是一張只有「Choose namespace」下拉選單的歡迎頁,**flow 表與服務圖都不存在**。能用的寫法是查詢參數:
+只打根目錄，則只會看到一個「Choose namespace」下拉選單，沒有服務圖也沒有 flow 表。
+
+**原因**：UI 用查詢參數接收命名空間：
 
 ```text
 http://localhost:12000/?namespace=netlab
 ```
 
-**而且只有 `namespace` 這個參數會被讀。** 實測 `?namespace=netlab&verdict=dropped` 完全沒有作用(右上角仍是 `Any verdict`)。
+**修法**：照步驟 4 的網址開。另外要知道，網址上的過濾參數多半不會生效：加上 `&verdict=dropped` 沒有作用（右上角仍是 `Any verdict`），只有 `&flows-filter=protocol%3Dhttp` 這種寫法會帶進過濾框。在 UI 裡設好的判定等過濾條件不會留在網址上，想讓同事看同一個畫面，截圖或給他 CLI 指令比較可靠。
 
-**後果**:UI 的過濾狀態多半不在網址裡,**一個「已經濾好的 Hubble 視圖」沒辦法用連結交給同事**——只能截圖。
+### flow 裡看得到 `Authorization` 的原文 {#mine-4}
 
-**給自動化的第三個坑**:Hubble UI 會一直開著 websocket,所以 headless 瀏覽器那種「等頁面 idle 之後自動截圖」的做法會**永遠掛著不返回**,必須改用瀏覽器的除錯協定定時抓。
-
-### 地雷 4:HTTP request header 原文進 flow buffer,而 relay 預設不開 TLS {#mine-4}
-
-驗收那段 JSON 裡的 `headers` 不是摘要,是原文:
+**症狀**：對有 L7 政策的服務發帶認證資訊的請求，再用 CLI 看 flow：
 
 ```console
 $ curl -H 'Authorization: Bearer SUPERSECRET-DEMO-TOKEN-abc123' \
@@ -413,44 +496,45 @@ url: http://svc-echo7.netlab/?apikey=demo-key-in-url
      Cookie = session=demo-cookie-value                        ← 原文
 ```
 
-而 `helm upgrade` 自己印出來的警告是:
+bearer token、cookie、URL 裡的 api key 都原樣進了 flow。而步驟 2 執行 `helm upgrade` 時，Helm 自己印過這行警告：
 
 ```text
 WARNING: TLS is not enabled for the Hubble Relay server (hubble.relay.tls.server.enabled=false).
 ```
 
-**把兩件事疊起來:任何能 port-forward 到 relay 的人,就能明文讀到叢集裡每一個走 L7 政策的請求的認證標頭。**
+**原因**：兩件事加在一起，能 port-forward 到 relay 的人，就能讀到叢集裡每一個走 L7 政策的請求的認證標頭。
 
-三層要分開講:
+- 只有走 L7 政策的流量會這樣。沒有 HTTP 規則就不會經過 Envoy，flow 裡也就沒有 `l7` 這一段。把政策寫到 HTTP 層，同時也讓這些標頭被記了下來。
+- relay 是 `kube-system` 裡一個普通的 ClusterIP Service，有 `pods/portforward` 權限就連得上。很多叢集把這個權限當成維運權限發出去，沒有當成讀取敏感資料的權限在管。
+- 緩衝區只留兩三分鐘，所以這些原文不會累積。可是一旦為了事後回查把 flow 匯出到儲存，存下來的就是含 token 的原文。
 
-- **它只發生在有 L7 政策的路徑上。** 沒有 HTTP 規則就沒有 Envoy,沒有 Envoy 就沒有 `l7` 區段。**也就是說「把政策寫細一點」這個安全決定,順便打開了一份明文的認證標頭日誌**——兩件事在文件裡分屬不同章節。
-- **RBAC 上它不是一個「機密」。** relay 是一個普通的 ClusterIP Service,能做 `pods/portforward` 的人就讀得到,**而那個權限在多數叢集裡是給「維運」而不是給「資料存取」的**。
-- **緩衝區淺這件事在這裡反而是保護。** 只留兩三分鐘代表這份明文不會累積——但那也代表**你沒辦法既要鑑識深度又不要這份風險**:一旦把 flow 寫入儲存,存下來的就是含 token 的原文。要兩者兼得得自己設定標頭遮罩,而那不是預設值。
+**修法**：收緊 `kube-system` 的 `pods/portforward` 權限，並照 Helm 警告裡的參數開啟 relay 的 TLS；匯出 flow 之前，先設定 header 的遮罩。TLS 和遮罩本課都沒有實作，也沒有驗證。
 
-## 帶得走的東西
+## 想一想
 
-- **一個工具的盲點,跟它的執行點是同一件事的兩面。** Hubble 看不見 hostNetwork 的繞過,不是因為它壞了,是因為它的視角就是 endpoint 的視角,而那個破口的定義就是「不經過 endpoint 政策」。同樣的邏輯解釋了 Tetragon 為什麼被 `nsenter` 繞過(它綁 cgroup),以及網路政策為什麼繞不過(它綁網路命名空間)。
-- **Hubble 看的是網路 flow,不是行程——而且它會給錯名字。** 攻擊者鑽進別人的網路命名空間之後,flow 逐欄記在受害者身上,而工具沒有任何表達「我不確定」的方式。要把一條 flow 對應到一個行程,需要另一條資料線。
-- **「第二段不存在」比「日誌裡沒有」是強得多的證據。** 查日誌只能得到「沒看到」;flow 的兩段結構可以證明「它沒被送過去」。這是 Hubble 最站得住的用途:**任何在 proxy 被截掉的東西,客戶端與應用端各只看得到半個故事。**
-- **先問緩衝區有多深,再決定它在你的事故流程裡是什麼角色。** 幾千筆、每節點、環狀覆蓋,在閒置的實驗叢集上是三分鐘,在忙碌的節點上是十幾秒。這個數字決定了 Hubble 是「即時儀表板」還是「鑑識工具」,而它預設是前者。
-- **服務圖是最近的通聯紀錄,不是拓撲。** 最近沒說過話的東西不在圖上,而那個「最近」由緩衝區深度決定。把它當拓撲用會刪掉一天只跑一次的批次任務所需要的規則。
+- 凌晨兩點收到告警，你在兩點十分連上叢集，打開 Hubble UI 想看兩點整發生了什麼，結果表上最早的一筆是兩點八分。這代表 Hubble 壞了嗎？你會先看哪個數字，下次要怎麼安排才查得到？
+- 稽核報告指出 `netlab/client` 在半夜對內部服務發了一批被擋的 POST，證據是 Hubble 的紀錄。在認定是 `client` 的程式出問題之前，你還要查哪一類資料？為什麼光靠 flow 不夠？
+- 主管想用一條告警「`--verdict DROPPED` 的筆數突然增加」來發現有人繞過網路政策。根據這一章的探針 C，這條告警抓得到 hostNetwork 的繞過嗎？要讓這類流量出現在 DROPPED 裡，得先改什麼？
+
+## 小結
+
+Hubble 讀的是 cilium-agent 從 Day 7 起就在記的 flow，開啟它只是加上 relay 和 UI 兩個讀取端，不會動到資料平面。它最有用的地方，是同時看到 Envoy 前後兩段連線，能證明被 L7 政策擋下的請求沒有送到應用，這是應用日誌和客戶端都給不了的。但它的紀錄有三個限制：每顆節點只有 4095 筆的環狀緩衝區，預設只留得住幾分鐘；來源記的是網路身分，攻擊者鑽進別人的網路命名空間發的請求會記在受害 pod 名下；hostNetwork pod 的流量以 `reserved:host` 出現，被 endpoint 政策對 `reserved:host` 的無條件規則放行，判定是 `ALLOWED`，找違規的過濾條件全部找不到。之後要拿 Hubble 的紀錄當證據時，先確認事件還在緩衝區的時間範圍內、來源需不需要用看得到行程的工具交叉比對，以及你要找的流量會不會被一條無條件放行的規則記成正常。
 
 ## 延伸閱讀
 
-想往下深挖,從這幾份開始:
+想再深入，可以從這幾份開始：
 
-- **[Hubble 的組成](https://docs.cilium.io/en/stable/observability/hubble/)** —— 官方對 relay(跨節點與跨叢集聚合)與 UI(L3/L4 到 L7 的服務相依圖)的定位說明,以及設定 TLS、匯出 flow 等子頁的入口。
-- **[Cilium Helm 參數表](https://docs.cilium.io/en/stable/helm-reference/)** —— 地雷 1 的另一半:`hubble.eventBufferCapacity` 在這裡列的數字與本課實測不同,**兩邊並讀正好說明為什麼這個值要在自己的叢集上量**。
-- **[Host Firewall](https://docs.cilium.io/en/stable/security/host-firewall/)** —— 探針 C 那個破口的堵法。開了它,節點層的流量才會有政策判定,Hubble 才有東西可以標成 DROPPED。
-- **[L7 政策](https://docs.cilium.io/en/stable/security/policy/layer7/)** —— 步驟 3 那個「兩段連線」的來源:官方說明 L7 政策會把流量導進節點上的 Envoy,而違反規則不會丟包、是回一個 403。
+- **[Hubble 的組成](https://docs.cilium.io/en/stable/observability/hubble/)** —— 官方對 relay（跨節點與跨叢集聚合）與 UI（L3/L4 到 L7 的服務相依圖）的定位說明，以及設定 TLS、匯出 flow 等子頁的入口。
+- **[Cilium Helm 參數表](https://docs.cilium.io/en/stable/helm-reference/)** —— 本章提到但沒有開的 `hubble.metrics`、`hubble.relay.tls` 等設定，完整參數都列在這裡。
+- **[本機 host 與 endpoint 的政策](https://docs.cilium.io/en/stable/security/policy/layer3/#access-to-from-local-host)** —— 探針 C 的本機預設放行，以及交由政策控制的設定。
+- **[Host Policies](https://docs.cilium.io/en/stable/security/policy/host/)** —— 另行管理主機流量的政策範圍，不能由啟用 host firewall 推論 endpoint 已拒絕本機來源。
+- **[L7 政策](https://docs.cilium.io/en/stable/security/policy/layer7/)** —— 步驟 3 那個「兩段連線」的來源：官方說明 L7 政策會把流量導進節點上的 Envoy，違反規則時不會丟包，而是回一個 403。
 
 ## 下一步
 
-Sprint 2 的動手部分到這裡結束。一路走到這裡,同一批核心事件被四套工具用四種方式取用過:bpftrace 即時追、Falco 用規則判斷、Tetragon 在核心裡攔、Cilium 在網路層擋與看。
-
-而最值得回頭看的,是它們**各自看不見的東西剛好是別人的長處**——`nsenter` 那一題四套工具給了四個不同的答案,`hostNetwork` 那個破口有三套工具完全沒有提過。[Day 10](sprint2-day10-decision-matrix.md) 不動手,把這些散在九章裡的實測數字收攏成一張分工決策表,每一格都要能追溯到某一天的某一個量測。
+Sprint 2 的動手部分到這裡結束。同一批核心事件，被四套工具用四種方式取用過：bpftrace 即時追蹤、Falco 用規則判斷、Tetragon 在核心裡攔下、Cilium 在網路層擋下並記錄。`nsenter` 那個情境，四套工具給了四個不同的答案；hostNetwork 那個破口，另外三套工具的章節完全沒有碰到。[Day 10](sprint2-day10-decision-matrix.md) 不動手，把散在九章裡的量測結果整理成一張分工表，說明每種需求該交給哪一套工具。
 
 ---
 
 !!! quote ""
-    Cilium 標誌為 Cilium 專案之官方資產(CNCF artwork),此處作社群教學用途。Hubble UI 擷圖為本課程實測畫面。
+    Cilium 標誌為 Cilium 專案之官方資產（CNCF artwork），此處作社群教學用途。Hubble UI 擷圖為本課程實測畫面。

@@ -1,74 +1,104 @@
-# Day 10: 遊戲伺服器平台總結——十天回顧、實務取捨、沒教的主題
+# Day 10: 新遊戲需要哪些平台元件，哪些還不用？
 
 ![Agones 官方標誌](../assets/logos/agones-icon-color.svg){ align=right width="90" }
 
-> 十天前，Sprint 5 從一個問題開始：為什麼 dedicated game server 不能當成一般的 pod 來管。現在每一段答案都親手跑過：Agones 管 server 的生命週期，Quilkin 讓封包進到正確的 server，Nakama 管玩家身分與配對，最後兩個 Unity 視窗在同一顆 server 上互相看到對方移動。今天不動手：回顧這條路、談實務上怎麼取捨，並列出這門課沒教的部分。
+團隊準備把一款遊戲放進 Kubernetes，帳號服務已經存在。有人希望直接沿用這幾天的 Agones、Quilkin 與 Nakama；另一個需求卻只是讓玩家輪流出牌，每一步的狀態都能寫回資料庫。這兩種情況，需要同一套部署嗎？
 
-!!! abstract "你在課程的哪裡"
-    - **Day 0–9**：從第一顆 GameServer 走到 relay server 上的多人同步。
-    - **今天**：不動手。回顧、取捨、沒教的主題。
+先回答一個更具體的問題：一場對戰是否需要持續由某個程序保存狀態，玩家也必須一直連到它？本章用前面實際看到的分配、路由與失效行為，整理哪些需求對應哪些元件。最後應能為自己的遊戲選出起點，也能說出選擇前還欠哪些證據。
 
-## 走完十天之後
+## 先畫出狀態放在哪裡
 
-一場對戰在這套平台上的樣子，現在可以用一張圖講完：
+Day 5 的玩家資料放在 PostgreSQL，Nakama 接收登入與 storage 請求；Day 9 的 relay 則在記憶體裡保存目前有哪些玩家加入。這些資料的生命週期不同：帳號需要跨越多場對戰，relay 的連線名單只服務這一場。
 
-```mermaid
-flowchart TB
-    A["登入<br/>Nakama 發 session token"] --> B["排隊<br/>WebSocket 保持連線"]
-    B --> C["配對成立<br/>hook 要一顆 server、產生 token"]
-    C --> D["拿到入口<br/>通知推送或 RPC 查詢"]
-    D --> E["對戰<br/>UDP 帶 token 經 Quilkin"]
-    E --> F["結束<br/>server 呼叫 Shutdown、Fleet 補位"]
-```
+本課的實作可以分成圖中的三段。先看中間的交接資料，再看右邊的遊戲程序；「拿到 assignment」與「能繼續原本對戰」並不是同一件事。
 
-這條路上，平台只在兩個時間點需要知道遊戲的狀況：配對成立時要一顆 server，對戰結束時把它還回去。其他時候三個元件各自運作：Agones 管 GameServer 的生命週期，Quilkin 管 UDP 封包的路由，Nakama 管玩家身分與配對。它們之間只靠 allocation、routing token 與 hook 接起來，所以任何一段都能單獨換掉。[Day 9](sprint5-day9-unity-client.md) 把 echo server 換成 relay 時，Agones 與 Quilkin 的設定沒有改；改的是 Fleet 的名稱與 image、Nakama Lua module 的 allocation selector，以及一個指定 Fleet 名稱的 runtime env。
+![玩家身分與配對交付 assignment，UDP 路由連到對戰程序，結束後釋放容量](../assets/diagrams/s5d10-boundaries.svg)
 
-Day 0 開場的三個說法，十天下來都有了實測結果。
+assignment 裡保存的是去哪裡連線，不是對戰狀態的備份。Day 8 關閉節點後，Fleet 補出新的 Ready，舊 token 的探測卻一直 timeout；這就是兩者的差別。若需求是「換一台 server 後仍接續對戰」，需要另外設計狀態保存與恢復，這幾天的 allocation 與 token 並沒有提供它。
 
-「連線綁在特定 pod」成立，而且不只綁在 pod：玩家拿到的 token 寫在那一顆 GameServer 的 annotation 上，那顆 server 消失，token 就沒有對象了。[Day 8](sprint5-day8-observability-resilience.md) 的節點失效演練裡，Fleet 在 pod 被驅逐後 2 秒內補上了新的 server，但原本那場對戰沒有接續下去，帶著舊 token 的探測一直 timeout 到手動停止。
+## 判斷是否需要 Agones：看對戰生命週期
 
-「封包多半走 UDP」也成立，而且可以說得更精確：登入、排隊、拿入口都走 TCP，這幾步慢一點沒關係，漏一次卻不行；真正走 UDP 的只有對戰中的封包。元件也正好沿著這條線切開：Nakama 管 TCP 那一半，Quilkin 與 GameServer 管 UDP 那一半。
+如果每次請求都能從外部資料庫取得完整狀態，任一副本都能接手下一次請求，那麼先用一般 Deployment 管理服務是可評估的起點。若一組玩家需要分配並持續使用同一個遊戲程序，還要區分「可以接新對戰」與「正在服務對戰」，就需要額外的生命週期管理。
 
-「session 中途被 evict 不是一次平常的重啟」也成立，而且 Kubernetes 本身不會替你擋。Agones 在它看得到的地方保護得很好，Fleet 縮容時一顆 Allocated 都不碰；可是節點直接消失時，玩家 2 秒就斷線，平台要 8 分多鐘才知道。狀態回報得越早，平台反應越快：game server 自己呼叫 `Shutdown()` 是 1 秒，崩潰靠 health check 是 4 秒，節點消失靠 Kubernetes 是分鐘級（都是 Day 8 量到的數字）。所以 game server 應該在對戰結束時主動呼叫 `Shutdown()`，不要等平台透過 health check 或節點狀態發現。
+Agones 在本課解決的是後者：`GameServerAllocation` 選取 Ready server 並轉為 Allocated，Fleet 維持伺服器數量，遊戲程式以 SDK 回報就緒、健康與結束。Day 8 把 Fleet replicas 調到 0 時，Allocated server 仍保留，正好說明為什麼一般副本數不足以描述一場進行中的對戰。
 
-還有一件事在十天裡一再出現：官方範例跟手上的版本對不上。Quilkin 的 relay 範例跑不起來（[Day 4](sprint5-day4-quilkin-udp-proxy.md)）、Agones 的 CRD 過不了新版 Kubernetes 的驗證（[Day 1](sprint5-day1-agones-first-gameserver.md)）、simple-game-server 的 README 描述的行為跟原始碼不同（[Day 8](sprint5-day8-observability-resilience.md)）。遊戲伺服器這一圈的專案迭代很快，Quilkin 到 2026-09 都還是 pre-1.0。照抄之前，先對照同一個版本的原始碼與 changelog。
+不要只用「卡牌」或「射擊」決定。回合制遊戲也可能有綁定程序的房間狀態；即時遊戲也可能採用不同的分散方式。先追一場對戰的狀態在哪裡，以及移除程序會失去什麼，再選管理方式。[Fleet 規格](https://agones.dev/site/docs/reference/fleet/) 可以用來核對 replicas 與分配的關係。
 
-## 真的要做的時候
+| 需要回答的問題 | 本課的證據 | 對設計的影響 |
+|---|---|---|
+| 何時能接新對戰？ | Day 1–3 的 Ready 與 allocation | 把「可分配」當成明確狀態 |
+| 分配後還剩多少空位？ | Day 7 兩次分配用完兩顆 Ready | 固定 replicas 不會因分配自動增加；容量補足另行規劃 |
+| 對戰結束時誰釋放程序？ | Day 8 的 EXIT、Day 9 的 BYE 後 Shutdown | 遊戲需要主動回報結束，也要處理玩家未到或失聯 |
+| 伺服器失效後誰恢復對戰？ | Day 8 補 Ready 後舊探測仍失敗 | Fleet 補容量；對戰恢復需另做設計 |
 
-先看遊戲本身。卡牌、回合制這類遊戲，每一步都是一次請求、一次回應，對局狀態存在資料庫裡，任何一個副本都能接下一步；這種遊戲用不到 Agones 的 allocation 與生命週期管理，一般的 Deployment 加上 Nakama 的 RPC 應該就夠了。格鬥、射擊、競速這類即時對戰，一場對戰綁在一顆 server 上、每秒幾十個封包，才是這整套架構派上用場的地方。
+## 判斷是否需要 Quilkin：看入口與路由需求
 
-不必一次全上。玩家還不多的時候，Agones 加上直連節點 IP 就能開始，這是 [Day 1](sprint5-day1-agones-first-gameserver.md) 的做法；等需要固定入口、需要擋掉來路不明的封包，再把 Quilkin 加進來，client 那邊只是把入口從 `address:port` 換成「proxy 位址加 token」。已經有自己帳號與配對系統的團隊，也不必為了 game server 換成 Nakama：在自家配對服務湊齊玩家的那一刻，呼叫 Kubernetes API 建立 `GameServerAllocation`，就是 [Day 6](sprint5-day6-matchmaking.md) 那段 Lua hook 做的事，換成任何語言都是同一個 HTTP 請求。
+Day 1 的 client 直接連到節點位址與 GameServer port，路徑較短，也讓 client 必須知道每次分配的伺服器位置。Day 4、7 改成連到 proxy，再以 routing token 選擇 GameServer。這讓入口與後方 server 位址分開，但也增加 proxy、路由設定與觀測的工作。
 
-不論選了哪些元件，下面這些都跑不掉。game server 要在對戰結束時自己呼叫 `Shutdown()`，否則容量不會還回來。監控不能只看 Agones 的 GameServer 計數，要同時看節點是否 Ready，因為節點失聯時那個計數會照舊回報好幾分鐘。client 要把斷線當成正常情況，斷了就回 Nakama 重新排隊或查詢自己被分到哪裡。game server 也要確認加入的人是誰：Day 9 的 relay 只要 token 對就讓人進來，正式環境應該在玩家加入時向後端驗證配對名單。
+若目前只需要驗證遊戲程序可以接收 UDP，直連足以開始；若需要統一入口與可設定的 UDP 路由，再評估 Quilkin。這是從本課兩種連線方式得到的設計判斷，並非效能比較：課程沒有測量加入 proxy 後的延遲分布、吞吐量或故障切換時間。
 
-這些元件都還在快速變動。選型時，讓兩三個候選各跑一次端到端流程，看它們在你的環境裡實際卡在哪裡。
+還有兩個實際限制。第一，Day 7 的三字元 token 只是練習配置，沒有碰撞處理、資格驗證與完整失效流程；錯誤 token 沒收到回應，不能據此認定已解決所有未授權流量。第二，Day 9 的 relay 看到的是 proxy 的 IP:port，並不是玩家的原始來源；如果遊戲需要原始位址或玩家身分，要另外設計如何可信地傳遞與驗證。Quilkin 的定位與可設定功能可查[官方儲存庫](https://github.com/EmbarkStudios/quilkin)。
 
-## 這門課沒教的
+## 判斷是否需要 Nakama：看既有後端缺哪一段
 
-**遊戲本身的網路同步。** relay 收到位置就轉發，沒有插值、預測、延遲補償，也沒有防作弊。這些是遊戲網路程式的核心，跟平台無關，而且值得一整門課；[Gaffer On Games](https://gafferongames.com/) 的系列文章是很好的起點。
+Day 5 用 Nakama 處理登入與 storage，Day 6 用 matchmaker 湊齊玩家，再由 hook 呼叫 Agones。這個接法說明：Agones 接收的是 allocation 請求，並不要求配對服務一定是 Nakama。已經有帳號、配對與授權系統的團隊，可以評估由既有後端完成同一段交接。
 
-**權威 server。** 要擋作弊，server 必須自己計算遊戲狀態，不能只轉發。常見的做法是用遊戲引擎做 dedicated server build，例如 Unity 搭配 [Agones 的 Unity SDK](https://agones.dev/site/docs/guides/client-sdks/unity/)，由引擎在 server 端跑完整的遊戲邏輯。
+反過來，如果這些功能還沒建立，Nakama 提供了可一起使用的 API 與 server runtime；代價是需要理解它的資料模型、資料庫與維運方式。本課驗過 migration、單一玩家 storage，以及兩位玩家的配對，尚未涵蓋 PostgreSQL 高可用、備份還原、正式金鑰與多節點行為。選它之前，要把這些需求納入試作。[Nakama 官方文件](https://heroiclabs.com/docs/nakama/) 可用來查各項功能與部署條件。
 
-**多區域與就近連線。** 玩家分散在各地時，要讓 client 量測到各區域的延遲再選最近的；Agones 內建的 ping service 就是為此設計的，搭配多叢集部署使用。
+| 團隊已有的能力 | 可評估的接法 | 還要驗證什麼 |
+|---|---|---|
+| 已有帳號與配對服務 | 既有服務在配對成立後建立 allocation | 授權、重試不重複分配、失敗如何回報玩家 |
+| 尚缺登入、storage 與配對 | 以 Nakama 串接這些功能 | 權限拒絕、並行寫入、資料庫維運與對外入口 |
+| 配對通知可能漏接 | 保存 assignment，提供主動查詢 | 舊 assignment 何時失效，如何避免把玩家送回失效 server |
 
-**spot 回收前的預告。** Azure Spot VM 被回收前，可以透過 Scheduled Events 收到通知（best effort，最多提前 30 秒）。這段時間夠不夠通知玩家、收掉對戰，以及通知沒有送到時怎麼辦，都要另外設計。
+Day 7 已驗證 notification 與 RPC 回傳同一份 assignment，但沒有演練完整重連。`get_assignment` 只讀資料，不會檢查伺服器是否仍存活。需要重連的服務，不能把「查得到」當成「還能連」。
 
-**Nakama 的正式維運。** PostgreSQL 高可用、備份還原、TLS、更換預設金鑰、多節點 Nakama，這些主題請見 [Nakama 的官方文件](https://heroiclabs.com/docs/nakama/)。
+## 判斷遊戲程序做到哪裡：echo、relay 與權威狀態
 
-**matchmaking 的其他路線。** Open Match 是 Nakama 內建 matchmaker 以外常被提到的路，但截至 2026-08，v1 已停止維護、v2 還沒有正式 release，還不適合在新專案採用，值得持續觀察。
+Day 9 換成 Unity SDK 後，登入、配對與 UDP 的分工沒有改變。真正讓兩位玩家看見彼此的，是 GameServer 由 echo 改成 relay。這提供一個清楚的驗證順序：先測路徑能通，再測資料會送到其他玩家，最後才檢查遊戲規則與同步品質。
+
+| 程序的行為 | 本課已證明 | 尚不能據此推論 |
+|---|---|---|
+| echo 回覆發送者 | 封包可以往返 | 玩家收到彼此資料 |
+| relay 轉送玩家位置 | 兩個視窗與 log 顯示雙向位置資料 | 網路零丟包、位置合法、無作弊 |
+| server 驗證輸入並計算狀態 | 本課未實作 | 已有權威遊戲邏輯或完整同步機制 |
+
+本章提到的 relay 是 Agones 上的獨立 UDP 程序。Nakama 另有透過自身 realtime socket 轉送的 [client relayed multiplayer](https://heroiclabs.com/docs/nakama/concepts/multiplayer/relayed/)，兩者的封包路徑與生命週期不同，不能只因名字相同就互換。
+
+## 決定前，補足與故障有關的證據
+
+Day 8 的時間線顯示：主動結束與程序崩潰後，很快就觀察到 GameServer 狀態改變；節點失效時，玩家探測先失敗，Node 與 GameServer 的狀態才陸續更新。它們測的是不同事件，也只有這組環境的觀察，不能排成通用效能排名，更不能當成玩家恢復時間。
+
+這次真正能帶進設計的判斷是：主動回報結束、觀察程序失敗與偵測節點失聯，各依賴不同訊號；只看 GameServer 計數會漏掉玩家已收不到回應的時段。下一次試作應同時保存 client 探測、節點、GameServer 與 metrics 的時間線，並確認補位後是恢復容量，還是也恢復了對戰狀態。
+
+以下幾項沒有在本課驗證，若需求包含它們，就應列入下一次試作：
+
+- **不同玩家的網路條件**：跨網路的延遲、遺失與亂序，以及 client 的插值、預測與延遲補償。Day 9 的兩個 player 都在同一台 Mac 上。
+- **不同中斷來源**：節點 drain、Spot 回收通知、更新與故障切換，不能直接沿用手動關機的結果。
+- **多區域與入口**：區域選擇、跨區分配、Nakama 對外 TLS，以及 proxy 容量與可用性。
+- **長期資料與身分**：資料庫還原、預設金鑰替換、配對資格驗證，以及憑證更新。
+
+## 想一想
+
+1. 團隊已有帳號與配對服務，還想使用 Agones，需要把整個後端換成 Nakama 嗎？請指出需要接上的介面。
+2. Fleet 已補回 Ready，玩家仍帶舊 token timeout，應優先檢查哪個責任範圍？
+3. 兩個同機 Unity player 的收發數量相符，還缺少哪些資料，才能評估正式玩家的網路體驗？
+
+## 小結
+
+是否採用整套平台，取決於對戰狀態、分配、封包入口與既有後端的需求。Agones 處理 GameServer 生命週期，Quilkin 處理本課的 UDP 路由，Nakama 提供玩家與配對 API；遊戲程式仍要負責規則、同步與結束條件。先選擇能回答目前問題的組合，再用實際失敗情境驗證缺少的部分，比一次採用全部元件更容易知道問題出在哪一段。
 
 ## 延伸閱讀
 
-想往下深挖，從這幾份開始：
+想再深入，可以從這幾份開始：
 
-- **[Agones overview](https://agones.dev/site/docs/overview/)** —— 把這十天用到的 `GameServer`、`Fleet`、`GameServerAllocation` 與 SDK sidecar 放回官方的整體架構裡再看一次。
-- **[Gaffer On Games](https://gafferongames.com/)** —— 遊戲網路程式的經典系列：UDP、可靠傳輸、狀態同步，對應「這門課沒教的」第一項。
-- **[Agones Unity SDK](https://agones.dev/site/docs/guides/client-sdks/unity/)** —— 往權威 server 走的起點，對應 relay 用到的 `Ready`、`Health`、`Shutdown`。
-- **[Nakama 文件](https://heroiclabs.com/docs/nakama/)** —— 正式維運、權威 match、排行榜與其他後端功能。
+- [Agones overview](https://agones.dev/site/docs/overview/)：對照 GameServer、Fleet、allocation 與 SDK 的責任。
+- [Agones Unity SDK](https://agones.dev/site/docs/guides/client-sdks/unity/)：使用 Unity 撰寫伺服器時的生命週期介面；本課只建置 macOS client，未驗證 dedicated server build。
+- [Nakama 文件](https://heroiclabs.com/docs/nakama/)：查詢資料模型、配對與正式部署的要求。
 
 ## 下一步
 
-Sprint 5 到這裡結束。回到[課程總覽](../index.md)，可以看到五個 sprint 各自的主題。
+Sprint 5 到這裡結束。回到[課程總覽](../index.md)，選擇下一個要深入驗證的主題。
 
 ---
 

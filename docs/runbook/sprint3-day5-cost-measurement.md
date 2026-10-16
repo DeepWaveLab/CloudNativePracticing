@@ -1,29 +1,16 @@
-# Day 5: 三條路線的成本量測——冷啟動、記憶體與映像大小
+# Day 5: 量測 wasm 與容器的成本——對照組、信賴區間與 shim 的記憶體
 
 ![WebAssembly 官方標誌](../assets/logos/webassembly-icon-color.svg){ align=right width="95" }
 
-> 前四天刻意一個比較宣稱都沒做,全部留到今天。這一章的重點不是三欄數字,是**怎麼判斷一個數字算不算數**——包括一個帶信賴區間的否定結論,以及一欄交白卷。
+你大概讀過這類說法：「wasm 冷啟動比容器快一個數量級」「wasm 比容器輕」。想在自己的叢集上驗證，最直接的做法是拿同一支程式，一次編成 wasm 交給 Day 4 裝好的 wasmedge shim，一次編成一般執行檔交給 runc，各啟動 50 次。結果出來，wasmedge 的中位數是 167 毫秒，runc 是 173.5 毫秒。可以說 wasm 快了 6.5 毫秒嗎？再跑一批，換成快 10.5 毫秒，但這次差值的信賴區間不再包含 0。
 
-!!! abstract "你在課程的哪裡"
-    - **Day 2–4**:三條路線各自跑起來了,每一章都標明「這個數字只跑一次、不作比較宣稱」。
-    - **今天**:把那些註記兌現。同一份原始碼編三個目標,在同一顆節點上量。
-    - **Day 6**:第三條路線 SpinKube,那一天會真的派 operator 去改節點。
+這一章在一顆節點上比較容器建立、執行到清理的總時間與記憶體，再說明映像大小的比較條件，重點放在每個數字量完之後要問的問題：量具本身有多少雜訊，差距有沒有大過雜訊，兩個數字是不是在同一個條件下量的。讀完之後，拿到兩組啟動時間或記憶體讀數時，你能判斷差距能不能拿來排名，也能說出 wasm 容器在節點上的記憶體花在哪裡。
 
-## 今天要走的路
+## 步驟 1: 先確認 Day 4 的 shim 還在不在 {#step-1}
 
-| 步驟 | 做什麼 |
-|---|---|
-| 1 | 驗證:節點層改動撐不過 VM 汰換 |
-| 2 | 一份原始碼,三個目標 |
-| 3 | 方法學試跑——先量地板 |
-| 4 | 冷啟動,兩批獨立的 n=50 |
-| 5 | 記憶體 |
+Day 4 在節點上裝了 109 MiB 的 wasmedge shim、在 containerd 設定裡加了 8 行，也建了 `wasmedge` 這個 RuntimeClass。如果兩章之間你把叢集停掉再啟動（`az aks stop`／`start`），可能遇到節點 VM 被替換，寫在舊 VM 磁碟上的東西就跟著消失。動手量之前，先確認節點現在的狀態。
 
-## 步驟 1: 先驗一個性質——節點層改動撐不過 VM 汰換
-
-[Day 4](sprint3-day4-wasmedge.md) 結束時,節點上還留著 wasmedge 的 shim 與那 8 行設定。**如果「VM 汰換會抹掉節點層的手動改動」這個性質成立,它們現在應該已經不在了**——先驗這件事,Day 8 的可逆性驗收要靠它。
-
-還沒動任何東西時的快照,對照 Day 1 基準:
+做法是照 [Day 1 步驟 3](sprint3-day1-three-generations.md) 存基準的同一套指令，再存一份目前的節點狀態（檔名用 `day5-s0-` 開頭），跟 Day 1 的基準比對；`runtimeHandlers` 是 kubelet 回報「這顆節點實際能跑哪些 handler」的欄位，Day 1 看過：
 
 ```console
 $ diff <Day1 基準>/baseline-containerd-config.toml day5-s0-containerd-config.toml
@@ -38,9 +25,9 @@ $ kubectl get node -o jsonpath='{…runtimeHandlers}'
 ['', 'runc', 'untrusted']                      ← wasmedge 不在了
 ```
 
-**成立。** Day 4 加的 8 行設定、109 MiB 的 shim、`runtimeHandlers` 裡的 `wasmedge`,全部隨 VM 消失。
+三處都回到 Day 1 的樣子：containerd 設定和基準逐字相同，shim 檔案不在，`runtimeHandlers` 裡也沒有 `wasmedge`。Day 4 在節點上做的改動，全部隨舊 VM 消失。
 
-### 但 RuntimeClass 留下來了
+再看叢集這一側：
 
 ```console
 $ kubectl get runtimeclass
@@ -52,30 +39,78 @@ wasmedge            wasmedge          ← 還在
 wasmtime-spin-v2    wasmtime-spin-v2
 ```
 
-RuntimeClass 住在 etcd,不隨 VM 生命週期消失。**於是叢集重啟後的那一刻,它處於一個特定狀態:`wasmedge` 這個名字在,而節點上沒有任何東西實作它。**
+`wasmedge` 這個 RuntimeClass 還在。RuntimeClass 是存在 etcd 裡的叢集物件，不會因為換了 VM 就消失。下面這張圖把兩側放在一起，上排是 Day 4 結束時，下排是 VM 換過之後：
 
-跟 [Day 1 地雷 2](sprint3-day1-three-generations.md#mine-2) 那個預設就壞掉的 `kata-vm-isolation` 變成同一類——差別只在這次是自己造成的。記成[地雷 1](#mine-1)。
+![兩排對照：Day 4 結束時，叢集層有 RuntimeClass wasmedge，節點層有 containerd 設定的 8 行、109 MiB 的 shim 和 runtimeHandlers 裡的 wasmedge；VM 汰換之後，RuntimeClass 仍在，節點層三樣都消失，於是指名 wasmedge 的 pod 會停在 ContainerCreating](../assets/diagrams/s3d5-two-layers.svg)
 
-!!! warning "這件事改變了 Day 8 的驗收設計"
-    Day 8 原訂「移除全部 SpinKube 元件之後,節點的 containerd 設定與 Day 1 基準逐字比對」。前提成立,**但今天的結果同時暴露一個弱點**:
+我們可以從圖上看到，VM 換過之後，叢集處於「名字還在、實作不在」的狀態。這跟 Day 1 看到的 `kata-vm-isolation` 是同一類問題：API server 不會檢查 RuntimeClass 指向的 handler 在節點上存不存在，本例沒有排程標籤限制，Pod 排上節點後會因 handler 缺失而停在 `ContainerCreating`；Day 1 的 Kata 例子則先被 selector 擋在排程階段。要判斷 handler 在不在，看節點的 `runtimeHandlers`，不要看 `kubectl get runtimeclass`。遇到這個狀況的處理方式見[疑難排解：VM 換過之後，RuntimeClass 還在但 pod 起不來](#mine-1)。
 
-    節點層改動本來就撐不過一次停機,所以「比對結果相同」有兩種解釋——**解除安裝乾淨,或 VM 被換掉了**。兩者在 diff 上長得一模一樣。
+本課在 `az aks stop`／`start` 後觀察到節點替換，不代表每次停止、啟動都一定更換 VM。節點映像升級、spot 節點被回收也會換掉 VM，可以預期同樣的結果，但本課沒有實際驗證。
 
-    **Day 8 要驗的是前者,所以那天的解除安裝與比對必須在同一個 VM 生命週期內完成,中途不能停機。**
+這個結果也影響 [Day 8](sprint3-day8-reversibility.md) 的做法。Day 8 要移除 SpinKube，再把節點的 containerd 設定和 Day 1 的基準逐字比對，確認拆得乾淨。如果比對期間換了 VM，結果相同也可能只是新節點沒有安裝過那些元件。所以 Day 8 的移除和比對要在同一個 VM 生命週期內做完，中間不能停機。
 
-因為這個結果,今天要量 wasmedge 就得先重裝一次。重裝一次就回到 Day 4 的狀態——**順帶證明 Day 4 的安裝程序是可重現的。**
+要量 wasmedge，就得先把 shim 裝回去：重做 Day 4 的[安裝 shim](sprint3-day4-wasmedge.md#install-shim)、[設定 handler](sprint3-day4-wasmedge.md#configure-handler)與[映像解包設定](sprint3-day4-wasmedge.md#run-images)。RuntimeClass 還在時，不必重建它。裝完在本機執行完整指令 `kubectl get node -o jsonpath='{.items[0].status.runtimeHandlers}'`，`runtimeHandlers` 裡應該又出現 `wasmedge`。
 
-## 步驟 2: 一份原始碼,三個目標
+## 步驟 2: 一份原始碼，三個目標
 
-[Day 4](sprint3-day4-wasmedge.md#gate) 證明了跨執行期的「同一支程式」不存在——wasmCloud 吃 component、wasmedge shim 只吃 core module,差在第 5 個位元組。**所以今天要自己編。**
+[Day 4](sprint3-day4-wasmedge.md#gate) 發現 wasm 有兩種格式：wasmedge shim 只吃 core module，wasmCloud 只吃 component。網路上現成的範例程式各自編成其中一種，拿兩支不同的程式比，量到的差距可能來自程式本身。所以這一章自己寫一支程式，從同一份原始碼編出三個版本。
+
+Rust 用 **target triple** 指定要編給哪一種執行環境，它是一串用連字號串起來的名字，寫出 CPU 架構、作業系統和執行環境。這裡用到三個：
+
+| target triple | 產出 | 給誰跑 |
+|---|---|---|
+| `wasm32-wasip1` | core module | wasmedge shim |
+| `wasm32-wasip2` | component | wasmCloud |
+| `x86_64-unknown-linux-musl` | 靜態連結的 Linux 執行檔 | runc |
+
+原生版要是 linux/amd64 的執行檔，所以在叢集裡開一顆裝了 Rust 工具鏈的 pod 來編：
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: builder
+  namespace: wasmlab
+spec:
+  restartPolicy: Never
+  containers:
+    - name: rust
+      image: rust:1-bookworm
+      command: ["sleep", "infinity"]
+```
 
 ```bash
-# one crate, one release profile, three target triples
-rustup target add wasm32-wasip1 wasm32-wasip2 x86_64-unknown-linux-musl
-for T in wasm32-wasip1 wasm32-wasip2 x86_64-unknown-linux-musl; do
-  cargo build --release --target "$T"
-done
+kubectl apply -f builder.yaml
+kubectl -n wasmlab exec -it builder -- bash
 ```
+
+musl 是 Linux 的 C 標準函式庫；這裡把需要的函式一起連結進執行檔，讓空映像也能執行。進到 pod 之後，先裝 musl 的工具，再開一個新專案：
+
+```bash
+apt-get update -qq
+apt-get install -y -qq musl-tools
+mkdir -p /work && cd /work
+cargo new --bin payload
+cd payload
+```
+
+程式有兩種模式。不帶參數時印一行就結束，計時涵蓋這次容器建立、程式執行與清理完成；帶 `stay <秒數>` 時會停住不結束，讓我們有時間去讀它佔了多少記憶體。把 `src/main.rs` 換成：
+
+```rust
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("stay") {
+        let secs: u64 = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(300);
+        println!("cnp-sprint3-day5 payload: resident for {secs}s");
+        std::thread::sleep(std::time::Duration::from_secs(secs));
+        return;
+    }
+    let who = if args.is_empty() { "world".to_string() } else { args.join(" ") };
+    println!("cnp-sprint3-day5 payload: hello {who}");
+}
+```
+
+`Cargo.toml` 的 release 設定控制最佳化方式。三個版本共用縮小產物、跨模組最佳化、移除符號與 panic 時直接結束的選項，避免編譯選項成為另一個差異：
 
 ```toml
 [profile.release]
@@ -85,35 +120,121 @@ strip = true
 panic = "abort"
 ```
 
-**三者唯一的差別是 target triple。** 程式本身刻意做兩件事:一次性模式印一行就結束(冷啟動取樣量的就是這個),`stay <secs>` 模式常駐(記憶體從 cgroup 讀出來,不用猜)。
+然後一次編出三個目標：
 
-打包成四個 OCI reference:
+```bash
+# one crate, one release profile, three target triples
+rustup target add wasm32-wasip1 wasm32-wasip2 x86_64-unknown-linux-musl
+for T in wasm32-wasip1 wasm32-wasip2 x86_64-unknown-linux-musl; do
+  cargo build --release --target "$T"
+done
+```
+
+三次建置使用相同原始碼與 release 選項，改變的是 target triple；各目標仍會連入不同的標準函式庫與執行期支援。後面量到的差距，就不會是「兩支程式寫得不一樣」造成的。
+
+### 打包成映像
+
+三個成品要包成 OCI 映像，containerd 和 wasmCloud 才拉得到。rootfs 是容器看見的檔案系統；這裡用 tar 打包。artifact 泛指 registry 裡儲存的成品，不一定是 Linux 容器映像。本課包了四個：
 
 | 後綴 | 內容 | 給誰 |
 |---|---|---|
-| `-wasm` | core module,空 base,tar rootfs | wasmedge shim |
-| `-native-scratch` | 原生 ELF,空 base,tar rootfs | runc,**無 base image** |
-| `-native-debian` | 原生 ELF 疊在 `debian:12-slim` 上 | runc,**有 base image** |
-| `-comp` | component,`application/wasm` artifact | wasmCloud |
+| `-wasm` | core module，空 base，tar rootfs | wasmedge shim |
+| `-native-scratch` | 原生執行檔，空 base，tar rootfs | runc，**無 base image** |
+| `-native-debian` | 原生執行檔疊在 `debian:12-slim` 上 | runc，**有 base image** |
+| `-comp` | component，`application/wasm` artifact | wasmCloud |
 
-`-wasm` 與 `-native-scratch` **是逐字相同的打包配方**——那是映像大小唯一有可比性的前提。
+`-wasm` 和 `-native-scratch` 用的是同一套打包方式：一層 tar，裡面只有那一個檔案，沒有任何 base image。兩者的映像大小要能比較，這是前提；如果一邊多疊了一層作業系統，比到的就是那層作業系統的大小。`-native-debian` 是另一種對照，代表一般疊在 Linux 發行版上的應用容器。
 
-## 步驟 3: 先量地板
+打包用 `crane`（v0.21.9）和 `oras`（v1.3.3）兩個工具，在 builder pod 裡執行。先在 builder 安裝對應版本：
 
-量測在**節點上、用 `ctr`** 進行,把 kubelet、scheduler、API server 的來回排除在外。四個設計要點:
+```bash
+curl -sSL https://github.com/google/go-containerregistry/releases/download/v0.21.9/go-containerregistry_Linux_x86_64.tar.gz | tar xz -C /usr/local/bin crane
+curl -sSL https://github.com/oras-project/oras/releases/download/v1.3.3/oras_1.3.3_linux_amd64.tar.gz | tar xz -C /usr/local/bin oras
+```
 
-- **`harness` 是 null control**:同一支 `ctr` 二進位檔做一次 no-op RPC。**兩個 runtime 之間的差異必須大於這個地板加上樣本離散度,否則不算結果。**
-- 每個 runtime 先跑一次暖機,第一個樣本不付 page cache 的錢。
-- 兩個 runtime **交錯**取樣,抵銷時間漂移。
-- 統計用**中位數與 IQR**,不用平均與標準差——樣本有硬地板與長右尾,平均數不是中間。
+本課推到 ttl.sh，這是不用帳號的臨時 registry，tag 寫 `1h` 代表映像一小時後自動刪除，量測要在這段時間內做完；想留久一點，換成自己的 registry。`<prefix>` 換成一串自己的隨機字：
+
+```bash
+mkdir -p /out
+cp target/wasm32-wasip1/release/payload.wasm        /out/payload-wasip1.wasm
+cp target/wasm32-wasip2/release/payload.wasm        /out/payload-wasip2.wasm
+cp target/x86_64-unknown-linux-musl/release/payload /out/payload-native
+cd /out
+R=ttl.sh/<prefix>
+
+tar --owner=0 --group=0 --mode=0755 -cf wasm-layer.tar --transform 's,payload-wasip1.wasm,payload.wasm,' payload-wasip1.wasm
+tar --owner=0 --group=0 --mode=0755 -cf native-layer.tar --transform 's,payload-native,payload,' payload-native
+
+crane append --oci-empty-base -f wasm-layer.tar   -t "${R}-wasm-base:1h"   --platform linux/amd64
+crane mutate "${R}-wasm-base:1h"   --entrypoint /payload.wasm -t "${R}-wasm:1h"
+crane append --oci-empty-base -f native-layer.tar -t "${R}-native-base:1h" --platform linux/amd64
+crane mutate "${R}-native-base:1h" --entrypoint /payload      -t "${R}-native-scratch:1h"
+crane append -b debian:12-slim -f native-layer.tar -t "${R}-debian-base:1h"
+crane mutate "${R}-debian-base:1h" --entrypoint /payload      -t "${R}-native-debian:1h"
+
+echo '{}' > wasm-config.json
+cp payload-wasip2.wasm payload.wasm
+oras push "${R}-comp:1h" \
+  --config wasm-config.json:application/vnd.wasm.config.v0+json \
+  payload.wasm:application/wasm
+```
+
+映像大小這一欄，本課的驗證沒有留下成品的大小紀錄，所以本章不給數字。自己做的話，在 `/out` 裡跑 `ls -l` 看三個檔案的大小，再用 `crane manifest` 看每個映像的 layer 大小；比較時記得只拿 `-wasm` 和 `-native-scratch` 這兩個打包方式相同的映像來比。
+
+## 步驟 3: 先量量具本身的雜訊
+
+容器的單次總時間在節點上用 `ctr` 量。`ctr` 是 containerd 附的命令列工具，Day 4 用它查過映像。直接用 `ctr` 啟動容器，不經過 API server、scheduler 和 kubelet，計時從執行 `ctr run --rm` 到命令返回，包含命令列工具、RPC、容器建立、程式執行與退出清理。它沒有把純啟動階段分離出來，也不是服務能接收請求的時間。
+
+用 node-shell 進到節點（Day 1 建的那顆特權 pod）：
+
+```bash
+NODE_SHELL_POD=$(kubectl -n wasmlab get pod -l app=node-shell -o jsonpath='{.items[0].metadata.name}')
+kubectl -n wasmlab exec -it "$NODE_SHELL_POD" -- nsenter -t 1 -m -- bash
+```
+
+前面在 builder 的操作完成後，回到本機再進節點 shell。量測用獨立的 containerd namespace `cnp5`，跟 kubelet 用的 `k8s.io` 分開。先用 `ctr -n cnp5 images pull` 把 `-wasm` 和 `-native-scratch` 兩個映像拉到節點上，量測時就不會把下載時間算進去。
+
+在開始量之前，要先回答一個問題：計時這件事本身要花多少時間、會晃動多少？`ctr` 每次要啟動一個新的行程、連到 containerd 再回來，這段時間不管跑什麼容器都會付。單一樣本的波動不能直接當成兩組差值的判定門檻，後面會用重抽樣估計差值的不確定性。
+
+所以先量一組**對照組**（null control）：用同一支 `ctr` 下一個什麼都不做的指令 `ctr version`，只問 containerd 的版本，不建立任何容器。這組數字讓我們知道基本命令往返的耗時；它不是 runtime 差距必須超過的門檻。下面保留歷史採樣程式，先量 50 次對照組，再交錯量兩個 runtime。這份程式沒有檢查每次命令是否成功，失敗也會記下時間，因此不能直接拿來收集新的有效樣本：
+
+```bash
+W=ttl.sh/<prefix>-wasm:1h
+C=ttl.sh/<prefix>-native-scratch:1h
+
+# warm-up so the first sample is not paying for page cache
+ctr -n cnp5 run --rm --runtime io.containerd.wasmedge.v1 "$W" warm-w >/dev/null 2>&1
+ctr -n cnp5 run --rm "$C" warm-c >/dev/null 2>&1
+
+for i in $(seq 1 50); do
+  t0=$(date +%s%N); ctr -n cnp5 version >/dev/null 2>&1; t1=$(date +%s%N)
+  echo "harness $(( (t1 - t0) / 1000000 ))"
+done
+for i in $(seq 1 50); do
+  t0=$(date +%s%N); ctr -n cnp5 run --rm --runtime io.containerd.wasmedge.v1 "$W" "w$RANDOM$i" >/dev/null 2>&1; t1=$(date +%s%N)
+  echo "wasmedge $(( (t1 - t0) / 1000000 ))"
+  t0=$(date +%s%N); ctr -n cnp5 run --rm "$C" "c$RANDOM$i" >/dev/null 2>&1; t1=$(date +%s%N)
+  echo "runc $(( (t1 - t0) / 1000000 ))"
+done
+```
+
+重新量測時，應先確認映像可執行，每次保留退出碼；失敗立即停止該組採樣並顯示錯誤，不得把失敗時間計入。這次歷史紀錄沒有逐筆退出碼，無法補證每個樣本都成功，因此下面數字只作方法與既有資料判讀，不能當成已通過這項條件的新效能結果。
+
+有兩個細節值得注意。正式取樣前，每個 runtime 先各跑一次暖機，讓相關的檔案先進到記憶體的快取裡，第一個樣本不會因為讀磁碟而特別慢。另外，wasmedge 和 runc 是一個接一個交錯跑，不是先跑完 50 次 wasmedge 再跑 50 次 runc；如果量測途中節點變忙或變閒，可減少先後次序造成的偏差，但不能保證兩邊受到完全相同的影響。
+
+整理這些樣本時用**中位數**和 **IQR**。中位數是把 50 個數字排好之後最中間的那個；IQR（四分位距）是排在第 75% 的數字減掉排在第 25% 的數字，也就是中間那一半樣本分布得多寬。不用平均數，是因為啟動時間有一個降不下去的最低值，偶爾又會冒出特別慢的一次，平均數會被少數幾個慢的樣本往上拉，不能代表「一般的一次」。
+
+對照組的結果：
 
 ```text
 harness   n=50   median 16.0 ms   IQR 1.0   (min 15.0, max 30.0)
 ```
 
-**16 毫秒,IQR 只有 1 毫秒。** 量具本身的雜訊小到可以忽略,所以後面量到的離散度是被測物的。
+這批版本查詢的中位數是 16 毫秒，IQR 為 1 毫秒。它的變異較小，但不能據此把容器樣本的其他變異全部歸因給 runtime。
 
-## 步驟 4: 冷啟動——兩批獨立的 n=50
+## 步驟 4: 建立、執行與清理，兩批各 n=50
+
+同樣的程序跑兩批，每批各 50 個樣本。下面是兩批的統計，欄位依序是樣本數、最小值、第 25%、中位數、第 75%、最大值和 IQR（單位毫秒）：
 
 ```text
 === 批次 A
@@ -128,27 +249,11 @@ wasmedge   50   147.0   154.0   161.0   169.0   196.0    15.0
 runc       50   148.0   165.0   171.5   181.8   255.0    16.8
 ```
 
-用 bootstrap(10000 次重抽,固定亂數種子)算中位數差的 95% 信賴區間:
+把五組中位數畫在同一把尺上：
 
-```text
-=== 批次 A:wasmedge vs runc
-observed difference = -6.5 ms
-bootstrap 95% CI    = [-16.0, +1.0] ms
-verdict: NOT MEASURABLE (CI covers 0)
-
-=== 批次 B:wasmedge vs runc
-observed difference = -10.5 ms
-bootstrap 95% CI    = [-16.5, -5.0] ms
-verdict: measurable
-```
-
-**兩批獨立取樣的判定不一致。** 批次 A 說量不出來,批次 B 說量得出來——但只差 10.5 毫秒,而 CI 下緣只到 -5。
-
-先把五組中位數畫在同一把尺上——**wasmedge 與 runc 幾乎貼在一起,而兩者都離地板很遠**:
-
-<svg viewBox="0 0 660 210" role="img" aria-label="冷啟動中位數(毫秒,每批 n=50)" width="100%" style="max-width:660px; font-family: var(--md-text-font-family, sans-serif);">
-<text x="0" y="18" font-size="15" font-weight="600" fill="var(--md-default-fg-color)">冷啟動中位數(毫秒,每批 n=50)</text>
-<text x="160" y="50" font-size="13" text-anchor="end" fill="var(--md-default-fg-color)">地板(空指令)</text>
+<svg viewBox="0 0 660 210" role="img" aria-label="建立至清理的中位數(毫秒,每批 n=50)" width="100%" style="max-width:660px; font-family: var(--md-text-font-family, sans-serif);">
+<text x="0" y="18" font-size="15" font-weight="600" fill="var(--md-default-fg-color)">建立至清理的中位數(毫秒,每批 n=50)</text>
+<text x="160" y="50" font-size="13" text-anchor="end" fill="var(--md-default-fg-color)">版本查詢</text>
 <rect x="170" y="34" width="33" height="22" rx="2" fill="#9aa0a6"/>
 <text x="211" y="50" font-size="13" font-weight="600" fill="var(--md-default-fg-color)">16</text>
 <text x="160" y="84" font-size="13" text-anchor="end" fill="var(--md-default-fg-color)">wasmedge 批次A</text>
@@ -165,30 +270,66 @@ verdict: measurable
 <text x="530" y="186" font-size="13" font-weight="600" fill="var(--md-default-fg-color)">171.5</text>
 </svg>
 
+wasmedge 和 runc 的長條幾乎一樣長，兩者都遠高於 16 毫秒的地板。兩批的中位數都是 wasmedge 略低，分別低 6.5 和 10.5 毫秒。問題在於：wasmedge 自己的 IQR 就有 15 到 22.5 毫秒，差 6.5 毫秒會不會只是這一批剛好抽到比較快的幾次？
 
-對照兩者與地板的距離,差距就很清楚:
+### 用 bootstrap 估計差距的範圍
+
+回答這個問題用的是 **bootstrap 信賴區間**。做法是拿手上這 50 個 wasmedge 樣本，從裡面隨機抽 50 次，每次抽完放回去（同一個樣本可以被抽到不只一次），得到一組「重抽」的樣本；runc 也一樣抽一組，算兩組中位數的差。這樣重複一萬次，就有一萬個差值。把最小的 2.5% 和最大的 2.5% 去掉，剩下的範圍叫 95% 信賴區間，意思是：以手上的資料來看，真正的差距大致落在這個範圍內。
+
+判讀規則很簡單：區間跨過 0，代表「兩者一樣快」也在合理範圍內，這批資料分不出誰快；區間整個在 0 的某一邊，差距才算成立。亂數用固定的種子，同一份資料每次算出來的區間都一樣。
+
+可在本機下載[統計程式](../assets/labs/s3d5/50-effect-vs-noise.py)、[批次 A](../assets/labs/s3d5/samples-node-n50.txt)與[批次 B](../assets/labs/s3d5/samples-node-n50b.txt)。以 `python3 50-effect-vs-noise.py wasmedge runc < samples-node-n50.txt` 重算 A，再換成 B 的檔名；這只分析已保存資料，不會連線叢集。兩批的結果：
+
+```text
+=== 批次 A:wasmedge vs runc
+observed difference = -6.5 ms
+bootstrap 95% CI    = [-16.0, +1.0] ms
+verdict: NOT MEASURABLE (CI covers 0)
+
+=== 批次 B:wasmedge vs runc
+observed difference = -10.5 ms
+bootstrap 95% CI    = [-16.5, -5.0] ms
+verdict: measurable
+```
+
+畫在一條數線上，橘色虛線是「差距為 0」：
+
+![數線上兩條信賴區間：批次 A 從 -16.0 到 +1.0 毫秒，觀察值 -6.5，跨過 0；批次 B 從 -16.5 到 -5.0 毫秒，觀察值 -10.5，沒有跨過 0。對照之下，wasmedge 減地板的區間落在 +141 到 +157 毫秒](../assets/diagrams/s3d5-ci.svg)
+
+照著圖看兩件事。第一，批次 A 的區間剛好越過 0，批次 B 的區間停在 -5，兩批的點估計都偏向 wasmedge 較短，區間也大幅重疊；差別是 A 包含 0、B 不包含 0，不能說效果方向相反。第二，就算採信批次 B，差距也在 5 到 16.5 毫秒之間，跟一次啟動的 160 多毫秒比，約占數個百分點，還要看這個差距對應用是否有實際影響。
+
+同樣的方法拿來比 wasmedge 和地板：
 
 ```text
 wasmedge vs harness   批次 A CI = [+144.0, +157.0] ms   measurable
                       批次 B CI = [+141.0, +149.5] ms   measurable
 ```
 
-### 判定
+wasmedge 比地板多出約 150 毫秒，兩批都很明確。
 
-!!! note "能說什麼、不能說什麼"
-    **不能說**:誰的冷啟動比較快。在這個量測平面、這個工作負載、n=50 兩批的條件下,**wasmedge 與 runc 的差異落在雜訊邊緣。**
+### 這組數字能說什麼
 
-    **可以說**:兩者都在 **160–175 毫秒**這個量級,而**那 150 毫秒的絕大部分是容器管線本身**(`ctr` → containerd → shim → cgroup 建立),不是執行期在跑 wasm 或跑原生碼。
+在這個條件下，兩組「建立、執行、清理」總時間的中位數約為 160–175 毫秒。A 的差值區間包含 0，B 不包含 0；現有資料支持的範圍有限，又缺少逐筆退出碼，不能用來宣稱一般的 wasm 冷啟動排名。
 
-這一條直接牴觸「wasm 冷啟動比容器快一個數量級」這類說法。**至少在「用 containerd 當容器跑」這條路上,那個數量級不存在——因為省不掉的是管線,不是執行期。**
+wasmedge 比版本查詢多出的約 150 毫秒，包含好幾個階段。本課沒有分段計時，不能判定其中多少來自 cgroup、shim、程式本身或清理。若要比較純啟動或 HTTP 可用時間，必須另選一致的開始與結束條件。
 
-**這不代表 wasm 的快啟動是假的。** 它代表的是:**那個優勢發生在別的地方**(例如一個行程內載入上千個實例、或 FaaS 的 per-request 啟動),而**不會出現在「把 wasm 當成 Pod 來跑」這條路上**。要拿到那個優勢,得用 Day 2 那種 host 模型,而 host 模型的代價 Day 2 已經量過了。
+增加樣本與批次可讓估計更有依據，但不保證某一種判定一定成立。本課沒有跑第三批。
 
-## 步驟 5: 記憶體——差異方向跟宣傳相反
+## 步驟 5: 記憶體
 
-### shim 的常駐與邊際成本
+### shim 的記憶體：觀察並行容器增加時的用量 {#shim-memory}
 
-用 PSS 不用 RSS(shim 的 forked 行程之間共享頁面,RSS 會重複計算),取 1／2／3 個並行容器:
+每個容器在節點上都有一個 shim 行程替它跟 containerd 溝通（Day 1 追過這條路徑）。要量 shim 吃多少記憶體，第一個想到的是 `ps` 的 RSS 欄位，但 RSS 會算錯：RSS 是一個行程用到的全部實體記憶體，包含跟其他行程共用的部分。wasmedge 的 shim 會分出好幾個行程，它們共用同一份程式碼，用 RSS 加總會把共用的部分重複算好幾次。
+
+所以這裡用 **PSS**（proportional set size）：共用的頁面按共用的行程數平均分攤，每個行程只算自己那一份，加總起來就不會重複。PSS 可以從 `/proc/<pid>/smaps_rollup` 讀到：
+
+```bash
+for p in $(pgrep -f containerd-shim); do awk '/^Pss:/{print $2}' /proc/$p/smaps_rollup; done
+```
+
+（這會把節點上所有 shim 都算進去；本課只加總命令列裡帶 `cnp5` 的那些，也就是自己用 `ctr` 啟動的容器。）
+
+實際使用的[並行取樣腳本](../assets/labs/s3d5/52-measure-shim-scaling.sh)在節點執行，參數為打包時的 `<prefix>`，僅統計 `cnp5` namespace 的 shim。它依序建立 1、2、3 個 `stay` 容器，每組等 6 秒再讀 PSS，清理後才換下一組。上面的泛用 `pgrep` 只是讀 PSS 的示意，不能直接拿它加總全節點來重現以下數字：
 
 ```text
 wasmedge n=1 shim_pss_KiB=49235  shim_procs=4
@@ -199,14 +340,14 @@ runc     n=2 shim_pss_KiB=9904   shim_procs=2
 runc     n=3 shim_pss_KiB=13885  shim_procs=3
 ```
 
-線性擬合:
+以下是原紀錄從 1–3 個容器樣本推估的固定項與每容器增量。當時用「常駐」稱呼固定項，但沒有直接量過零容器時的用量，不能當成零負載實測，也不能直接套到任意容器數：
 
-| | 常駐 | 每多一個容器 | 每個容器的 shim 行程數 |
-|---|---|---|---|
-| **wasmedge** | **38.8 MiB** | **+9.3 MiB** | **4** |
-| **runc** | 0.1 MiB | +4.5 MiB | 1 |
+```text
+wasmedge  常駐 38.8 MiB  +9.3 MiB/容器  4 行程/容器
+runc      常駐  0.1 MiB  +4.5 MiB/容器  1 行程/容器
+```
 
-畫出來一眼就看到兩件事:**wasmedge 起點就高(常駐成本),而且每多一個容器,跟 runc 的差距愈拉愈開**:
+畫成長條圖：
 
 <svg viewBox="0 0 660 235" role="img" aria-label="shim 記憶體對並行容器數" width="100%" style="max-width:660px; font-family: var(--md-text-font-family, sans-serif);">
 <text x="0" y="18" font-size="15" font-weight="600" fill="var(--md-default-fg-color)">shim 記憶體 PSS(MiB)對並行容器數</text>
@@ -228,11 +369,19 @@ runc     n=3 shim_pss_KiB=13885  shim_procs=3
 <text x="207" y="211" font-size="12.5" font-weight="600" fill="var(--md-default-fg-color)">13.6</text>
 </svg>
 
-**兩個結構性差異**:wasmedge 有 38.8 MiB 的常駐成本(整個 WasmEdge 執行期靜態連結在 shim 裡),而且**每個 wasm 容器開 4 個 shim 行程,runc 開 1 個**。記成[地雷 2](#mine-2)。
+圖上是直接量到的 PSS：1–3 個容器時，wasmedge 約 48–67 MiB，runc 約 4.6–13.6 MiB。這組樣本中，wasmedge 每個容器有 4 個 shim 行程，runc 有 1 個；但資料沒有把每一頁記憶體的用途分開，不能把推估的固定項全歸給執行期程式碼。
 
-### 容器自身的 cgroup
+固定項加上容器數乘以增量，可以作為這組樣本的近似模型。要用於更大規模的容量規劃，還要在目標容器數與工作負載下取樣；shim 檔案大小也不等於執行時的實體記憶體用量。
 
-同一份原始碼,`stay` 模式常駐時讀 cgroup:
+### 容器自己的記憶體
+
+shim 之外，容器裡的程式自己用多少？cgroup v2 是 Linux 用來分組計帳與限制資源的機制，每個容器在它底下有自己的目錄，其中 `memory.current` 是目前算在這個容器頭上的記憶體，包含它與子 cgroup 的計帳用量及檔案快取等項目；它不是記憶體限制或峰值，也不能直接當作 RSS。以下是建立與讀值的簡寫。實際採樣在啟動後等 5 秒，從容器 PID 的 `/proc/<pid>/cgroup` 取得路徑，再讀 `memory.current`；不能假設每個節點都會使用下面簡寫的固定路徑。完整程序見[記憶體取樣腳本](../assets/labs/s3d5/51-measure-memory.sh)：
+
+```bash
+ctr -n cnp5 run -d --runtime io.containerd.wasmedge.v1 "$W" memw /payload.wasm stay 120
+ctr -n cnp5 run -d "$C" memc /payload stay 120
+cat /sys/fs/cgroup/cnp5/memw/memory.current /sys/fs/cgroup/cnp5/memc/memory.current
+```
 
 ```text
 --- wasmedge
@@ -245,11 +394,13 @@ runc     n=3 shim_pss_KiB=13885  shim_procs=3
   61077   316 payload
 ```
 
-**wasm 版的常駐記憶體是原生版的 5.4 倍。**
+同一份原始碼，wasm 版的 `memory.current` 是 1.53 MiB，原生版是 0.28 MiB，約 5.4 倍。wasm 版除了程式本身，還要在容器裡把 WasmEdge 執行期跑起來。下面的 `ps` 輸出是同一個行程的 RSS，跟上一節說的一樣包含共用的頁面，所以不拿來比較。
 
-(順帶一個實作細節:wasm 容器裡的行程叫 `youki:[2:INIT]`——runwasi 內部用 youki 這個 Rust 的 OCI 執行期函式庫。)
+wasm 容器裡的行程名稱是 `youki:[2:INIT]`。youki 是一套用 Rust 寫的 OCI 容器執行期，runwasi 用它的函式庫來建立容器，所以行程名稱帶著它的名字。
 
 ### 磁碟
+
+shim 檔案的大小：
 
 ```text
 /usr/bin/containerd-shim-runc-v2              8.4 MiB
@@ -266,10 +417,15 @@ runc     n=3 shim_pss_KiB=13885  shim_procs=3
 <text x="567" y="84" font-size="13" font-weight="600" fill="var(--md-default-fg-color)">109.2</text>
 </svg>
 
+wasmedge 的 shim 大了 13 倍，這支檔案包含靜態連結的執行期。但磁碟大小不能換算為等量的常駐記憶體。
 
-### wasmCloud 那一側:一個量不到的格子
+把這一步的數字放在一起看：wasm 檔案本身很小，但在節點上跑起來，本次量到的 shim PSS 與容器 cgroup 用量都比 runc 高。做容量規劃時要算的是跑起來之後的記憶體，不是 wasm 檔案的大小。
 
-想在**乾淨的 host** 上量單一元件的記憶體(避開 [Day 2](sprint3-day2-wasmcloud.md) 那個「卸載元件不會把記憶體還給 host 行程」的陷阱),做法是刪掉一顆 host pod 讓它重建:
+要注意這裡的 runc 對照組是空 base 的靜態執行檔，這個對照組沒有加上 Linux 發行版的檔案層。一般應用容器疊在 Linux 發行版上，結果可能不同；本課打包了 `-native-debian`，但沒有拿它來量。
+
+### wasmCloud 那一側：量不到單一元件
+
+wasmCloud 的元件跑在 host 這顆 pod 裡，要量一個元件吃多少記憶體，得先有一顆沒跑過任何元件的 host。[Day 2](sprint3-day2-wasmcloud.md) 看過，元件停掉之後記憶體不會還給 host 行程，跑過元件的 host 讀數已經被墊高。所以這裡刪掉一顆 host pod 讓它重建，每 4 秒讀一次新 pod 的記憶體，同時從 log 數它啟動了幾個 workload：
 
 ```text
 new host pod: hostgroup-default-…
@@ -278,111 +434,83 @@ t+4s   working_set_bytes=4800512  workloads_started=0
 t+160s working_set_bytes=4837376  workloads_started=0
 ```
 
-**160 秒內 `workloads_started` 一直是 0。**
+160 秒內，新 host 一個 workload 都沒有分到。原因是 [Day 3](sprint3-day3-wasmcloud-distributed.md) 看過的行為：wasmCloud 不會重新平衡，新加入的 host 不會分到既有的 workload。這樣做只會得到一顆一直空著的 host，正確的順序見[疑難排解：乾淨的 host 一直分不到 workload](#mine-3)。
 
-**這個量測失敗了,而失敗的原因是 [Day 3 的發現](sprint3-day3-wasmcloud-distributed.md)**:wasmCloud 不重新平衡,新加入的 host 不會分到既有的 workload。所以「乾淨 host + 一個元件」這個組合沒拿到。記成[地雷 3](#mine-3)。
+能拿到的只有兩端：空 host 約 4.80 MB，帶著 6 個 workload 的 host 約 26.65 MB。那 6 個是 Day 2、Day 3 部署的 blobby 和 hello-world 混在一起，不是本章編的程式，不能除出每個元件多少。
 
-拿到的只有兩端:空 host 4.80 MB、帶 6 個 workload 的 host 26.65 MB。**那 6 個是 blobby 與 hello-world 混在一起,不能相除。**
+## 步驟 6: wasmCloud 的啟動時間要放在哪一欄
 
-### wasmCloud 的啟動時間不能跟前兩者比
+對應的 [WorkloadDeployment 範本](../assets/labs/s3d5/47-wasmcloud-payload.yaml)把 image 改成自己的 `-comp:1h` reference；[歷史採樣腳本](../assets/labs/s3d5/53-measure-wasmcloud.sh)則在本機透過 kubectl 執行，參數依序為 manifest 路徑與次數。這份腳本只供核對下列資料的採樣方式，沒有失敗逾時處理，也沒有確認 HTTP 就緒，不能直接當成服務啟動的測試工具。wasmCloud 的時間是這樣量的：刪掉 `WorkloadDeployment`，再 `kubectl apply` 一次，每 0.5 秒查一次狀態，計時到讀到 `Ready=True`，重複 20 次。終點不是首次 HTTP 成功，還包含輪詢間隔造成的等待：
 
 ```text
 wasmcloud_ready  n=20  min 1422  p25 1979.5  median 2302  p75 5049.2  max 12699  IQR 3069.8
 ```
 
-中位數 2.3 秒,**IQR 3.07 秒——離散度比中位數還大**。
+中位數 2.3 秒，IQR 3.07 秒，晃動的幅度比中位數本身還大。
 
-**但這個數字不能跟步驟 4 的 160–175 毫秒放在同一欄。** 兩者量的是不同的東西:
+這個 2.3 秒不能跟步驟 4 的 160 到 175 毫秒放在同一欄比。下面這張圖把兩條路徑並排，上面是步驟 4 計時的範圍，下面是 wasmCloud 這組數字計時的範圍：
 
-| | 量什麼 | 包含 |
-|---|---|---|
-| 步驟 4 | `ctr` 層 | containerd → shim → cgroup |
-| wasmCloud | 端到端 | API server → operator 對帳 → NATS → host 拉取 → 啟動 → EndpointSlice → kube-proxy |
+![兩條路徑並排：上排是步驟 4 的 ctr 層，ctr run、containerd、shim、行程與 cgroup，中位數 160 到 175 毫秒；下排是 wasmCloud，kubectl apply、API server、operator 對帳、NATS、host 拉取並啟動元件、Ready=True，中位數 2.3 秒](../assets/diagrams/s3d5-planes.svg)
 
-**要公平比,得讓 wasmedge 也走一次完整的 Pod → kubelet → CRI 路徑,今天沒做。**
+照著圖看：上排從 `ctr` 下指令算到容器執行與清理完成；下排從 `kubectl apply` 開始算，中間經過 API server、operator 的對帳迴圈、wasmCloud 內部用來傳訊息的 NATS，再由 host 拉取元件並啟動。兩組數字的起點、終點和經過的元件都不一樣，我們把這種差別叫做**量測平面**不同。量測平面不同的數字放進同一張表，讀者會以為 wasmCloud 慢了十幾倍，其實是量了不同的東西。
 
-## 驗收 checkpoint
+若要比較到 Ready 的控制路徑時間，得讓 wasmedge 也從 `kubectl apply` 一個 Pod 開始計時，走完 API server、kubelet、CRI 到 shim 的整條路徑。兩邊還須定義可比的 Ready 條件；若比較服務可用性，應改以成功回應同一種請求為終點。本課沒有做這組量測。
 
-| 要求 | 判定 | 說明 |
-|---|---|---|
-| **同一支程式** | **達成** | 一份原始碼、同一份 release profile,只換 target triple。**同時補掉 Day 4 誠實的差距第 5 條** |
-| 同一顆節點 | 達成 | 全部在同一顆 `Standard_D2as_v5` 上 |
-| **冷啟動** | **部分達成** | wasmedge 與 runc 有 2×n=50 的乾淨數據,**結論是「差異落在雜訊邊緣、不能排名」**;wasmCloud 量測平面不同,不可比 |
-| **記憶體足跡** | **部分達成** | shim 常駐與邊際、容器 cgroup 都有;**wasmCloud 的「每個元件多少」沒拿到** |
-| **映像大小** | **未達成** | 打包配方設計完整,**但成品大小沒有留下紀錄** |
-| **方法學限制寫清楚** | 達成 | null control、bootstrap CI、兩批獨立重複、判定不一致如實記錄 |
+## 這些數字能用到哪裡
 
-**整體:部分通過。** 最有價值的產出不是三欄數字,是**那個帶信賴區間的否定結論**,以及記憶體的結構性差異。
+本章的結論有幾個前提，引用時要一起帶上：
 
-## 誠實的差距
+- 只有一顆節點、一支印一行就結束的程式。程式沒有 I/O、沒有網路，也不配置大量記憶體，結論不能直接推到真實的應用。
+- 計時涵蓋建立、執行與清理；兩批差值的信賴區間有重疊，一批包含 0、一批不包含 0，且缺逐筆退出碼，不能宣稱一般啟動排名。
+- 容器的對照組只有空 base 的靜態執行檔，沒有量疊在 Linux 發行版上的版本。
+- 映像大小沒有數字。
+- wasmCloud 的啟動時間和每個元件的記憶體，都沒有跟另外兩者放在同一個條件下量到。
 
-- **映像大小整欄沒有數據。** 打包配方設計完整(含／不含 base image 兩版),但成品大小只印在建置 pod 的 stdout,沒有存下來。**這一欄要補做才算完整。**
-- **wasmCloud 沒有可比的冷啟動數字。** 只有端到端的 2.3 秒,而那條路徑包含整個 Kubernetes 控制平面。
-- **wasmCloud 的「每個元件多少記憶體」沒拿到。**
-- **冷啟動兩批判定不一致,沒有跑第三批。** 要定論需要更大的 n 或更多批次,所以結論只能是「落在雜訊邊緣」。
-- **容器對照組只用了 scratch base。** `-native-debian` 打包了但沒拿來量,所以「跟一般應用容器比」這個更貼近現實的對照沒有。**這一點對地雷 2 的適用範圍很重要。**
-- **只有單節點、單一工作負載。** 那支 payload 印一行字就結束,沒有 I/O、沒有網路、沒有大量記憶體配置——**結論不能外推到真實工作負載。**
-- **Day 4 的 `use_local_image_pull = true` 副作用仍未評估。**
+## 疑難排解
 
-## 地雷記錄
+### VM 換過之後，RuntimeClass 還在但 pod 起不來 {#mine-1}
 
-### 地雷 1:停機抹掉節點層改動,而 RuntimeClass 留在 etcd {#mine-1}
+**症狀**：前一天裝好、驗過能跑的 `wasmedge` RuntimeClass，叢集停機再啟動之後，`kubectl get runtimeclass` 照樣列得出來，但指名它的 pod 都停在 `ContainerCreating`，訊息是 `no runtime for "wasmedge" is configured`。
 
-**症狀**:Day 4 裝好、驗過會動的 `wasmedge` RuntimeClass,節點被汰換一次之後(本例:叢集停機重啟)`kubectl get runtimeclass` 照樣列得出來,但任何指名它的 pod 都會卡在 `ContainerCreating`,訊息 `no runtime for "wasmedge" is configured`。
+**原因**：RuntimeClass 存在 etcd，handler 的實作（containerd 設定和 shim 檔案）寫在 VM 的磁碟上，換了 VM 只剩前者，見[步驟 1](#step-1)。
 
-**根因**:兩層的生命週期不同。RuntimeClass 是 etcd 裡的物件,跨 VM 生命週期存活;handler 的實作(`config.toml` 那幾行加磁碟上的 shim)寫在 VM 的作業系統磁碟上,換執行個體就沒了。**而這兩層之間沒有人負責校驗。**
+**修法**：用 `kubectl get node -o jsonpath='{.items[0].status.runtimeHandlers}'` 確認 handler 不在之後，照 Day 4 的安裝 shim、設定 handler 與映像解包設定重裝。手動對節點做的任何改動，都要假設下一次換 VM 時會消失。
 
-**判斷準則**:**任何節點層的手動改動,都要假設它撐不過一次 VM 汰換——停機重啟、節點映像升級、spot 回收都算。** 判斷 handler 在不在,唯一可靠的來源是 `kubectl get node -o jsonpath='{…status.runtimeHandlers}'`,**不是 `kubectl get runtimeclass`**。
+### 節點上的 shim 行程數是容器數的 4 倍 {#mine-2}
 
-**對 Day 8 的影響**:「解除安裝之後節點與基準相同」有兩種解釋。**Day 8 的解除安裝與比對必須在同一個 VM 生命週期內完成。**
+**症狀**：節點上同時跑 3 個 wasm 容器，`pgrep -fc containerd-shim` 數到 12 個行程；同樣 3 個原生容器只有 3 個。節點的記憶體也比用 wasm 檔案大小估的多。
 
-### 地雷 2:每個 wasm 容器要開 4 個 shim 行程,而 runc 是 1 個 {#mine-2}
+**原因**：runwasi 的 wasmedge shim 每個容器開 4 個行程，本課 1–3 個容器樣本的 PSS 也較高，見[步驟 5](#shim-memory)。38.8 MiB 與 9.3 MiB 是樣本推估的固定項與增量，外推前要再驗證。
 
-**症狀**:節點上並行跑 3 個 wasm 容器時,`pgrep -fc containerd-shim` 數到 12 個行程;同樣 3 個原生容器只有 3 個。
+### 乾淨的 host 一直分不到 workload {#mine-3}
 
-```text
-wasmedge  常駐 38.8 MiB  +9.3 MiB/容器  4 行程/容器
-runc      常駐  0.1 MiB  +4.5 MiB/容器  1 行程/容器
-```
+**症狀**：為了量 wasmCloud 單一元件的記憶體，刪掉一顆 host pod 換一顆新的，等了 160 秒，`workloads_started` 一直是 0。
 
-**根因**:整個 WasmEdge 執行期靜態連結在那支 109 MiB 的 shim 裡(runc 的 shim 是 8.4 MiB),而 runwasi 的 shim 模型對每個容器多開一組行程。
+**原因**：wasmCloud 不重新平衡（[Day 3](sprint3-day3-wasmcloud-distributed.md) 量過），新加入的 host 不會分到既有的 workload。刪 pod 換新的，只會得到一顆一直空著的 host。
 
-**為什麼要記**:「wasm 比容器輕」這個說法在節點層**不成立**——**同一份原始碼,wasm 版容器的 cgroup 是原生版的 5.4 倍,shim 那一側更是差一個數量級。輕的是 wasm 檔案,不是跑起來的行程。** 做容量規劃時要算的是後者。
+**修法**：先準備好乾淨的 host，再部署一個新的 `WorkloadDeployment`，順序不能反。另一種做法是把 host group 縮到 1 顆，讓所有 workload 集中在同一顆 host 上，再一個一個加上去，每加一個讀一次記憶體。
 
-**適用範圍要講清楚**:對照組是 scratch base 的靜態 musl 二進位檔,**那是容器這一側的最佳情況**。跟一個疊在 `debian:12-slim` 上的應用比,結論可能不同——**而那個對照今天沒量。**
+## 想一想
 
-### 地雷 3:想在乾淨的 host 上量 wasmCloud 的單一元件,會被「不重新平衡」擋住 {#mine-3}
+- 同事在另一顆節點上跑了一批 n=30，wasmedge 的中位數比 runc 快 12 毫秒，想在報告裡寫「wasm 啟動比較快」。在同意之前，你會請他補哪些數字？
+- 一顆節點預計同時跑 20 個 wasmedge 容器。估算 shim 要吃多少記憶體時，109 MiB、38.8 MiB、9.3 MiB 這三個數字各該怎麼用？如果換成 20 個 runc 容器呢？哪些是直接量到的值，哪些只是超出 1–3 個容器範圍的試算，還需要怎樣驗證？
+- 週一早上，指名 `wasmedge` 的 pod 全部停在 `ContainerCreating`，`kubectl get runtimeclass` 卻看得到 `wasmedge`。週末叢集停過機。你會先查哪一個欄位？
 
-**症狀**:刪掉一顆 host pod 換一顆乾淨的,等 160 秒,`workloads_started` 一直是 0,量不到任何元件的成本。
+## 小結
 
-**根因**:[Day 3 已經量過](sprint3-day3-wasmcloud-distributed.md)——wasmCloud 不重新平衡,新加入的 host 不會分到既有的 workload。刪 pod 換新的這個做法,拿到的是一顆永遠空著的 host。
-
-**修法**:要量乾淨 host 上的單一元件,得**先有乾淨 host,再部署一個新的 `WorkloadDeployment`**,順序不能反;或把 host group 縮到 1 顆強迫所有 workload 集中,再一個一個加。
-
-**這顆的形狀值得記**:**前面幾天量到的行為特性,會變成後面實驗設計的約束。** 那些發現不只是知識,也是限制。
-
-## 帶得走的東西
-
-- **null control 是一個數字能不能用的前提。** 先量「什麼都不做要多久」(這裡是 16 毫秒、IQR 1),才知道後面 160 毫秒裡有多少是量具的。沒有這個地板值,任何比較都在猜。
-- **一批數據不算數,兩批才看得出邊界。** 今天兩批獨立的 n=50 給出**相反的判定**——這不是實驗失敗,這是實驗告訴你「差異就在你的解析度邊緣」。只跑一批的話,不論拿到哪一批都會寫出過度自信的結論。
-- **「量不出來」是一個結論,不是沒有結論。** 帶信賴區間的否定比一個沒有區間的排名有用得多:`[-16.0, +1.0] ms` 明確告訴讀者「差異即使存在也小於 16 毫秒」,而那對決策已經夠了。
-- **輕的是檔案,不是行程。** wasm 二進位檔確實小,但跑起來之後,執行期要常駐、每個實例要開行程。**容量規劃時把檔案大小當行程成本,會低估一個數量級。**
-- **前一天的發現會變成後一天的實驗約束。** Day 3 量到「wasmCloud 不重新平衡」,今天它讓一個看起來很自然的量測方法整個失效。**前面章節的結論,同時是後面實驗的約束條件。**
-- **比較之前先確認兩邊在同一個量測平面上。** `ctr` 層的 165 毫秒與端到端的 2.3 秒不是同一件事的兩個數字,把它們放進同一張表就是在誤導。
+比較快慢，要先對齊計時起點、終點與成功條件。本章的 `ctr run --rm` 包含建立、執行及清理，wasmCloud 則量到狀態被查為 Ready，兩者不能直接排名。版本查詢的 16 毫秒是對照資訊，不是差距的最低門檻；差值要連同信賴區間與資料限制一起解讀。記憶體方面，這組小程式的 wasmedge shim PSS 與容器 cgroup 用量較高，但 1–3 個容器的推估不等於大規模容量公式。每個結論都要連同工作負載、版本與取樣範圍使用。
 
 ## 延伸閱讀
 
-- **[containerd 的 shim 說明](https://github.com/containerd/containerd/blob/main/core/runtime/v2/README.md)** —— 解釋 shim 為什麼是獨立行程、為什麼 containerd 重啟不會殺掉容器(Day 4 量到的那件事),以及 shim 的生命週期模型——地雷 2 那個「每個容器 4 個行程」要從這裡理解。
-- **[containerd/runwasi](https://github.com/containerd/runwasi)** —— 今天量的 wasmedge shim。`crates/containerd-shim-wasmedge` 底下看得到它用 youki 當 OCI 層,那正是 cgroup 裡那個 `youki:[2:INIT]` 的來源。
-- **[Linux 核心的 smaps_rollup 文件](https://docs.kernel.org/filesystems/proc.html)** —— PSS 與 RSS 的差別。量多行程共享記憶體的東西時,用 RSS 會系統性高估,而 shim 剛好就是這種東西。
+想再深入，可以從這幾份開始：
+
+- **[containerd 的 shim 說明](https://github.com/containerd/containerd/blob/main/core/runtime/v2/README.md)** —— shim 為什麼是獨立的行程、containerd 重啟為什麼不會停掉容器，以及 shim 的生命週期。步驟 5 量到的 shim 行程數和常駐記憶體，可以從這裡理解。
+- **[containerd/runwasi](https://github.com/containerd/runwasi)** —— 本章量的 wasmedge shim。`crates/containerd-shim-wasmedge` 底下看得到它用 youki 建立容器，也就是 cgroup 裡那個 `youki:[2:INIT]` 的來源。
+- **[Linux 核心的 /proc 文件](https://docs.kernel.org/filesystems/proc.html)** —— `smaps_rollup` 裡 PSS 和 RSS 的定義。量好幾個行程共用記憶體的程式時，用 RSS 加總會高估。
 
 ## 下一步
 
-三條路線的成本輪廓到這裡出來了兩條半:**冷啟動在容器這條路上分不出高下,記憶體則是 wasm 明顯較重,而 wasmCloud 因為量測平面不同無法並列。**
-
-[Day 6](sprint3-day6-spinkube-shim.md) 走最後一條路線 **SpinKube**,也是唯一一條會**派 operator 去替你改節點**的。前兩條的節點改動都是自己動手(wasmCloud 零改動、WasmEdge 8 行加一個 shim),那一天要看的是:**當這件事交給一個 controller 自動化之後,它到底在節點上做了什麼、又留下什麼。**
-
-而今天步驟 1 的結果已經先替 Day 8 改了規則:**那天的解除安裝與比對必須在同一個 VM 生命週期內完成,中途不能停機**——否則驗到的是「VM 被換掉了」,不是「拆得乾淨」。
+wasmCloud 和 WasmEdge 兩條路線的成本到這裡都量過了：容器計時範圍與資料完整性仍有比較限制，記憶體則是本次 wasmedge 樣本較高。[Day 6](sprint3-day6-spinkube-shim.md) 走最後一條路線 SpinKube，它會用 operator 自動把 shim 裝上節點；那一天要看的是，自動化之後節點上被改了什麼、又留下什麼。
 
 ---
 

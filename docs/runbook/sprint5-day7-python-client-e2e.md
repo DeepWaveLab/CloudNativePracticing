@@ -1,37 +1,32 @@
-# Day 7: Python client 端到端——登入、配對、RPC、UDP 經 Quilkin 連進 GameServer
+# Day 7: 配對成功了，封包如何送到那一台 GameServer？
 
 ![Nakama 官方標誌](../assets/logos/nakama-icon-color.png){ align=right width="72" }
 
-> Day 4 到 Day 6 各自驗過玩家連線的一段：Quilkin 用 token 轉送 UDP、Nakama 登入、matchmaker 拿到 server endpoint。但 Day 6 交給 client 的仍是 node IP 與 hostPort，沒有 routing token，玩家連不到 Quilkin 後面的 server。今天把缺的那一段補上：配對成立時由後端產生 routing token、寫進 allocation，再用一支只靠 Python 標準函式庫的 client，從登入一路走到收到 GameServer 的回應。
+兩位玩家收到同一個伺服器位址後，把封包送到 Quilkin，卻沒有任何回應。配對沒有失敗；缺的是 Quilkin 判斷路由所需的 token。另一個問題也接著出現：如果配對通知已經送出，client 沒有收到，它要去哪裡找回連線資訊？
 
-!!! abstract "你在課程的哪裡"
-    - **Day 6**：Nakama matchmaker hook 呼叫 Agones allocation，兩個 client 收到同一組 endpoint。
-    - **今天**：部署帶 routing token 與 RPC 的 Nakama module，跑兩個 Python player。驗收：兩人配到同一顆 GameServer、收到同一個 token；RPC 查到的 assignment 與通知相同；UDP 帶 token 經 Quilkin 收到 `ACK`，錯 token 沒有回應；再配對一次時分到另一顆 Ready 的 server、拿到不同的 token，結果同樣通過。
-    - **Day 8**：在已能配對與分配 server 的平台上，加入觀測與韌性演練。
+本章讓後端把 GameServer、Quilkin 入口與 routing token 整理成同一份資料，再交給玩家。你會用一支 Python client 完成整段流程，並從 GameServer 的 annotation 與 log 反查，確認收到回應的確實是剛才分配的那一台。
 
 ## 玩家端三段連線接成一條路
 
-Day 0 把玩家端的連線分成三段：登入、配對、遊戲封包。前幾天缺的是第二段和第三段之間的交接：Day 6 的 hook 只把 `address:port` 交給 client，Day 4 的 Quilkin 卻要求封包帶著 routing token。今天的 Nakama module 在配對成立時多做三件事：
+先把玩家需要的資訊列出來：登入憑證用來向 Nakama 證明身分；遊戲入口與 routing token 用來把 UDP 送到對戰伺服器。這兩組資訊用途不同。現在要補上配對與 UDP 之間的交接：Day 6 的 hook 只把 `address:port` 交給 client，Day 4 的 Quilkin 卻要求封包帶著 routing token。這份 GameServer 名稱、proxy 入口與 token 的組合稱為 **assignment**，也就是交給玩家的分配結果。Nakama module 在配對成立時要完成以下順序：
 
-1. **產生 routing token**，放進 `GameServerAllocation` 的 `metadata.annotations["quilkin.dev/tokens"]`。Agones 在分配的同時把這個 annotation 寫到被選中的 GameServer 上，Quilkin 的 xDS control plane 看到之後，就知道帶這個 token 的封包要轉給哪顆 server。
+1. **產生 routing token**，放進 `GameServerAllocation` 的 `spec.metadata.annotations["quilkin.dev/tokens"]`。Agones 在分配的同時把這個 annotation 寫到被選中的 GameServer 上，Quilkin 的 xDS control plane 看到之後，就知道帶這個 token 的封包要轉給哪顆 server。
 2. **把 assignment 存進 Nakama storage**，內容是 GameServer 名稱、Quilkin endpoint 與 token，每位玩家各一筆。
-3. **用兩種方式把 assignment 交給 client**：配對當下用 notification 主動推送；另外註冊一支 RPC `get_assignment`，client 斷線重連或漏接通知時，可以自己來問。
+3. **用兩種方式把 assignment 交給 client**：配對當下用 notification 主動推送；另外註冊一支 **RPC** `get_assignment`，讓 client 主動呼叫後端函式查詢。這次測試會在收到通知後立刻查詢，比對兩份結果；斷線後補查是這個設計可延伸的用途，尚未包含完整重連流程。
 
-```mermaid
-flowchart TB
-    C["Python client"] -->|"① REST 登入"| N["Nakama"]
-    C -->|"② WebSocket 配對"| N
-    N -->|"allocation + token"| A["Agones"]
-    N -->|"通知 / RPC"| C
-    C -->|"③ UDP + token"| Q["Quilkin proxy"]
-    Q --> GS["GameServer"]
-```
+圖中上半部交付 assignment，下半部才傳遊戲封包。請注意：client 拿到 assignment 後連的是 Quilkin 入口，而不是 assignment 裡供核對用的 direct 位址。
 
-為了隔離下一章的節點關機演練，這裡建立一個帶 taint 的專用節點池，並在 `nakama-lab` namespace 部署獨立的 Nakama 與 PostgreSQL，Day 5–6 那套不受影響。完整檔案在 [labs/sprint5/day7/](https://github.com/DeepWaveLab/CloudNativePracticing/tree/main/labs/sprint5/day7)。
+![Nakama 分配伺服器並交付 assignment，client 再帶 token 連到 Quilkin](../assets/diagrams/s5d7-handoff.svg)
+
+所以排除問題時，要先問「兩位玩家拿到相同 assignment 嗎」，再問「Quilkin 與 GameServer 也看見同一個 token 嗎」。只有 client 印出成功配對，還缺少下半部的證據。
+
+本章延續 Day 4 已可用的 Quilkin proxy；它的 LoadBalancer 入口以 `<LB-IP>:7777` 表示，請換成自己環境的實際位址。操作前在課程儲存庫切換到 `labs/sprint5/day7/`，後續相對檔名與 Python 指令都以這個目錄為準；程式節錄只供閱讀，部署與執行請使用完整檔案。
+
+接下來會新增專用節點池、`lab-game-server` Fleet，以及獨立的 `nakama-lab` namespace。這讓下一章可以把特定 GameServer 放到另一台節點上做失效演練。帶 taint 的節點仍可容納有相符 toleration 的其他 Pod，因此隔離不能只看節點池名稱；下一章關機前還要核對實際工作負載。完整檔案在 [labs/sprint5/day7/](https://github.com/DeepWaveLab/CloudNativePracticing/tree/main/labs/sprint5/day7)。
 
 ## 步驟 1:建立演練節點池與演練 Fleet
 
-節點池帶 label `role=gameserver-lab` 與 taint `sprint5-lab=true:NoSchedule`，只有明確宣告 toleration 的 pod 會排上去；和 Day 1 的 gamesrv 一樣要開節點公網 IP。`<RESOURCE-GROUP>` 是叢集所在的資源群組，`<CLUSTER>` 是叢集名稱，用 `az aks list -o table` 就能看到兩者：
+先區分這裡的兩個排程條件：**taint** 限制哪些 Pod 可以進入節點，**toleration** 表示 Pod 可以容忍該限制；`nodeSelector` 才指定這些 Pod 要選哪一組節點。下面的節點池帶 label `role=gameserver-lab` 與 taint `sprint5-lab=true:NoSchedule`；和 Day 1 的 gamesrv 一樣要開節點公網 IP。`<RESOURCE-GROUP>` 是叢集所在的資源群組，`<CLUSTER>` 是叢集名稱，用 `az aks list -o table` 就能看到兩者：
 
 ```console
 $ az aks nodepool add -g <RESOURCE-GROUP> --cluster-name <CLUSTER> -n gslab \
@@ -80,9 +75,9 @@ spec:
 - namespace 改成 `nakama-lab`，PostgreSQL 也在同一個 namespace 另建一份。
 - Nakama 與 PostgreSQL 都加上步驟 1 節點池的 `nodeSelector` 與 `tolerations`。
 - Nakama 的 ServiceAccount token 要 mount，並用 `--runtime.env` 傳入 `K8S_TOKEN` 與 `QUILKIN_ENDPOINT`，做法與 Day 6 相同。
-- Lua module 由 ConfigMap `nakama-lab-module` 以 subPath 掛到 `/nakama/data/modules/main.lua`，避開 [Day 6 的地雷 2](sprint5-day6-matchmaking.md#mine-2)。
+- Lua module 由 ConfigMap `nakama-lab-module` 以 subPath 掛到 `/nakama/data/modules/main.lua`，避開 [Day 6 的 module 重複載入說明](sprint5-day6-matchmaking.md#mine-2)。
 
-建立 namespace 後，DB 密碼依 [Day 5 的地雷 1](sprint5-day5-nakama-postgres.md#mine-1) 用 hex 產生；Quilkin 的對外入口放進 ConfigMap，由 Nakama 啟動時讀取：
+建立 namespace 後，DB 密碼依 [Day 5 的資料庫連線設定說明](sprint5-day5-nakama-postgres.md#mine-1) 用 hex 產生；Quilkin 的對外入口放進 ConfigMap，由 Nakama 啟動時讀取：
 
 ```console
 $ kubectl create namespace nakama-lab
@@ -217,7 +212,7 @@ nk.register_matchmaker_matched(matchmaker_matched)
 nk.register_rpc(get_assignment, "get_assignment")
 ```
 
-`context.user_id` 由 Nakama 從 session token 解出，client 無法指定別人的 user id。
+這個 RPC 使用 Nakama 提供的 `context.user_id` 選擇資料，沒有採用 client payload 裡的 user id。這避免此函式讓 client 直接指定其他擁有者；帳號憑證被竊或其他 API 的授權，仍是不同的議題。
 
 ## 步驟 4:確認 module 載入與 Fleet 就緒
 
@@ -238,7 +233,7 @@ lab-game-server-s7xfm-g4fk2   Ready   <NODE-IP>      7245   aks-gslab-97904148-v
 lab-game-server-s7xfm-g9p9n   Ready   <NODE-IP>      7444   aks-gslab-97904148-vmss000000
 ```
 
-Nakama 仍是 `ClusterIP`，用 port-forward 接到本機。接到本機的 17350，client 也用這個 port：
+Nakama 仍是 `ClusterIP`，用 port-forward 接到本機。接到本機的 17350，client 也用這個 port。port-forward 保留在一個終端機，healthcheck 與稍後的 client 在另一個終端機執行：
 
 ```console
 $ kubectl -n nakama-lab port-forward svc/nakama 17350:7350
@@ -248,7 +243,7 @@ $ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:17350/healthcheck
 
 ## 步驟 5:只用標準函式庫寫 client
 
-截至 2026-08，Python 沒有仍在維護的 Nakama client（社群的 nakama-python 停在 2021）。這支 client（[game_client.py](https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day7/game_client.py)）直接呼叫 Nakama 的 REST 與 WebSocket API，只用 `urllib`、`socket`、`json` 等標準函式庫，不必安裝第三方套件。每位 player 的流程：
+為了看清楚 HTTP、WebSocket 與 UDP 各自負責哪一段，這支教學 client（[game_client.py](https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day7/game_client.py)）直接呼叫 Nakama 的 REST 與 WebSocket API，只用 `urllib`、`socket`、`json` 等標準函式庫，不必安裝第三方套件。每位 player 的流程：
 
 1. **登入**：`POST /v2/account/authenticate/device?create=true`，用 server key 走 Basic auth，拿到 session token。
 2. **開 realtime socket**：連到 `/ws?token=<session token>&format=json`。
@@ -256,7 +251,7 @@ $ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:17350/healthcheck
 4. **RPC**：`POST /v2/rpc/get_assignment`，帶 `Authorization: Bearer <session token>`，比對回傳內容與 notification 是否相同。
 5. **UDP**：把 `hello-<player>` 接上 routing token，送到 Quilkin endpoint，等 `ACK`；再用錯的 token `zz0` 送一次，預期收不到回應。
 
-標準函式庫沒有 WebSocket，client 自己實作最小的 RFC 6455：HTTP Upgrade 握手、client 送出的 frame 一律加 mask、回應 server 的 ping。送 frame 的部分：
+Python 標準函式庫沒有直接可用的 WebSocket client，所以這份範例以 `socket` 實作本次流程需要的訊息框架（frame）。下面是 RFC 6455 的部分要求：HTTP Upgrade 握手、client 送出的 frame 一律加 mask、回應 server 的 ping。送 frame 的部分：
 
 ```python
 def _send_frame(self, opcode, payload):
@@ -273,7 +268,7 @@ def _send_frame(self, opcode, payload):
     self.sock.sendall(header + mask + masked)
 ```
 
-呼叫 RPC 時要注意 body 的格式：Nakama REST 的 RPC body 是「一個 JSON 字串」，不是 JSON 物件。空參數要送 `"{}"`（含引號），回應的 `payload` 也是字串，要再 `json.loads` 一次。換成任何 client 都會遇到這一點：
+呼叫 RPC 時要注意 body 的格式：Nakama REST 的 RPC body 是「一個 JSON 字串」，不是 JSON 物件。空參數要送 `"{}"`（含引號），回應的 `payload` 也是字串，要再 `json.loads` 一次。直接使用 REST 時需要處理這層編碼；SDK 可能已代為處理。這裡 `http_json` 會再做一次 JSON 編碼，因此傳給它的是 Python 字串 `"{}"`：
 
 ```python
 status, rpc = http_json("POST", f"{api}/v2/rpc/get_assignment", "{}", bearer=token)
@@ -291,6 +286,9 @@ bad = udp_roundtrip(assignment["proxy"], f"hello-{name}".encode() + b"zz0", args
 兩個 player 各開一個 thread 同時跑，最後印出 `SUMMARY`，五項都為 true 時 exit code 為 0。
 
 ## 步驟 6:跑兩個 player
+
+這支程式會自行啟動兩個 player，不需要分別執行兩份指令。先讀登入、配對通知與 RPC 三段，再讀 UDP 的正確與錯誤 token 測試：
+
 
 ```console
 $ python3 game_client.py --port 17350
@@ -311,7 +309,7 @@ player-a: udp via proxy with wrong token -> None
 SUMMARY {"errors": [], "same_gameserver": true, "same_token": true, "rpc_matches": true, "udp_ack_ok": true, "wrong_token_blocked": true, ...}
 ```
 
-兩人配到同一顆 `g4fk2`，token 都是 `v47`。通知比 `matchmaker_matched` 先到，因為 hook 在 Nakama 送出 matched 事件之前執行；client 的結束條件是兩者都收到，不依賴先後順序，也避開了 [Day 6 的地雷 4](sprint5-day6-matchmaking.md#mine-4)。
+兩人配到同一顆 `g4fk2`，token 都是 `v47`。通知比 `matchmaker_matched` 先到，因為 hook 在 Nakama 送出 matched 事件之前執行；client 的結束條件是兩者都收到，不依賴先後順序，也避開了 [Day 6 的雙訊息等待條件](sprint5-day6-matchmaking.md#mine-4)。
 
 再執行一次 client。這次 allocation 選到另一顆 Ready 的 GameServer，hook 也產生了不同的 token，五項仍全部為 true：
 
@@ -319,11 +317,11 @@ SUMMARY {"errors": [], "same_gameserver": true, "same_token": true, "rpc_matches
 SUMMARY {"errors": [], "same_gameserver": true, "same_token": true, "rpc_matches": true, "udp_ack_ok": true, "wrong_token_blocked": true, "results": {"player-a": {"gameserver": "lab-game-server-s7xfm-g9p9n", "proxy": "<LB-IP>:7777", "routing_token": "ysz", ...
 ```
 
-這個 Fleet 沒有掛 `FleetAutoscaler`，兩次配對用掉 2 顆 Ready 之後就沒有可分配的 server；要再配對，先刪掉 Allocated 讓 Fleet 補回（步驟 8），或照 [Day 3](sprint5-day3-allocation-autoscaler.md) 掛 buffer autoscaler。正式環境要用後者。
+這個 Fleet 沒有掛 `FleetAutoscaler`，兩次配對用掉 2 顆 Ready 之後就沒有可分配的 server；要再配對，先刪掉 Allocated 讓 Fleet 補回（步驟 8），或照 [Day 3](sprint5-day3-allocation-autoscaler.md) 掛 buffer autoscaler。正式服務需設計可分配容量的補足方式，並讓遊戲在對戰結束時主動釋放 GameServer；不能只靠測試人員刪除。
 
 ## 步驟 7:從 GameServer 這一側對照
 
-client 收到 `ACK` 只能證明「有 server 回應」。要確認封包真的進了被分配的那一顆，從 GameServer 這一側看：
+client 收到 `ACK` 只能證明「有 server 回應」。要確認封包真的進了被分配的那一顆，請把下方指令中的 GameServer 名稱換成自己 notification 收到的名稱，把 `v47` 換成自己的 routing token。範例名稱、port 與節點 IP 都是某一次執行結果：
 
 ```console
 $ kubectl get gs lab-game-server-s7xfm-g4fk2 \
@@ -338,11 +336,11 @@ $ kubectl logs lab-game-server-s7xfm-g4fk2 -c simple-game-server | grep hello
 2026/09/29 02:50:54 Received UDP: hello-player-a
 ```
 
-這顆 server 屬於 `lab-game-server` 且是 `Allocated`；annotation 是 `v47` 的 base64；收到的是 `hello-player-a` 而不是 `hello-player-av47`，表示 Quilkin 的 Capture filter 已經把 token 剝掉。封包來源是 proxy 的出口 IP，game server 看不到玩家的真實位址。
+這顆 server 屬於 `lab-game-server` 且是 `Allocated`；annotation 是 `v47` 的 base64；收到的是 `hello-player-a` 而不是 `hello-player-av47`，表示 Quilkin 的 Capture filter 已經把 token 剝掉。封包來源是 proxy 的出口 IP，這份封包本身沒有提供玩家的原始位址。
 
 ## 步驟 8:收尾
 
-`simple-game-server` 不會自己結束，兩顆 Allocated 要手動刪，Fleet 會補回 Ready：
+本次 client 只傳 hello，沒有傳結束指令，因此兩顆 Allocated 仍保留。確認兩次測試都已完成後，才刪除它們，讓固定 replicas 的 Fleet 補回 Ready。下方名稱要換成自己這兩次分配的 GameServer，不能直接複製範例名稱：
 
 ```console
 $ kubectl delete gs lab-game-server-s7xfm-g4fk2 lab-game-server-s7xfm-g9p9n
@@ -356,23 +354,17 @@ lab-game-server-s7xfm-2gcfx   Ready   <NODE-IP>      7114   aks-gslab-97904148-v
 lab-game-server-s7xfm-4cl5c   Ready   <NODE-IP>      7356   aks-gslab-97904148-vmss000000
 ```
 
-## 自我檢查
+## 想一想
 
-- `nakama-lab` 的 Nakama 啟動 log：`Found runtime modules` 的 `count` 是 1，並且有 `id":"get_assignment"` 與 `Matchmaker Matched` 兩行註冊。
-- `python3 game_client.py --port 17350` 的 `SUMMARY`：`same_gameserver`、`same_token`、`rpc_matches`、`udp_ack_ok`、`wrong_token_blocked` 五項都是 true，exit code 0。
-- 對被分配的 GameServer 查 `jsonpath`：狀態 `Allocated`，`quilkin.dev/tokens` 等於 `echo -n <token> | base64` 的結果。
-- 該 GameServer 的 log：收到的 payload 是 `hello-player-a`，尾端沒有 token；來源 IP 是 proxy 的出口，不是你的機器。
-- 再跑一次 client：分到另一顆 Ready 的 GameServer、token 不同，五項仍為 true。
+1. notification 與 RPC 的 assignment 相同，為什麼仍不能判定 UDP 路由成功？
+2. `get_assignment` 回傳 `found: true`，是否代表該 GameServer 現在仍可連線？從本章程式判斷它檢查了什麼。
+3. 固定兩個 replicas 的 Fleet 已連續分配兩次，為什麼第三次可能沒有 Ready server？
 
-## 帶得走的東西
+## 小結
 
-- routing token 由後端在配對成立時產生，寫進 allocation metadata；Agones、Quilkin、client 三方拿到的是同一個值，client 不需要知道任何 node IP。
-- 配對結果用 notification 主動推送、用 RPC 讓 client 補拿，兩條路讀的是同一份 storage；client 斷線重連時靠 RPC 找回自己的 server。
-- RPC 只能讀到 `context.user_id` 自己的資料，這個 id 由 session token 決定，client 無法冒用別人。
-- Nakama REST 的 RPC body 與回應 `payload` 都是 JSON 字串，要多編碼、解碼一次。
-- 要確認封包真的進了被分配的那顆 server，除了 client 收到的回應，還要看 server 端的 annotation 與 log。
+配對與 UDP 之間需要交接同一份 assignment：後端把 token 寫到被分配的 GameServer，也把 proxy 入口與 token 交給兩位玩家。通知、RPC 回應、annotation 與 server log 各證明其中一段。RPC 目前只讀保存的 assignment，沒有檢查 GameServer 是否仍存活；節點失效後該如何重新配對，不能只靠讀回舊資料解決。
 
-## 正式環境還要補的
+## 這份範例尚未處理的情況
 
 這支 client 的 WebSocket 是最小實作：只處理文字 frame、ping 與 close，沒有 TLS，也不處理壓縮等擴充。正式的遊戲 client 應該用 Nakama 官方 SDK 或成熟的 WebSocket 函式庫。
 
@@ -380,7 +372,7 @@ Nakama 要有對外入口與 TLS，不能靠 port-forward。routing token 只有
 
 ## 延伸閱讀
 
-想往下深挖，從這幾份開始：
+想再深入，可以從這幾份開始：
 
 - **[Agones GameServerAllocation reference](https://agones.dev/site/docs/reference/gameserverallocation/)** —— `spec.metadata` 的 labels 與 annotations 會在分配當下寫到 GameServer 上。
 - **[Nakama matchmaker](https://heroiclabs.com/docs/nakama/concepts/multiplayer/matchmaker/)** —— matchmaker 只接受保持 socket 連線的玩家，這是 client 必須先開 realtime socket 再排隊的原因。

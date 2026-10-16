@@ -1,116 +1,72 @@
-# Day 0: 服務網格與入口閘道的三層地圖
+# Day 0：入口能連線之後，服務之間還缺什麼？
 
 ![Kubernetes 官方標誌](../assets/logos/kubernetes-icon-color.svg){ align=right width="80" }
 
-> Sprint 2 把封包治理放進了核心——用 eBPF 在 L3/L4 看流量、擋流量。那再往上一層,服務之間的加密、斷路、依 HTTP 內容路由,這些「應用層的事」現在歸誰管?這一章不裝東西,只把 mesh 與 gateway 這一整片地景整理成一張地圖,後面幾天都拿它對照。
+購物網站已經能從瀏覽器打開，訂單服務也能呼叫付款服務。但團隊提出兩個新要求：入口要支援 HTTP/3，內部服務則要驗證彼此身分，避免任何能連到付款服務的程式都能送出請求。這兩件事發生在不同的連線上，更換入口元件不會自動完成內部驗證。讀完這章，你要能沿著請求路徑，判斷需求應由入口閘道、服務網格，還是 Pod 網路處理。
 
-!!! abstract "你在課程的哪裡"
-    - **來時路**:Sprint 2 教了 eBPF/Cilium 在 L3/L4 的底層治理;Sprint 3 換過 pod 的執行體(WebAssembly)。
-    - **今天**:純概念。畫出「CNI / east-west mesh / north-south gateway」三層地圖,搞懂 sidecar 為什麼退場、Cilium 為什麼會跟 Istio 在同一層碰頭、eBPF 到底取代了什麼又沒取代什麼。
-    - **接下來**:[Day 1](sprint4-day1-envoy-gateway.md) 動手用 Envoy Gateway 取代 Ingress Nginx(north-south),[Day 2](sprint4-day2-istio-ambient.md) 起 Istio ambient 做服務間 mesh(east-west)。
+## 先找出要管理的是哪一段連線
 
-## 先分清楚兩個方向:north-south 與 east-west
+從叢集外進入服務的流量稱為 **north-south（南北向）**；叢集內服務互相呼叫則稱為 **east-west（東西向）**。這是描述流量方向的用語，不代表某個產品只能處理其中一種。
 
-網路流量在叢集裡有兩個方向,整片地景都是照這兩個方向切的:
+入口閘道（Gateway）接收外部連線，再依主機名稱或網址路徑轉送到服務。購物網站與付款服務之間的呼叫，則可以交給 **service mesh（服務網格）**：在應用程式之外統一處理服務通訊，例如驗證服務身分、加密及限制連線。
 
-- **north-south(南北向)**:外面進來、裡面出去的**入口流量**。使用者的請求打進叢集、找到某個服務,走的是這條。舊世界用 **Ingress** 管它。
-- **east-west(東西向)**:服務**之間**互相呼叫的流量。訂單服務打帳務服務、帳務服務打風控服務,走的是這條。這條過去多半沒有統一在管——服務直接用 ClusterIP 互打,加密、重試、斷路各自在程式裡自己刻。
+下圖沿用同一筆購物操作。先看上排的外部入口，再看下排訂單服務發出的新請求；兩排管理的連線不同。
 
-這兩個方向要的東西不一樣:north-south 要的是「請求怎麼路由進來」,east-west 要的是「服務互信與韌性」(彼此加密、某個服務掛了不要拖垮全部)。所以它們由不同的東西來管,這就是三層地圖的由來。
+![外部入口與內部服務呼叫由不同位置處理](../assets/diagrams/s4d0-request-path.svg)
 
-## 三層地圖
+Gateway 把請求交給訂單服務後，訂單服務仍可能另外呼叫付款服務。付款服務是否要求身分驗證，不能只從入口已啟用 HTTPS 推斷。兩段流量都需要底層 Pod 網路；前面學過的 **CNI** 負責設定 Pod 網路，Cilium 是其中一種實作。
 
-```mermaid
-flowchart TB
-    subgraph NS["north-south gateway(入口,取代 Ingress)"]
-        A["Envoy Gateway · Cilium Gateway API · Istio Gateway"]
-    end
-    subgraph EW["east-west mesh(服務之間:mTLS / 斷路 / L7 路由)"]
-        B["Istio(ambient) · Cilium mesh · Linkerd"]
-    end
-    subgraph L34["CNI(L3/L4:pod 網路 + network policy)"]
-        C["Cilium · Calico · Flannel"]
-    end
-    NS -.-> EW -.-> L34
-```
+## 內部請求為什麼需要服務身分？
 
-由下往上讀:最底層 **CNI** 負責 pod 有沒有 IP、封包怎麼在 pod 之間走(這是 Sprint 2 的 Cilium 幹的事);中間 **east-west mesh** 負責服務之間的加密與韌性;最上面 **north-south gateway** 負責入口流量。
+只知道來源 IP，還不足以表達「只有訂單服務可以呼叫付款服務」。Pod 重建後 IP 可能改變，規則真正要對應的是工作負載身分。
 
-**這張圖裡有個名字出現了三次:Cilium。** 它從最底層的 CNI,一路往上長進了 mesh、也長進了 gateway。這件事三年前還不成立。
+**mTLS（雙向 TLS）**讓連線兩端都出示憑證並驗證對方，同時加密連線。服務網格可以替應用程式處理這件事，但你仍要決定哪些身分有權存取哪些服務。加密、身分驗證與授權是相關但不同的要求：連線已加密，不表示來源已獲准執行所有操作。
 
-## Cilium 現在橫跨三層,不只是 CNI
+[Day 2](sprint4-day2-istio-ambient.md) 會用 Istio ambient 觀察服務身分；[Day 3](sprint4-day3-cilium-mesh.md) 則會分別檢查 WireGuard 加密與 HTTP 存取規則。比較時必須分開這些證據，不能用「都有加密」直接判定功能相同。
 
-Cilium 起家時是純 CNI——跟 Calico 同一層,管 pod 網路,跟 Istio 那種 mesh 井水不犯河水。它後來往上長,現在是一套橫跨三層的東西:
+## 不在每個 Pod 放代理，可以怎麼做？
 
-- **CNI(L3/L4)**:給 pod 配網路、套 network policy——這是它的老本行。
-- **mesh(east-west)**:服務之間的加密走 WireGuard/IPsec(在 eBPF 資料面做),身分與 L7 介入用每個節點一個共享的 Envoy。
-- **Gateway API(north-south)**:它自己也有一套入口閘道。
+傳統 **sidecar** 部署會在每個應用 Pod 裡加入代理容器，讓它處理進出流量。代理會使用 CPU 與記憶體；更新注入的代理版本也通常需要替換應用 Pod。當 Pod 很多時，團隊可能希望把代理與應用的生命週期分開。
 
-所以 east-west 的選型不只 Istio,還有 Cilium——**Cilium 從底層一路長到 east-west,跟純 mesh 的 Istio 在這一層碰頭了**。這個碰頭是 Day 3、Day 4 要實測比較的主戲。
+Istio ambient 將工作拆成兩部分：每個節點的 **ztunnel** 處理服務身分與加密通道；需要理解 HTTP 內容時，再部署稱為 **waypoint** 的 Envoy 代理。ztunnel 是使用者空間的程式，不能因為沒有 sidecar，就把它當成 eBPF 在核心中的處理。
 
-## sidecar 為什麼在退場
+Cilium 則以 eBPF 處理網路轉送與部分網路政策，並可整合核心的 WireGuard 加密功能。需要檢查 HTTP 方法或路徑時，流量會導向 Envoy。WireGuard 執行加密與 eBPF 導引封包，是不同的工作。
 
-現在的 mesh 是從舊的 sidecar mesh 演變來的,先看舊的長怎樣、為什麼被換掉。
+因此，選擇不使用 sidecar，仍然要問代理部署在哪裡，以及哪些請求會經過代理。本課不以某種部署方式判定所有情境的效能，也不把 sidecar 描述成已經不能使用。
 
-早年的 Istio 是 **sidecar 模式**:每一個 pod 旁邊都硬塞一個 Envoy proxy,pod 進出的流量全被這個 sidecar 攔下來加密、路由。功能很強,但代價是**每個 pod 都多背一個 proxy**——記憶體、CPU、啟動時間全部乘上 pod 數量,升級 mesh 還得把每個 pod 重啟一輪。
+## 看到 HTTP 規則，就找出誰會解析 HTTP
 
-於是 sidecar 開始退潮:業界統計 sidecar 型 mesh 的採用率從 2023 的 50% 掉到 2024 的 42%(截至 2026-08 的引用數字,非本課實測)。但**退的是 sidecar 這個形態,不是 mesh 這件事**——mesh 整體採用其實還在成長,mTLS、斷路這些功能只是更中心了。取代 sidecar 的是兩條路:
+**L7（應用層）**在本課主要指 HTTP 方法、路徑與標頭等內容。例如允許 `GET /`、拒絕 `POST /`，必須有人解析 HTTP；只檢查 IP 與連接埠的規則無法完成這個判斷。
 
-- **Istio ambient**(2024-11 起 GA、2026 已是官方推薦):不再每個 pod 塞 proxy,改成每個**節點**一個輕量的 L4 元件(ztunnel)做加密,需要 L7 時才另起一個共享的 proxy(waypoint)。
-- **Cilium**:本來就在核心用 eBPF 做事,不需要 sidecar。
+接下來會遇到三種使用 Envoy 的方式。它們共用代理技術，但設定介面與部署責任不同，不能直接互換設定檔。
 
-## eBPF 取代了什麼,又沒取代什麼
+| 要處理的需求 | 本課使用的元件 | HTTP 規則由誰執行 |
+|---|---|---|
+| 外部請求依主機名稱進入服務 | Envoy Gateway | Gateway 管理的 Envoy |
+| 內部服務的 HTTP 連線限制 | Istio ambient | waypoint 的 Envoy |
+| Cilium 網路政策中的 HTTP 方法與路徑限制 | Cilium | Cilium 管理的 Envoy |
 
-**eBPF 吃下的是 L4 跟 sidecar 這個形態,沒吃下 L7。**
+Cilium 同時提供 CNI、服務通訊與 Gateway API 相關功能，因此會在多個需求中出現。Istio ambient 也可以使用 Cilium 提供的 Pod 網路。比較產品前，先確認比較的是入口、服務身分、HTTP 政策，還是底層網路，才能避免把不同範圍的功能放在一起。
 
-拆開講:
+## 想一想
 
-- **eBPF 拿下的**:L3/L4 的封包治理(負載平衡、network policy、L4 層的加密),這些搬進了核心,快、省、不需要 proxy。sidecar 那種「每個 pod 一個 proxy」的擺法也被它淘汰。
-- **eBPF 沒拿下的**:L7——也就是需要看懂 HTTP 內容才能做的事(依 header/path 路由、斷路、重試、流量鏡像)。這些**還是需要一個 Envoy 等級的 proxy**,只是位置從「每個 pod 一個」變成「每個節點一個」或「按需一個」。
+1. 網站入口已啟用 HTTPS，能否據此證明訂單服務到付款服務也有加密？你還需要觀察哪一段？
+2. 需求是只允許 `GET /health`，IP 與連接埠政策夠不夠？本章哪些元件能解析這個條件？
+3. 同事說「沒有 sidecar，所以所有流量都只在 eBPF 裡處理」。用 Istio ambient 的分工說明這句話缺了什麼。
 
-所以實際上是**分工**,不是 eBPF 取代 Envoy:eBPF 在核心做 L4,Envoy 在 proxy 做 L7,兩者都脫離了 sidecar。
+## 小結
 
-而且有意思的是,**這三家的 L7 其實都是 Envoy**:
-
-| 東西 | 方向 | L7 資料面 | L4 資料面 |
-|---|---|---|---|
-| Envoy Gateway | north-south | Envoy | Envoy |
-| Cilium mesh | east-west | 每節點共享 Envoy | **eBPF(核心)** |
-| Istio ambient | east-west | waypoint(Envoy) | **ztunnel(Rust)** |
-
-三者的 L7 路徑都看得到 Envoy;但 L4 就分家了——Cilium 走 eBPF、Istio 的 ztunnel 是 Rust 寫的。所以你 Day 1 學會的 Envoy 設定思路,到 Day 2、Day 3 是相通的,只是被裝進不同的殼。
-
-## 驗收 checkpoint
-
-這一章沒有指令可跑,驗收是三個問題,答案要點都在上面:
-
-| 驗證 | 判準(答案要點) |
-|---|---|
-| **第一問** | north-south 與 east-west 各解決什麼?(入口/Ingress 替代 vs 服務間 mTLS/L7) |
-| **第二問** | 為什麼 Cilium 會跟 Istio 在 east-west 這層相遇?(Cilium 從 CNI 一路往上長到 mesh) |
-| **第三問** | eBPF 取代了什麼、沒取代什麼?(吃下 L4 與 sidecar 形態,L7 仍需 Envoy 級 proxy) |
-
-## 帶得走的東西
-
-- **流量分南北向與東西向,整片地景照這兩個方向切**。north-south 是入口(Envoy Gateway 的地盤),east-west 是服務之間(Istio/Cilium 的地盤),兩者由不同的東西管。
-- **Cilium 已經橫跨三層,不再只是 CNI**。它從底層爬上 mesh 與 gateway,所以 east-west 的選型變成「Istio 或 Cilium」,不是「有沒有 mesh」。
-- **退場的是 sidecar,不是 mesh**。每個 pod 塞一個 proxy 的成本擋不住,但 mTLS、斷路這些功能反而更中心——只是搬到節點層或按需起。
-- **eBPF 沒有吃掉 Envoy,兩者分工**:L4 進核心(eBPF),L7 留在 proxy(Envoy),都脫離 sidecar。
-- **三家的 L7 底層都是 Envoy**。學會一套 Envoy 思路,north-south 跟 east-west 都用得上。
+先沿著請求找出管理範圍，再選元件：Gateway 處理外部入口，mesh 處理內部服務通訊，CNI 提供 Pod 網路。接著把加密、身分驗證與 HTTP 政策分別列出，確認誰在什麼位置執行它們。[Day 1](sprint4-day1-envoy-gateway.md) 會先完成入口路由，再驗證用戶端到 Envoy 的 HTTP/3 連線。
 
 ## 延伸閱讀
 
-想往下深挖,從這幾份開始:
+想再深入，可以從這幾份開始：
 
-- **[Istio Ambient vs. Cilium(Istio 官方部落格)](https://istio.io/latest/blog/2024/ambient-vs-cilium/)** —— 官方自己把 ambient(ztunnel/waypoint)與 Cilium(eBPF + per-node Envoy)兩種 sidecar-less 架構攤開比,正是 Day 3/4 要實測的那組對照的紙上版。
-- **[Cilium Service Mesh 概念頁](https://docs.cilium.io/en/stable/network/servicemesh/)** —— 看 Cilium 怎麼把 mesh「折進」CNI:L4 在 eBPF、L7 用 per-node Envoy,印證「Cilium 從 CNI 長到 mesh」這件事。
-- **[Envoy Gateway 官網](https://gateway.envoyproxy.io/)** —— north-south 那層的主力,Day 1 的工具;它就是「Gateway API 的 Envoy 實作」。
-
-## 下一步
-
-地圖畫好了,從最上面那層開始動手。[Day 1](sprint4-day1-envoy-gateway.md) 用 **Envoy Gateway** 把一條入口流量路由起來,取代舊的 Ingress Nginx,順便解決一件 Ingress 一直做不好的事——HTTP/3。
+- [Istio ambient 架構](https://istio.io/latest/docs/ambient/architecture/)：ztunnel 與 waypoint 的責任。
+- [Cilium Service Mesh](https://docs.cilium.io/en/stable/network/servicemesh/)：Cilium 的服務通訊功能與資料路徑。
+- [Envoy Gateway](https://gateway.envoyproxy.io/)：以 Gateway API 管理 Envoy 的專案。
 
 ---
 
 !!! quote ""
-    Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,此處作社群教學用途。
+    Kubernetes 標誌為 CNCF（Linux Foundation）官方資產，此處作社群教學用途。

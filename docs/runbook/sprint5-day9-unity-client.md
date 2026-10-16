@@ -1,17 +1,14 @@
-# Day 9: Unity client——nakama-unity SDK、CLI build、relay server 多人同步
+# Day 9: 兩位玩家都收到 ACK，就能互相看到嗎？
 
 ![Nakama 官方標誌](../assets/logos/nakama-icon-color.png){ align=right width="72" }
 
-> Day 7 用 Python 證明了玩家端三段連線接得起來，但遊戲 client 實際上多半用遊戲引擎寫。今天分兩部分。Part 1 用 Unity 與 Nakama 官方的 nakama-unity SDK 重做 Day 7 的流程，整個專案從建立、加套件、build 到執行都用 Unity 的命令列完成。Part 2 讓畫面真的動起來：自己寫一個小型 relay server 放進 Agones，兩個 Unity 視窗互相看得到對方的角色在移動。
+你把 Python client 換成 Unity，兩位玩家都收到 `ACK`，畫面卻只有自己的角色在移動。連線明明成功了，還少了什麼？
 
-!!! abstract "你在課程的哪裡"
-    - **Day 7**：Python client 走完登入、配對、RPC，UDP 帶 token 經 Quilkin 收到 GameServer 的回應。
-    - **今天**：Part 1 用 nakama-unity v3.22.0 做兩個 Unity player，驗收同 Day 7；Part 2 部署 Go 寫的 relay server，驗收：兩個 player 在 10 秒內各自收到對方一半以上的位置封包，兩人離開後 relay 自己呼叫 SDK `Shutdown()`。
-    - **Day 10**：回顧這十天、談實務上怎麼取捨，並列出這門課沒教的主題。
+少的是把 A 的位置交給 B、把 B 的位置交給 A 的遊戲程式。本章先用 Nakama 官方 SDK 重做登入與配對，再把只會回覆發送者的測試伺服器換成 relay server。你會用兩個視窗、雙方 log 與 GameServer 狀態，分別判斷「連得上」「收到對方資料」與「對戰正常結束」，而不把一個 `ok=true` 當成全部成功。
 
 ## Unity client 與 relay server 各自負責什麼
 
-Part 1 的 Unity client 做的事跟 Day 7 的 Python client 完全一樣，只是改用 SDK：
+先看玩家端：**SDK** 是把常用 API 與連線處理包成函式的程式庫。第一部分用 nakama-unity 對應 Day 7 手動送出的請求；下表可以用來追查某個 SDK 呼叫實際對應哪一段流程：
 
 | 步驟 | Day 7 Python（直接打 API） | Day 9 Unity（nakama-unity SDK） |
 |---|---|---|
@@ -24,7 +21,7 @@ Part 1 的 Unity client 做的事跟 Day 7 的 Python client 完全一樣，只�
 
 SDK 省掉的是 WebSocket 與訊息格式的細節；UDP 那一段 SDK 不管，因為遊戲封包本來就不經過 Nakama。
 
-到 Part 1 為止，Fleet 裡跑的仍是 `simple-game-server`。它收到什麼就原樣回給送的人，不會轉給同一場的另一個玩家，所以就算 Unity 畫了兩個角色，A 也看不到 B 在動。Part 2 換成一個會轉發的 relay server：每個玩家送來的位置，轉給同一顆 server 上的其他玩家。其他元件都不變，Nakama 照樣負責登入、配對與 allocation，Quilkin 照樣用 token 轉送。
+到 Part 1 為止，Fleet 裡跑的仍是 `simple-game-server`。它收到什麼就原樣回給送的人，不會轉給同一場的另一個玩家，所以就算 Unity 畫了兩個角色，A 也看不到 B 在動。第二部分換成 **relay server**，也就是收到一位玩家資料後，會轉發給其他玩家的伺服器：每個玩家送來的位置，轉給同一顆 server 上的其他玩家。其他元件都不變，Nakama 照樣負責登入、配對與 allocation，Quilkin 照樣用 token 轉送。
 
 「relay」在 Nakama 的文件裡還有另一個意思，兩者要分清楚：
 
@@ -36,23 +33,21 @@ SDK 省掉的是 WebSocket 與訊息格式的細節；UDP 那一段 SDK 不管�
 
 本章用後者：relay 部署成 Agones 的 GameServer，分配與生命週期都由 Agones 管理，Day 8 看過的 shutdown、補位與節點失效行為也都適用。
 
-```mermaid
-flowchart TB
-    UA["Unity player A"] -->|"登入 / 配對 / RPC"| N["Nakama"]
-    UB["Unity player B"] -->|"登入 / 配對 / RPC"| N
-    N -->|"allocation + token"| AG["Agones<br/>lab-relay-server"]
-    UA -->|"POS + token"| Q["Quilkin proxy"]
-    UB -->|"POS + token"| Q
-    Q --> R["relay GameServer"]
-```
+看圖時先找出兩條不同路徑：登入、配對與查詢仍走 Nakama；位置資料則經 Quilkin 到 relay，再轉給另一位玩家。
 
-Unity 這一側全程用命令列操作，不開 Editor 的畫面，同樣的步驟可以放進 CI 或沒有螢幕的機器上重跑。Unity 的執行檔有兩種用法：Editor 加上 `-batchmode` 可以建專案、匯入套件、執行自訂的 build 方法；build 出來的 player 則可以用 `-logFile` 把 `Debug.Log` 寫到檔案，也可以加 `-batchmode -nographics` 在沒有畫面的情況下執行。player 的 log 記下每一步的結果，截圖用 `ScreenCapture.CaptureScreenshot()` 從 player 裡直接輸出。
+![Unity 透過 Nakama 取得 assignment，再經 Quilkin 與 relay 交換位置資料](../assets/diagrams/s5d9-relay.svg)
+
+替換的是 GameServer 內的程式與選取它的 Fleet 設定。Nakama 不處理這些位置封包，Quilkin 也不決定角色應該移到哪裡；relay 才負責本章的玩家間轉送。
+
+Unity 有兩種執行檔角色：**Editor** 負責建置專案，**player** 是建置後供玩家執行的程式。本章以 Editor 的 `-batchmode` 執行建置方法，再用 player 的 `-logFile` 保存結果。需要觀察方塊與截圖時仍會開啟有畫面的 player；背景 player 則用於第一部分的連線測試。
 
 ## 開始之前
 
-Part 1 需要 Day 7 的演練環境：演練節點池、`nakama-lab`（含 `get_assignment` 的 module）與 `lab-game-server` Fleet。Day 8 結尾已經拆掉，照 [Day 7 步驟 1–2](sprint5-day7-python-client-e2e.md) 重新建立。Part 2 再部署 relay Fleet，並把 allocation selector 切到 relay。
+Part 1 需要 Day 7 的演練環境：演練節點池、`nakama-lab`（含 `get_assignment` 的 module）與 `lab-game-server` Fleet。如果 Day 8 已拆除環境，先依 [Day 7](sprint5-day7-python-client-e2e.md) 重建到 module 載入、Fleet Ready 與 healthcheck 成功；若已保留，仍需確認這些條件。Part 2 再部署 relay Fleet，並把 allocation selector 切到 relay。
 
-本機需要 Unity 6000.3.19f1（batchmode 也需要已啟用的授權，Personal 即可）。nakama-unity 用 v3.22.0，2026-09-17 發布，截至 2026-09 是最新版。Part 2 另外需要一個叢集拉得到 image 的 container registry；image 在 ACR 上 build，本機不需要 Docker。完整檔案在 [labs/sprint5/day9/](https://github.com/DeepWaveLab/CloudNativePracticing/tree/main/labs/sprint5/day9)。
+本章的實測平台是 macOS，使用 Unity 6000.3.19f1、已啟用的 Unity 授權，以及 nakama-unity v3.22.0；下方路徑與建置目標都是 macOS standalone。Part 2 另外需要一個叢集拉得到 image 的 container registry；image 在 ACR 上 build，本機不需要 Docker。完整檔案在 [labs/sprint5/day9/](https://github.com/DeepWaveLab/CloudNativePracticing/tree/main/labs/sprint5/day9)。
+
+先在課程儲存庫的 `labs/sprint5/day9/` 目錄操作。本章會在這裡建立 `cnp-day9-unity` 子目錄；後續 `$UNITY`、`$APP` 與相對路徑沿用同一個 shell。完整 C# 檔案才包含輔助函式與模式切換，不能只用下方節錄建置。
 
 ## Part 1：用 nakama-unity 重做玩家流程
 
@@ -74,7 +69,7 @@ batchmode 需要已啟用的授權，建專案的 log 裡會看到授權類型�
   Product: Unity Personal Version
 ```
 
-官方 README 提供用 git URL 加入套件的方式，直接改 `Packages/manifest.json`，版本釘在 tag（完整檔案：[manifest.json](https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day9/manifest.json)）：
+官方 README 提供用 git URL 加入套件的方式，在新專案的 `cnp-day9-unity/Packages/manifest.json` 之 `dependencies` 物件加入以下項目，保留原有套件並注意逗號；版本固定在 tag（完整檔案：[manifest.json](https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day9/manifest.json)）：
 
 ```json
 "com.heroiclabs.nakama-unity": "https://github.com/heroiclabs/nakama-unity.git?path=/Packages/Nakama#v3.22.0"
@@ -84,7 +79,7 @@ batchmode 需要已啟用的授權，建專案的 log 裡會看到授權類型�
 
 ### 步驟 2:寫 client
 
-`Assets/Scripts/Day9Client.cs`（完整檔案：[Day9Client.cs](https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day9/Day9Client.cs)）是一個掛在場景物件上的 MonoBehaviour。參數從命令列讀取（`-player`、`-nakamaPort`、`-screenshot` 等），這樣同一個 build 可以用不同身分跑兩次。主要流程：
+先建立新專案內的 `Assets/Scripts/` 目錄，將本章完整的 `Day9Client.cs` 複製到 `cnp-day9-unity/Assets/Scripts/Day9Client.cs`。這個檔案（完整檔案：[Day9Client.cs](https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day9/Day9Client.cs)）定義一個 MonoBehaviour，也就是可掛在 Unity 場景物件上的程式元件；稍後建置腳本會建立場景並掛上它，不需要手動拖曳。參數從命令列讀取（`-player`、`-nakamaPort`、`-screenshot` 等），這樣同一個 build 可以用不同身分跑兩次。主要流程：
 
 ```csharp
 var client = new Client("http", host, port, "defaultkey", UnityWebRequestAdapter.Instance);
@@ -121,7 +116,7 @@ var rpc = await client.RpcAsync(session, "get_assignment", "{}");
 var fromRpc = JsonUtility.FromJson<Assignment>(rpc.Payload);
 ```
 
-`Assignment` 的欄位名稱必須跟 Day 7 Lua module 寫入的 key 一致（`gameserver`、`proxy`、`routing_token`、`direct`），`JsonUtility` 才解析得到。UDP 那一段用 `UdpClient`，把 token 接在 payload 後面，3 秒內沒回應就當成被擋下：
+`Assignment` 的欄位名稱必須跟 Day 7 Lua module 寫入的 key 一致（`gameserver`、`proxy`、`routing_token`、`direct`），`JsonUtility` 才解析得到。UDP 那一段用 `UdpClient`，把 token 接在 payload 後面，3 秒內沒回應就回傳 null。這是逾時觀察；還要搭配正確 token 成功的對照，才能判斷路由條件：
 
 ```csharp
 var bytes = Encoding.UTF8.GetBytes(payload);
@@ -134,7 +129,7 @@ if (await Task.WhenAny(receive, Task.Delay(3000)) != receive) return null;
 
 ### 步驟 3:用 `-executeMethod` build macOS player
 
-Editor script `Assets/Editor/Day9Build.cs`（完整檔案：[Day9Build.cs](https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day9/Day9Build.cs)）做三件事：建一個場景、放一個掛著 `Day9Client` 的物件、build 出 macOS player。
+再建立新專案內的 `Assets/Editor/` 目錄，把完整 `Day9Build.cs` 複製到 `cnp-day9-unity/Assets/Editor/Day9Build.cs`。這份只在 Editor 執行的腳本（完整檔案：[Day9Build.cs](https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day9/Day9Build.cs)）做三件事：建一個場景、放一個掛著 `Day9Client` 的物件、build 出 macOS player。
 
 ```csharp
 public static void BuildMac()
@@ -161,7 +156,7 @@ public static void BuildMac()
 }
 ```
 
-兩個 material 是 Part 2 要用的，原因見[地雷 1](#mine-1)。`runInBackground` 要打開，否則兩個視窗同時跑時，失去焦點的那個會暫停更新。
+兩個 material（材質資產）決定第二部分方塊的顏色，也讓建置保留需要的 shader（繪製物體的程式），原因見[方塊顯示洋紅色的說明](#mine-1)。`runInBackground` 要打開，否則兩個視窗同時跑時，失去焦點的那個會暫停更新。
 
 ```console
 $ $UNITY -batchmode -nographics -projectPath cnp-day9-unity -executeMethod Day9Build.BuildMac -logFile day9-build.log
@@ -175,11 +170,11 @@ Build Finished, Result: Success.
 [day9-build] result=Succeeded size=107192976 errors=0
 ```
 
-log 裡可能出現 `Error: Access token is unavailable; failed to update`。只要授權仍解析為 Personal、build 結果是 `Succeeded`，就可以繼續。
+log 裡可能出現 `Error: Access token is unavailable; failed to update`。這次仍產生 `Succeeded`、`errors=0` 與可執行 player；不能只看到授權類型就忽略其他建置錯誤，仍要以自己的建置結果與產物為準。
 
 ### 步驟 4:跑兩個 player
 
-啟動 player 前，確認 `lab-game-server` Fleet 有 Ready 的 server，並把 `nakama-lab` 的 Nakama port-forward 到本機 17350（`kubectl -n nakama-lab port-forward svc/nakama 17350:7350`）。A 開視窗並在結束前截圖，B 用 `-batchmode -nographics` 在背景跑：
+啟動 player 前，確認 `lab-game-server` Fleet 有 Ready 的 server，並把 `nakama-lab` 的 Nakama port-forward 到本機 17350（`kubectl -n nakama-lab port-forward svc/nakama 17350:7350`）。port-forward 保留在另一個終端機。以下末尾的 `&` 讓兩個 player 同時執行，否則第一個會一直等待配對。A 開視窗並在結束前截圖，B 用 `-batchmode -nographics` 在背景跑：
 
 ```console
 $ APP=cnp-day9-unity/Build/Day9Client.app/Contents/MacOS/Day9Client
@@ -188,7 +183,7 @@ $ $APP -logFile player-a.log -player unity-a -nakamaPort 17350 -screenshot playe
 $ $APP -batchmode -nographics -logFile player-b.log -player unity-b -nakamaPort 17350 &
 ```
 
-兩個 player 都以 exit code 0 結束。從兩份 log 挑出 client 印的狀態行（下面節錄登入到結果的部分）：
+本次兩個 player 都以 exit code 0 結束；自己執行時要等兩個背景程序結束，再讀 log。從兩份 log 挑出 client 印的狀態行（下面節錄登入到結果的部分）：
 
 ```console
 $ grep -hF '[day9]' player-a.log player-b.log
@@ -210,7 +205,7 @@ $ grep -hF '[day9]' player-a.log player-b.log
 [day9] unity-b: RESULT ok=true gameserver=lab-game-server-4f7v7-ddw75 token=wrb
 ```
 
-GameServer 這一側的對照跟 Day 7 步驟 7 相同：
+GameServer 這一側的對照跟 Day 7 相同。下方名稱與 `wrb` 是實測值，請換成自己收到的 GameServer 與 token：
 
 ```console
 $ kubectl get gs lab-game-server-4f7v7-ddw75 \
@@ -260,9 +255,9 @@ case "POS":
 	}
 ```
 
-`key` 是封包的來源位址（IP:port）。所有玩家都經過 Quilkin 進來，來源 IP 都是 proxy 的出口 IP，relay 靠 port 分辨是哪個玩家。回傳給玩家的封包也送到這個位址，Quilkin 會把它轉回對應的 client。
+`key` 是封包的來源位址（IP:port）。所有玩家都經過 Quilkin 進來，relay 看到的是 proxy 的來源 IP 與 port，並以整個 IP:port 作為 key。這次兩位玩家剛好來自同一個 proxy IP、不同 port；多個 proxy 時不能只用 port 作為身分。回傳給玩家的封包也送到這個位址，Quilkin 會把它轉回對應的 client。
 
-跟 Agones 的互動有四個：啟動後呼叫 `Ready()`；每 2 秒呼叫 `Health()`；用 `WatchGameServer()` 得知自己被分配；對戰結束時呼叫 `Shutdown()`。結束的條件是被分配之後，所有玩家都已離開，或 60 秒沒有收到任何封包：
+跟 Agones 的互動有四個：啟動後呼叫 `Ready()`；每 2 秒呼叫 `Health()`；用 `WatchGameServer()` 得知自己被分配；對戰結束時呼叫 `Shutdown()`。結束條件是已被分配、至少收到過一個封包，而且所有玩家都離開，或最後一個封包已超過 60 秒。注意 `lastPkt.IsZero()`：分配後完全沒有玩家送封包的情況，這段程式不會自行結束：
 
 ```go
 func (r *relay) shouldShutdown() bool {
@@ -279,7 +274,7 @@ func (r *relay) shouldShutdown() bool {
 
 ### 步驟 6:build image 並部署 relay Fleet
 
-image 用 multi-stage Dockerfile，最終層是 distroless（完整檔案：[relay-server/Dockerfile](https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day9/relay-server/Dockerfile)）：
+image 分成編譯與執行兩層（multi-stage build）；編譯層有 Go 工具鏈，最終層用 distroless，只帶執行這支程式所需的檔案（完整檔案：[relay-server/Dockerfile](https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day9/relay-server/Dockerfile)）：
 
 ```dockerfile
 FROM golang:1.26 AS build
@@ -295,7 +290,7 @@ EXPOSE 7654/udp
 ENTRYPOINT ["/relay"]
 ```
 
-用 ACR Tasks 在雲端 build，不需要本機 Docker：
+在本章的 `relay-server/` 目錄執行下列建置，讓最後的 `.` 包含 Dockerfile、`main.go`、`go.mod` 與 `go.sum`。`<ACR-NAME>` 換成自己的 registry 名稱；ACR Tasks 在雲端建置並儲存 image：
 
 ```console
 $ az acr build -r <ACR-NAME> -t cnp-day9-relay:0.1.0 --platform linux/amd64 .
@@ -310,13 +305,15 @@ Run ID: cef was successful after 1m21s
 
 前提是叢集要有權限拉這個 registry 的 image，可以用 `az aks check-acr -g <RESOURCE-GROUP> -n <CLUSTER> --acr <ACR-NAME>.azurecr.io` 確認；沒有權限時，授權方式見 [AKS 與 Azure Container Registry 整合](https://learn.microsoft.com/en-us/azure/aks/cluster-container-registry-integration)。接著 Fleet 由 Day 7 的 `lab-game-server` 改出（完整檔案：[relay-fleet.yaml](https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day9/relay-fleet.yaml)）：名稱改成 `lab-relay-server`、container 改用 relay image，port 仍是 7654。
 
+建置完成後回到 `labs/sprint5/day9/`。把 `relay-fleet.yaml` 中 `<ACR-NAME>.azurecr.io` 換成剛才建置的 registry，再套用完整檔案。不要把範例 digest 當成自己建置必然得到的值。
+
 Nakama 這一側改兩處。第一處是 Lua module：allocation selector 原本寫死 `lab-game-server`，改成從 runtime env 讀（完整檔案：[nakama-lab-module.yaml](https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day9/nakama-lab-module.yaml)）：
 
 ```lua
 selectors = { { matchLabels = { ["agones.dev/fleet"] = context.env["FLEET_NAME"] } } },
 ```
 
-第二處是 Nakama 啟動參數，加上 `--runtime.env "FLEET_NAME=lab-relay-server"`（[nakama-lab.yaml](https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day9/nakama-lab.yaml)）。套用修改後的 module 與 Deployment，等 Nakama rollout 完成；Nakama 的 pod 換過之後，原本的 port-forward 會失效，要重開一次（見 [Day 6 地雷 3](sprint5-day6-matchmaking.md#mine-3)）。部署 relay Fleet 後，兩顆 relay 都 Ready：
+第二處是 Nakama 啟動參數，加上 `--runtime.env "FLEET_NAME=lab-relay-server"`（[nakama-lab.yaml](https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day9/nakama-lab.yaml)）。套用修改後的 module 與 Deployment，等 Nakama rollout 完成；Nakama 的 pod 換過之後，原本的 port-forward 會失效，要重開一次（見 [Day 6 的 port-forward 失效說明](sprint5-day6-matchmaking.md#mine-3)）。部署 relay Fleet 後，兩顆 relay 都 Ready：
 
 ```text
 NAME                           STATE   ADDRESS         PORT   NODE
@@ -328,7 +325,7 @@ relay 的 log 第一行是 `relay listening on :7654, marked Ready`，代表它�
 
 ### 步驟 7:client 加上 relay 模式
 
-client 加一個 `-relay <秒數>` 參數。拿到 assignment 之後，改走 relay 流程：先用錯的 token 送一次 `JOIN` 確認被擋下，再用正確 token 加入，然後每 50 毫秒送一次自己的位置，讓方塊繞著圓心轉。兩個 player 的相位差半圈，畫面上會在圓的兩端：
+前面複製的完整 `Day9Client.cs` 已包含 `-relay <秒數>` 參數；不需再另寫一份 client。拿到 assignment 之後，改走 relay 流程：先用錯的 token 送一次 `JOIN` 確認被擋下，再用正確 token 加入，然後每 50 毫秒送一次自己的位置，讓方塊繞著圓心轉。兩個 player 的相位差半圈，畫面上會在圓的兩端：
 
 ```csharp
 while (Time.realtimeSinceStartup - start < relaySeconds)
@@ -363,7 +360,7 @@ Avatar(f[1], false).transform.position = new Vector3(x, 0.5f, z);
 
 ### 步驟 8:兩個視窗互相看到
 
-這一步兩個 player 都開視窗，各自每 0.25 秒存一張畫面：
+確認 Nakama 的 selector 已指向 `lab-relay-server`，且 relay Fleet 有 Ready 後，回到前面的 Unity 專案上層目錄執行。這一步兩個 player 都開視窗，各自每 0.25 秒存一張畫面；若重跑，先換用新的畫面輸出目錄，避免混入前一次結果：
 
 ```console
 $ $APP -logFile relay-a.log -player unity-a -nakamaPort 17350 -relay 10 -frames frames-a -screenshot relay-a.png \
@@ -375,7 +372,7 @@ $ $APP -logFile relay-b.log -player unity-b -nakamaPort 17350 -relay 10 -frames 
 兩個 player 都以 exit code 0 結束：
 
 ```console
-$ grep -hF '[day9]' relay-a.log relay-b.log | grep -E 'notification|JOIN|RELAY|RESULT'
+$ grep -hF '[day9]' relay-a.log relay-b.log | grep -E 'notification|rpc|JOIN|RELAY|RESULT'
 [day9] unity-a: notification 6006 gameserver=lab-relay-server-zn6v7-hbck9 token=sa4
 [day9] unity-a: rpc get_assignment found=True matches_notification=True
 [day9] unity-a: relay JOIN with wrong token -> (no reply)
@@ -390,7 +387,9 @@ $ grep -hF '[day9]' relay-a.log relay-b.log | grep -E 'notification|JOIN|RELAY|R
 [day9] unity-b: RESULT ok=true gameserver=lab-relay-server-zn6v7-hbck9 token=sa4
 ```
 
-10 秒內雙方各送出約 150 個位置，也收到對方約 150 個，沒有掉包。想把兩個視窗的逐格畫面左右並排成 GIF，可以用 ffmpeg：
+10 秒內 A 送出 153、B 收到 A 的 153；B 送出 154、A 收到 B 的 154。這支持本次雙向轉發與計數相符，不能證明正式網路零丟包：程式沒有按序號完整檢查重複、遺失或亂序，而且兩個 player 在同一台 Mac 上。
+
+想把兩個視窗的逐格畫面左右並排成 GIF，可以用 ffmpeg：
 
 ```console
 $ ffmpeg -framerate 4 -i frames-a/frame-%03d.png -framerate 4 -i frames-b/frame-%03d.png \
@@ -434,8 +433,8 @@ relay server 這一側的 log 與 GameServer 狀態：
 對照 relay 的 log：
 
 - `c2E0` 是 `sa4` 的 base64，跟 client 收到的 token 相同。
-- 兩個玩家的來源都是同一個 proxy 出口 IP，port 分別是 1026 與 1028。relay 看不到玩家的真實 IP，只能用 port 分辨。
-- 兩人都 `bye` 之後 1 秒，relay 呼叫 SDK `Shutdown()`，GameServer 轉成 `Shutdown`，Fleet 在 2 秒內補出新的 Ready。這個 relay 能自己收尾，不像 `simple-game-server` 要手動刪。
+- 兩個玩家的來源都是同一個 proxy 出口 IP，port 分別是 1026 與 1028。這份封包沒有攜帶玩家原始 IP；程式以來源 IP:port 區分連線，並未驗證玩家身分。
+- 兩人都 `bye` 之後 1 秒，relay 呼叫 SDK `Shutdown()`，GameServer 轉成 `Shutdown`，Fleet 在 2 秒內補出新的 Ready。這次 relay 在收到兩人的 BYE 後主動收尾；第一部分只傳 hello，沒有送 `simple-game-server` 支援的 EXIT，因此需要另行清理。
 
 ### 步驟 9:收尾
 
@@ -445,17 +444,9 @@ relay 在對戰結束時會自己呼叫 `Shutdown()`，不需要手動刪 GameSe
 $ az aks nodepool delete -g <RESOURCE-GROUP> --cluster-name <CLUSTER> -n gslab
 ```
 
-## 自我檢查
+## 疑難排解
 
-- `-executeMethod Day9Build.BuildMac` 的 log：`Build Finished, Result: Success.`，`errors=0`。
-- 兩個 player 的 log（Part 1）：同一個 `gameserver=` 與 `token=`；`matches_notification=True`；帶 token 收到 `ACK`、錯 token `(no reply)`；`RESULT ok=true`，exit 0。
-- `az acr build` 與 relay Fleet：build `successful`；`kubectl get gs` 有 2 顆 `lab-relay-server-*` Ready，log 有 `marked Ready`。
-- 兩個 player 的 log（Part 2）：`WELCOME <player>`；`RELAY received` 至少是自己 `sent` 的一半（本次量到約 153/154）；兩個視窗都看得到對方的方塊。
-- relay server 的 log 與 `kubectl get gs -w`：兩個 `join` 來自同一個 IP、不同 port；兩個 `bye` 之後 `calling SDK Shutdown`，GameServer 轉 `Shutdown`，Fleet 補出新 Ready。
-
-## 地雷記錄
-
-### 地雷 1:執行期建立的方塊在 player build 裡變成洋紅色 {#mine-1}
+### 執行期建立的方塊在 player build 裡變成洋紅色 {#mine-1}
 
 **症狀**：用 `GameObject.CreatePrimitive(PrimitiveType.Cube)` 在執行期建出方塊，再設定 `material.color`，build 出來的 player 裡方塊全部顯示成洋紅色，顏色設定沒有作用。
 
@@ -463,25 +454,27 @@ $ az aks nodepool delete -g <RESOURCE-GROUP> --cluster-name <CLUSTER> -n gslab
 
 **修法**：在 build script 裡用 `new Material(Shader.Find("Standard"))` 建成 material 資產，指派給場景中 `Day9Client` 的序列化欄位，讓 Standard shader 因為被引用而打包進去；執行期改用 `sharedMaterial` 套上這兩個 material。另一個做法是把 shader 加進 Graphics Settings 的 [Always Included Shaders](https://docs.unity3d.com/6000.3/Documentation/Manual/class-GraphicsSettings.html)。
 
-## 帶得走的東西
+## 想一想
 
-- 換成 SDK，省掉的是 WebSocket 與訊息格式的細節；登入、配對、RPC、UDP 帶 token 這條路本身跟 Day 7 一模一樣。
-- Unity 可以完全用命令列操作：Editor 的 `-batchmode -executeMethod` 負責建專案與 build，player 的 `-logFile` 把執行結果寫進檔案，`ScreenCapture` 可以在沒人看著時存下畫面。
-- 要讓玩家看到彼此，game server 必須轉發；echo server 只能證明連得上，證明不了多人。
-- 經 Quilkin 進來的封包來源都是 proxy 的 IP，game server 靠 port 分辨玩家，看不到玩家的真實位址。
-- game server 在對戰結束時自己呼叫 SDK `Shutdown()`，Fleet 會自動補回容量，營運端不需要清理。
+1. 兩位玩家都收到 echo 的 ACK，為什麼還不能證明他們收到彼此的位置？
+2. relay 回 `WELCOME`，是否代表它已驗證這位玩家在配對名單上？從本章協定與程式找依據。
+3. relay 已 Allocated，卻從未收到封包，`shouldShutdown()` 會自動釋放它嗎？該補哪一類逾時條件？
+
+## 小結
+
+SDK 改變的是 client 呼叫 API 的方式；玩家是否收到彼此資料，仍由遊戲伺服器程式決定。echo 證明連通性，relay 的雙方收發與畫面支持位置轉送，而 BYE、Shutdown 與新 Ready 串起對戰收尾。這份 relay 沒有驗證玩家身分或位置合理性，也還有未處理的閒置條件，不能把演示成功當成完整遊戲後端。
 
 ## 正式環境還要補的
 
 WebGL、iOS、Android 的網路 API 限制各不相同，要上這些平台得分別驗證。Nakama 要有對外入口與 TLS，不能靠 port-forward。兩個 player 在同一台機器上時網路條件相同，收發數字不能代表真實玩家的網路狀況。
 
-relay 是純轉發：不驗證位置是否合理，也不檢查 `JOIN` 的玩家是不是這場配對名單上的人。正式環境要在玩家加入時，由 relay 以 server-to-server 的方式呼叫 Nakama RPC 查詢配對名單。client 也要補上玩家輸入、插值、預測與延遲補償。
+relay 是純轉發：不驗證位置是否合理，也不檢查 `JOIN` 的玩家是不是這場配對名單上的人。後續需要在加入時驗證配對資格；例如設計 server-to-server RPC 查詢名單，但本章沒有實作這支驗證 API。client 也要補上玩家輸入、插值、預測與延遲補償。
 
-要擋作弊，server 必須自己計算遊戲狀態，不能只轉發。一個做法是用 Unity 做 dedicated server build（需要另外安裝 Dedicated Server Build Support 模組），搭配 Agones 的 Unity SDK 呼叫 `Ready()`、`Health()`、`Shutdown()`。
+要阻止 client 任意宣告不合理位置，server 需要驗證輸入與遊戲規則，必要時自行計算權威狀態；單純轉發做不到這件事。一個做法是用 Unity 做 dedicated server build（需要另外安裝 Dedicated Server Build Support 模組），搭配 Agones 的 Unity SDK 呼叫 `Ready()`、`Health()`、`Shutdown()`。
 
 ## 延伸閱讀
 
-想往下深挖，從這幾份開始：
+想再深入，可以從這幾份開始：
 
 - **[nakama-unity](https://github.com/heroiclabs/nakama-unity)** —— 官方 Unity client 的安裝方式（含 git URL 釘版本）與 session、socket、RPC 的用法範例。
 - **[Unity Editor 命令列參數](https://docs.unity3d.com/6000.3/Documentation/Manual/EditorCommandLineArguments.html)** —— `-batchmode`、`-createProject`、`-executeMethod`、`-logFile` 的說明，對照步驟 1 與步驟 3。

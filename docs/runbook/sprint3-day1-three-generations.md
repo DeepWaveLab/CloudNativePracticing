@@ -1,28 +1,42 @@
-# Day 1: RuntimeClass 七層追蹤鏈——Krustlet 與 WASI node pool 的退場
+# Day 1: 從 Pod 追到節點上的 shim——RuntimeClass、handler 與兩條已退場的路
 
 ![Kubernetes 官方標誌](../assets/logos/kubernetes-icon-color.svg){ align=right width="88" }
 
-> [Day 0](sprint3-day0-wasm-concepts.md) 在紙上說了兩件事:RuntimeClass 的 `handler` 對應到節點 containerd 設定裡的一段,而 wasm 進 Kubernetes 的路上,Krustlet 與 AKS 的 WASI node pool 已經先後退場。今天把兩件事都驗出來——包括對那個已退役的功能下一次指令,看它今天實際回什麼。
+想在 AKS 上跑 wasm，搜尋結果的前幾筆很可能教你兩種做法：在 `az aks nodepool add` 加上 `--workload-runtime WasmWasi`，建一個微軟代管的 WASI node pool；或是安裝 Krustlet。[Day 0](sprint3-day0-wasm-concepts.md) 提過，這兩條路都已經退場，現行的做法是 RuntimeClass 加上節點上的 containerd shim。
 
-!!! abstract "你在課程的哪裡"
-    - **Day 0**:wasm 是什麼、Kubernetes 用什麼機制執行它。全部是概念,沒有碰過叢集。
-    - **今天**:建一座新叢集,把 RuntimeClass 從 Pod spec 一路追到節點上的 shim 行程;順便確認已退役的 WASI node pool 確實叫不動了。驗收是那條追蹤鏈能完整指出來。
-    - **Day 2**:第一條路線 wasmCloud,而它的賣點是**完全不用改節點**——今天存下來的節點基準,就是那天的對照組。
+這一章先對兩條舊路各下一次指令，看它們現在的樣子，以後在教學文章裡遇到就認得出來。接著在一座全新的 AKS 叢集上，把 RuntimeClass 從 Pod spec 一路追到節點上實際啟動的程式，再刻意讓它在兩個地方斷掉。Day 4 與 Day 6 會分別在節點上裝 wasm 的 shim，這一章看到的每一層，那天都會再出現一次。
 
-## 今天要走的路
+讀完之後，一顆指定了 `runtimeClassName` 的 Pod 起不來時，你能搭配 Pod 的節點指派、Events 與 RuntimeClass 設定，分辨它卡在排程還是容器建立階段。狀態欄本身不足以判定原因。
 
-| 步驟 | 做什麼 | 為什麼排在這 |
-|---|---|---|
-| 1 | 對已退役的 WASI node pool 下指令 | 舊教學不會下架,**今天的錯誤訊息是網路上查不到的** |
-| 2 | 確認 Krustlet 的現況 | 它的官網還活著,而 repo 已經五年沒動 |
-| 3 | 原始節點上有什麼 | **這份基準 Day 8 要拿來驗「拆得乾淨嗎」** |
-| 4 | 建 RuntimeClass,追完七層 | 驗收 |
 
-## 步驟 1: 對已退役的 WASI node pool 下指令,看它今天回什麼
+本章假設本機已安裝 Azure CLI、kubectl、GitHub CLI（`gh`）與 Python 3，Azure CLI 已登入可建立 AKS 的訂閱，且 `<resource-group>` 指向已存在的資源群組；後面的 `<cluster>` 與相關佔位值請替換為自己的實驗環境。
 
-AKS 的 WASI node pool 是 [Day 0 那張表](sprint3-day0-wasm-concepts.md)裡「雲廠商代管」的那條路。微軟的封存文件說 2025-05-05 起無法建立新的 WASI node pool。**文件寫的東西不算數,要下指令。**
+## 開始之前：一座只給這個 sprint 用的叢集
 
-先看工具那一側。核心 `az` CLI **完全沒有** `--workload-runtime` 這個參數。但那份文件本來就要你裝 `aks-preview` 擴充套件,裝了之後:
+Day 4 起會改節點上的 containerd 設定，Day 8 要拿這一章存下來的節點設定逐字比對，確認改動拆得乾淨。所以這個 sprint 用一座新的叢集，不要跟裝了其他工具的叢集共用，否則比對時分不出差異是誰造成的。網路用 AKS 預設值，一台 system 節點就夠：
+
+```bash
+az aks create -g <resource-group> -n <cluster> \
+    --location <region> --tier free \
+    --nodepool-name system --node-count 1 --node-vm-size Standard_D2as_v5 \
+    --generate-ssh-keys
+az aks get-credentials -g <resource-group> -n <cluster>
+kubectl create namespace wasmlab
+```
+
+`<resource-group>`、`<cluster>`、`<region>` 換成你自己的資源群組、叢集名稱和區域。本課驗證時，節點是 Kubernetes 1.35.6、containerd 2.3.3。
+
+## 步驟 1: 試建一個 WASI node pool
+
+WASI node pool 是 AKS 以前的預覽功能：微軟替你在節點上裝好 wasm 的 shim，建 node pool 時指定執行期類型就能用。微軟已封存的文件寫著，2025-05-05 起無法再建立新的 WASI node pool。我們直接試一次，看它實際回什麼。
+
+核心的 `az` CLI 沒有 `--workload-runtime` 這個參數，舊文件會要你先裝 `aks-preview` 擴充套件：
+
+```bash
+az extension add --name aks-preview
+```
+
+裝好之後看 `--help`：
 
 ```console
 $ az aks nodepool add --help | grep -A4 workload-runtime
@@ -33,7 +47,7 @@ $ az aks nodepool add --help | grep -A4 workload-runtime
                                                        ^^^^^^^^^
 ```
 
-**`WasmWasi` 還在合法值清單裡**,而且 `--help` 裡還附著一個現成範例。照舊教學走的人,會一路走到最後一步才撞牆:
+`WasmWasi` 還在合法值清單裡，說明裡也還附著一個建立 wasm node pool 的範例。只看 `--help`，看不出這個功能已經不能用。真的送出去：
 
 ```console
 $ az aks nodepool add -g <resource-group> --cluster-name <cluster> \
@@ -47,11 +61,9 @@ like to run WebAssembly (WASM) workloads, you can deploy SpinKube to Azure Kuber
 Code: InvalidWorkloadRuntimeSettingError
 ```
 
-**這段訊息值得逐字讀,有三個資訊:**
+先看最後一行的 `Code`。這個錯誤碼來自 ARM（Azure Resource Manager，Azure 上建立、修改資源的請求都會經過的 API 層），表示請求是在伺服器端的資源驗證被擋下，不是 CLI 自己檢查參數時擋的。所以改用 Terraform、SDK 或直接呼叫 REST API，照理也會拿到同一個錯誤；本課只用 `az` 試過。
 
-**它有一個 `Code`。** `InvalidWorkloadRuntimeSettingError` 代表拒絕發生在 ARM 的資源驗證階段,不是 CLI 的參數檢查——**換 SDK、換 Terraform、直接打 REST,都會拿到同一段**。
-
-**措辭用現在式描述一個不存在的資源。** 「該 agent pool **有**一個已淘汰的執行期」——聽起來像 pool 已經建出來了。沒有:
+訊息用現在式寫 `The agent pool mywasipool has a deprecated workload runtime`，讀起來像 pool 已經建出來、需要清理。其實沒有：
 
 ```console
 $ az aks nodepool list -g <resource-group> --cluster-name <cluster> -o table
@@ -59,11 +71,11 @@ Name    Prov       Count
 system  Succeeded  1        ← 只有這一個
 ```
 
-這是「先建物件再驗證」的實作痕跡,而它會讓人誤以為要去清理殘留。
+訊息最後也指了遷移方向：改用 SpinKube，也就是本 sprint Day 6–7 要走的路。
 
-**它主動給了遷移方向。** 那個方向是 SpinKube,也就是本 sprint Day 6–7 要走的路。
+### 那個 feature flag 不用去註冊
 
-### 那個 feature flag 還在,但註冊它救不了任何事
+AKS 的預覽功能通常要先在訂閱上註冊一個 feature flag（預覽功能的開關）才能使用。WASI node pool 的 flag 還留在清單上：
 
 ```console
 $ az feature list --namespace Microsoft.ContainerService \
@@ -72,17 +84,15 @@ Name                                            State
 microsoft.ContainerService/WasmNodePoolPreview  NotRegistered
 ```
 
-旗標還掛在 ARM 的清單上。**這裡刻意不去註冊它**,兩個理由:
+這裡不去註冊它。註冊 feature flag 是訂閱層級的變更，同一個訂閱底下的所有叢集都會受影響，包括正式環境。而且上面的錯誤碼 `InvalidWorkloadRuntimeSettingError` 說的是 `WasmWasi` 這個值已經淘汰，flag 沒註冊時的錯誤則會說功能沒有啟用，所以註冊了應該還是會被拒。這一點是從錯誤碼推論的，本課沒有實際註冊驗證。
 
-註冊 feature flag 是**訂閱層級**的異動,會影響同一訂閱底下所有叢集可用的 API 介面,包含正式環境。為了一個已退場的預覽功能付這個代價不划算。
+結論很簡單：教學文章裡看到 `--workload-runtime WasmWasi`，就知道那篇已經過時，不必照著做。
 
-而且**從錯誤碼可以推論註冊了也沒用**:拒絕的 `Code` 是「這個值已淘汰」,不是 feature gate 沒開時慣用的「功能未啟用」。**擋你的是值,不是權限。**
+## 步驟 2: 查 Krustlet 的現況
 
-**這一點是推論,不是實測**——要實測就得動訂閱層級的設定。
+Krustlet 是更早的做法：一個用 Rust 寫的程式，假裝自己是 kubelet，直接向 API server 註冊成一個節點，wasm 由它自己執行，不經過 containerd。這裡不部署它，只查看課程驗證時（2026-08）的狀態，因為搜尋時很容易遇到它的教學。
 
-## 步驟 2: Krustlet——官網還活著,repo 五年沒動
-
-Krustlet 是 wasm 進 Kubernetes 最早的嘗試(Day 0 那張表的第一條路):一個假裝自己是 kubelet 的行程,繞過 CRI 直接向 API server 註冊成節點。這裡**不部署它**,只確認它現在是什麼狀態——因為你搜尋時遲早會撞到它。
+Day 0 的[專案健康度檢查方法](sprint3-day0-wasm-concepts.md#health-method)建議先看 release 和 commit。先看 release：
 
 ```console
 $ gh api repos/krustlet/krustlet/releases --jq '.[] | "\(.tag_name)\t\(.published_at)"'
@@ -91,27 +101,27 @@ v0.7.0           2021-03-24T21:57:49Z
 ...
 ```
 
-**最後一個 release 是 2021-07-27,而且九個 release 全部標記為 prerelease**——這個專案從來沒有發過正式版。
+最後一個 release 是 2021-07-27 的 `v1.0.0-alpha.1`。省略掉的其他幾個也一樣，九個 release 全部標成 prerelease，這個專案從來沒有發過正式版。
+
+再看 repo 本身和最後一次 commit 改了哪些檔案：
 
 ```console
-$ gh api repos/krustlet/krustlet --jq '{archived,pushed_at,stars}'
+$ gh api repos/krustlet/krustlet --jq '{archived,pushed_at,stars:.stargazers_count}'
 { "archived": false, "pushed_at": "2023-10-02T18:41:06Z", "stars": 3605 }
 
 $ gh api repos/krustlet/krustlet/commits/main --jq '.files[].filename'
 README.md
 ```
 
-**這個 repo 歷史上的最後一次提交只改了一個檔案:README。** 內容是:
+最後一次 commit 在 2023-10-02，只改了 README，加進去的是這句話：
 
 > ⚠️ This project is currently not actively maintained.
 
-而**就在那句話下面三行**,README 仍然寫著:
+同一份 README 往下三行，還留著：
 
 > 📯 Krustlet 1.0 coming soon!
 
-兩句話同時掛在首頁上,相隔兩年。
-
-### 為什麼這是讀者防雷的重點
+再看官網和文件站：
 
 ```console
 $ curl -s -o /dev/null -w "%{http_code}\n" https://krustlet.dev/
@@ -120,63 +130,87 @@ $ curl -s -o /dev/null -w "%{http_code}\n" https://docs.krustlet.dev/intro
 200
 ```
 
-**官網與文件站今天都回 200,站上沒有任何停止維護的標示,3605 顆星也還在。** 搜尋引擎會把一個看起來完整的教學站排在前面,而那個 repo 的最後一次提交是五年前的訃聞。
+兩個網站都正常回應，頁面上沒有停止維護的標示，repo 也沒有封存（`archived: false`）。只看官網和星星數，會以為這是一個還在運作的專案。判斷專案狀態要看 release 和 commit 紀錄，這裡就是一個例子。
 
-**判定一個專案的生死不能看官網,要看 release 與 commit。**
+那份封存的 AKS 文件裡，還有一段給 Krustlet 使用者的遷移說明：
 
-### 一份文件裡兩段互相抵消的指示
+> 如果你還在用基於 Krustlet 的 WASI node pool,可以建立一個新的 WASI node pool 來遷移到 containerd shim。
 
-那份封存的 AKS 文件裡有一段給 Krustlet 使用者的遷移指引:
-
-> 如果你還在用基於 Krustlet 的 WASI node pool,**可以建立一個新的 WASI node pool** 來遷移到 containerd shim。
-
-而同一頁最上面的警告是:
+同一頁最上面的警告卻是：
 
 > 2025 年 5 月 5 日起,你將無法建立新的 WASI node pool。
 
-**Krustlet 的使用者被指引搬去 WASI node pool,而 WASI node pool 已經關門。** 兩條退場的路,一條指向另一條。
+照這份文件從 Krustlet 遷移，會被指到步驟 1 那個已經不能建立的功能。兩條舊路都確認關了，接下來看現行的做法。
 
-## 步驟 3: 原始節點上有什麼
+## RuntimeClass 的兩半
 
-要看節點,需要一顆特權 pod 再跳進節點的命名空間——這個做法 [Sprint 2 Day 0](sprint2-day0-ebpf-concepts.md) 建立過,這裡直接沿用。
+Day 0 講過，RuntimeClass 是 Kubernetes 用來挑選容器執行方式的物件，它的 `handler` 欄位對應到節點上 containerd 設定裡的一段。所以這條路分成兩半：叢集裡的 RuntimeClass 宣告一個 handler 名稱，節點上的 containerd 設定提供這個名稱的實作。
+
+Kubernetes 不會替你檢查這兩半對不對得上。接下來先看節點那一半現在有什麼，再從叢集那一半建 RuntimeClass，一路往下追。
+
+## 步驟 3: 看節點上的 containerd 設定 {#step-3}
+
+要看節點上的檔案，沿用 [Sprint 2 Day 0](sprint2-day0-ebpf-concepts.md) 的做法：建立 `node-shell` DaemonSet，讓每個節點都有一顆特權 Pod，再用 `nsenter` 進到節點的命名空間。
 
 ```bash
 cat > node-shell.yaml <<'EOF'
-apiVersion: v1
-kind: Pod
+apiVersion: apps/v1
+kind: DaemonSet
 metadata:
   name: node-shell
   namespace: wasmlab
 spec:
-  hostPID: true          # so nsenter -t 1 reaches the node's PID 1
-  hostNetwork: true
-  containers:
-    - name: shell
-      image: mcr.microsoft.com/cbl-mariner/base/core:2.0
-      command: ["sleep", "infinity"]
-      securityContext:
-        privileged: true
-      volumeMounts:
-        - { name: host, mountPath: /host }
-  volumes:
-    - name: host
-      hostPath: { path: / }
+  selector:
+    matchLabels: {app: node-shell}
+  template:
+    metadata:
+      labels: {app: node-shell}
+    spec:
+      hostPID: true
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: shell
+          image: ubuntu:24.04
+          command: ["sleep", "infinity"]
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - {name: hostroot, mountPath: /host}
+      volumes:
+        - name: hostroot
+          hostPath: {path: /}
 EOF
 kubectl apply -f node-shell.yaml
+kubectl -n wasmlab rollout status ds/node-shell --timeout=5m
+NODE_SHELL_POD=$(kubectl -n wasmlab get pod -l app=node-shell -o jsonpath='{.items[0].metadata.name}')
 ```
 
+以下在本機終端機執行。`NODE_SHELL_POD` 是剛查出的 Pod 名稱，DaemonSet 的 Pod 名稱會帶隨機後綴；不要把 DaemonSet 名稱直接當 Pod 名稱。先看 containerd 的版本和設定目錄：
+
 ```console
-$ kubectl -n wasmlab exec node-shell -- nsenter -t 1 -m -- containerd --version
+$ kubectl -n wasmlab exec "$NODE_SHELL_POD" -- nsenter -t 1 -m -- containerd --version
 containerd github.com/containerd/containerd/v2 2.3.3-2
 
-$ kubectl -n wasmlab exec node-shell -- nsenter -t 1 -m -- ls /etc/containerd/
+$ kubectl -n wasmlab exec "$NODE_SHELL_POD" -- nsenter -t 1 -m -- ls /etc/containerd/
 config.toml
 kubenet_template.conf          ← 沒有 conf.d/,預設是單一檔案
 ```
 
-那個 **2.3.3** 立刻推翻了 Day 0 引用的設定路徑,見[地雷 1](#mine-1)。
+containerd 是 2.x，設定只有 `config.toml` 一個檔案。版本要先記下來，因為 containerd 1.x 和 2.x 的設定寫法不同，下面馬上會用到。
 
-### 預設設定全文,22 行
+在本機建立以下四份基準檔。Day 2 比較安裝前後，Day 8 也會用到；`containerd config dump` 讀取設定檔並展開預設值，並非向執行中的服務查詢已載入設定：
+
+```bash
+kubectl -n wasmlab exec "$NODE_SHELL_POD" -- nsenter -t 1 -m -- cat /etc/containerd/config.toml > baseline-containerd-config.toml
+kubectl -n wasmlab exec "$NODE_SHELL_POD" -- nsenter -t 1 -m -- containerd config dump > baseline-containerd-config-dump.toml
+kubectl get node -o jsonpath='{.items[0].status.runtimeHandlers}' | python3 -m json.tool > baseline-node-runtimehandlers.json
+kubectl -n wasmlab exec "$NODE_SHELL_POD" -- nsenter -t 1 -m -- sh -c 'ls -la /usr/bin/containerd-shim* /usr/bin/runc' > baseline-shim-binaries.txt
+```
+
+內容是這樣（中間省略了映像倉庫設定的幾行）：
 
 ```toml
 version = 2
@@ -200,13 +234,25 @@ oom_score = -999
   address = "0.0.0.0:10257"
 ```
 
-**把這份存起來。Day 8 要拿它逐字比對,驗證 Day 6 裝的 shim 拆得乾淨。**
+看 `runtimes.runc` 那一段的開頭：`plugins."io.containerd.cri.v1.runtime"`。Day 0 照 Kubernetes 官方 RuntimeClass 文件寫的是另一個名稱：
 
-### 有幾個 handler
+```text
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.${HANDLER}]
+```
 
-**兩個**:`runc` 與 `untrusted`。而且它們的 `runtime_type` 與 `BinaryName` 完全一樣——`untrusted` 是 Kubernetes 早年一個 pod annotation 留下來的相容性入口,跟 `runc` 指向同一個執行體,差別只在 `runc` 多了 `SystemdCgroup = true`。
+那是 containerd 1.x 的 plugin 名稱。containerd 2.x 把 CRI 相關設定拆成映像和執行期兩個 plugin，執行期這一半的路徑變成：
 
-同一件事**完全不碰節點也問得到**:
+```text
+[plugins."io.containerd.cri.v1.runtime".containerd.runtimes.${HANDLER}]
+```
+
+containerd 2.x 仍支援舊的 version 2 格式並會遷移，不能把所有舊路徑都判定為無效。本課 AKS 設定已使用新 plugin 名稱；後面安裝工具另外加上舊路徑時，新增的 handler 沒有出現在解析結果中。因此修改前要一起確認執行檔版本、設定格式與既有 plugin 路徑，見[疑難排解：照文件貼的 runtime 設定沒有生效](#mine-1)。
+
+### 節點上有幾個 handler
+
+設定裡每一段 `runtimes.<名稱>` 就是一個 handler。這份設定有兩個：`runc` 和 `untrusted`。兩段的 `runtime_type` 和 `BinaryName` 一樣，差別只在 `runc` 多了 `SystemdCgroup = true`。`untrusted` 是 Kubernetes 早年一個 pod annotation 留下的相容性入口，最後執行的程式跟 `runc` 相同。上面那行 `default_runtime_name = "runc"`，決定 Pod 沒有指定 RuntimeClass 時用哪一個 handler。
+
+同一份清單不進節點也查得到。kubelet 會把節點上可用的 handler 回報在 Node 物件的 `status.runtimeHandlers`：
 
 ```console
 $ kubectl get node -o jsonpath='{.items[0].status.runtimeHandlers}' | python3 -m json.tool
@@ -215,11 +261,17 @@ $ kubectl get node -o jsonpath='{.items[0].status.runtimeHandlers}' | python3 -m
   { "name": "untrusted", "features": {…} } ]
 ```
 
-三筆,多出來的空字串是**不指定 `runtimeClassName` 時走的預設路徑**。
+三筆裡多出來的空字串，就是沒有指定 `runtimeClassName` 時走的預設路徑。Day 6 裝好 wasm 的 shim 之後，這裡應該會多一筆，所以這行指令是那天最快的檢查方式。
 
-**這行指令是 Day 6 最好用的驗收工具**:shim 裝成功的話,這裡會多一筆。
+handler 只是設定裡的名稱，真正執行的是磁碟上的檔案。containerd 不直接啟動容器，它會為 Pod 起一個叫 **shim** 的小程式，由 shim 去呼叫底層的執行檔。`runtime_type = "io.containerd.runc.v2"` 指定用哪一種 shim，containerd 照這個名稱在節點上找 `containerd-shim-runc-v2` 這個執行檔；`BinaryName` 則是 shim 要呼叫的程式。
 
-而節點上真正存在的 shim 執行檔只有一個:
+接下來幾個指令要在節點的檔案系統裡執行。開一個節點上的 shell，這個視窗先留著，`kubectl` 指令另開一個終端機執行：
+
+```bash
+kubectl -n wasmlab exec -it "$NODE_SHELL_POD" -- nsenter -t 1 -m -- bash
+```
+
+在節點 shell 裡列出 shim 執行檔：
 
 ```console
 $ ls -la /usr/bin/containerd-shim* /usr/bin/runc
@@ -227,13 +279,17 @@ $ ls -la /usr/bin/containerd-shim* /usr/bin/runc
 -rwxr-xr-x 1 root root 10015640 /usr/bin/runc
 ```
 
-**兩個 handler、一個 shim 二進位檔。** handler 是設定裡的名字,shim 是磁碟上的東西——Day 6 要做的正是「放一個新的二進位檔進去,再加一段設定指向它」,而這兩件事今天各自看得清楚。
+節點上只有一個 shim 執行檔。把設定裡的名稱和磁碟上的檔案畫在一起，上半是設定，下半是執行檔：
 
-叢集那一側也有東西是預設就在的,而且其中一個是壞的,見[地雷 2](#mine-2)。
+![上半是 containerd 設定裡的三個 handler 名稱：空字串（預設）、runc、untrusted，空字串經由 default_runtime_name 指到 runc；runc 和 untrusted 兩段都寫 runtime_type io.containerd.runc.v2，所以都落到下半同一個執行檔 containerd-shim-runc-v2，再由它呼叫 /usr/bin/runc](../assets/diagrams/s3d1-handlers.svg)
 
-## 步驟 4: 驗收——RuntimeClass 的兩半 {#step-4}
+我們可以從圖上看到，三條路最後都落在同一個 shim 和同一個 `runc`。Day 6 要做的兩件事也都在這張圖上：在下半放進一個新的 shim 執行檔，在上半加一段指向它的設定。少了任何一件，wasm 的 Pod 都起不來。
 
-### 第一半:handler 對得上
+## 步驟 4: 建 RuntimeClass，追到節點上的程式 {#step-4}
+
+### handler 對得上的時候
+
+建一個 handler 指向 `runc` 的 RuntimeClass，再起一顆指定它的 Pod：
 
 ```bash
 cat > runtimeclass-runc.yaml <<'EOF'
@@ -260,9 +316,36 @@ EOF
 kubectl apply -f runtimeclass-runc.yaml -f pod-runc.yaml
 ```
 
-刻意不用叢集預設的那個 `runc` RuntimeClass——**要證明的是這個物件自己建得出來**,而 Day 6 的 wasm 版本除了 handler 名字以外長得一模一樣。
+叢集本來就有一個叫 `runc` 的 RuntimeClass（步驟 5 會看到），這裡刻意自己建一個。Day 6 要建的 wasm 版本，除了 handler 名稱以外跟這份一樣。
 
-**但 Pod 跑起來不算證明**,因為不指定 `runtimeClassName` 它也會跑起來。要證明的是「它是經由 `runc` 這個 handler 被啟動的」,所以要問 CRI:
+節點上的第二個 handler `untrusted` 也建一組，等一下拿來對照：
+
+```bash
+cat > runtimeclass-untrusted.yaml <<'EOF'
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: wasm-day1-untrusted
+handler: untrusted
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-untrusted-handler
+  namespace: wasmlab
+spec:
+  runtimeClassName: wasm-day1-untrusted
+  containers:
+    - name: app
+      image: mcr.microsoft.com/cbl-mariner/busybox:2.0
+      command: ["sh", "-c", "sleep 3600"]
+EOF
+kubectl apply -f runtimeclass-untrusted.yaml
+```
+
+兩顆 Pod 都會進入 `Running`。但這還不能證明 `pod-runc-handler` 是經由 `runc` 這個 handler 起來的，因為不指定 `runtimeClassName` 它一樣會跑。要確認，得問 containerd 那一側。
+
+kubelet 和 containerd 之間用 **CRI**（Container Runtime Interface）溝通。kubelet 啟動 Pod 時，會先請 containerd 建一個 **sandbox**（同一個 Pod 裡所有容器共用的執行環境），並在這個請求裡帶上 handler 名稱。`crictl` 是在節點上查 CRI 狀態的工具。在節點 shell 執行 `crictl pods --namespace wasmlab -o json`，看各筆 sandbox 的 `runtimeHandler`。下面是整理過的輸出，`| …` 代表省略顯示處理，不要照著輸入：
 
 ```console
 $ nsenter -t 1 -m -- crictl pods --namespace wasmlab -o json | …
@@ -271,47 +354,42 @@ pod-untrusted-handler    SANDBOX_READY  runtimeHandler='untrusted'
 node-shell               SANDBOX_READY  runtimeHandler=''        ← 沒指定的那顆
 ```
 
-三種狀態同框。最後那顆的 `runtimeHandler` 是**空字串**——kubelet 根本沒把 handler 傳給 CRI,containerd 自己套用 `default_runtime_name`。**「用預設」與「明確指定 runc」在 CRI 層是兩條不同的路徑,即使結果一樣。**
+三顆 Pod 剛好是三種情況：指定 `runc`、指定 `untrusted`，以及什麼都沒指定的 `node-shell`。最後那顆的 `runtimeHandler` 是空字串，表示 kubelet 沒有傳 handler 給 containerd，由 containerd 套用 `default_runtime_name`。結果一樣是 `runc`，但在 CRI 這一層，「沒指定」和「明確指定 `runc`」走的是不同的路徑。
 
-### 七層,完整串起來
+最後一層是節點上實際在跑的程式，同樣在節點 shell 裡查：
 
-這就是 Day 0 只在紙上講、今天要指出來的那條線。前兩層住在叢集(etcd),第 ③ 層是 kubelet 把 handler 交給 CRI 時、在節點側查到的執行狀態,第 ④–⑦ 層則落在節點的設定、磁碟與行程裡——**「叢集宣告、節點執行」這條分界後面幾天會反覆出現**:
-
-```mermaid
-flowchart TB
-    subgraph cluster["叢集側(存在 etcd)"]
-        A["① Pod 宣告要用哪個 RuntimeClass<br/>runtimeClassName: wasm-day1-runc"]
-        B["② RuntimeClass 指向哪個 handler<br/>handler: runc"]
-    end
-    C["③ kubelet 把 handler 交給 CRI<br/>sandbox 的 runtimeHandler = runc"]
-    subgraph node["節點側(存在 VM 磁碟上)"]
-        D["④ config.toml 有這個 handler 的區塊<br/>runtimes.runc"]
-        E["⑤ 區塊宣告執行期類型<br/>runtime_type = io.containerd.runc.v2"]
-        F["⑥ 執行期指向真正的執行檔<br/>BinaryName = /usr/bin/runc"]
-        G["⑦ 節點上實際啟動的行程<br/>containerd-shim-runc-v2"]
-    end
-    A --> B --> C --> D --> E --> F --> G
+```console
+$ nsenter -t 1 -m -p -- ps -eo args | grep containerd-shim
+/usr/bin/containerd-shim-runc-v2 -namespace k8s.io -id 0ce4e75a... -address /run/containerd/containerd.sock
+/usr/bin/containerd-shim-runc-v2 -namespace k8s.io -id 10a205b6... -address /run/containerd/containerd.sock
+...
 ```
 
-七層各自在哪裡驗、實測值是什麼:
+Pod 的容器就是由這些 `containerd-shim-runc-v2` 行程管理的。
 
-| 層 | 怎麼驗 | 實測值 |
+### 串成一條線
+
+從 Pod spec 到節點上的程式，每一層都看過了。下面這張圖把它們由上往下排起來，虛線上方存在叢集裡（etcd），下方在節點上：
+
+![RuntimeClass 的七層：叢集側是 ① Pod 的 runtimeClassName 與 ② RuntimeClass 的 handler；③ kubelet 經由 CRI 把 handler 交給 containerd；節點側是 ④ config.toml 的 runtimes.runc 區塊、⑤ runtime_type、⑥ BinaryName、⑦ 實際啟動的 containerd-shim-runc-v2 行程](../assets/diagrams/s3d1-chain.svg)
+
+照著圖上的編號看：① 和 ② 是叢集裡的宣告；③ 是 kubelet 把 handler 名稱交給 containerd 的那一步；④ 到 ⑦ 是節點上的設定、執行檔和行程。Day 6 換成 wasm 時，① ② 只換 handler 名稱，真正要動的是節點上的 ④ 到 ⑦，③ 回報的 handler 會跟著改變。
+
+每一層用什麼查，以及這次查到的值：
+
+| 層 | 怎麼查 | 查到的值 |
 |---|---|---|
 | ① Pod 的宣告 | `kubectl get pod -o yaml` 看 `runtimeClassName` | `wasm-day1-runc` |
 | ② RuntimeClass 的 `handler` | `kubectl get runtimeclass` | `runc` |
 | ③ CRI 收到的 handler | 節點上 `crictl pods` 看 `runtimeHandler` | `runc` |
-| ④ `config.toml` 的 runtime 區塊 | 設定檔第 12 行 | `[plugins."io.containerd.cri.v1.runtime".containerd.runtimes.runc]` |
+| ④ `config.toml` 的 runtime 區塊 | 節點上的設定檔 | `[plugins."io.containerd.cri.v1.runtime".containerd.runtimes.runc]` |
 | ⑤ 區塊裡的 `runtime_type` | 同一個區塊 | `io.containerd.runc.v2` |
 | ⑥ 區塊裡的 `options.BinaryName` | 同一個區塊 | `/usr/bin/runc` |
 | ⑦ 實際啟動的 shim 行程 | 節點上 `ps` | `/usr/bin/containerd-shim-runc-v2` |
 
-**Day 6 要換掉的只有節點側那四層(④–⑦);叢集宣告的前兩層(①②)形狀一模一樣,而第 ③ 層作為節點回報的執行狀態,也只是跟著改變。**
+### handler 不存在的時候
 
-節點上第二個 handler 也驗了一次:建一個 `handler: untrusted` 的 RuntimeClass,pod 一樣 Running,CRI 回報 `runtimeHandler='untrusted'`。**它不是理論上存在,是真的能用。**
-
-### 第二半:handler 不存在
-
-這一半是刻意去撞的,因為**那正是 Day 6 裝 shim 沒成功時會看到的畫面**。先有一次乾淨的對照,到時候就不用猜。
+再建一個 RuntimeClass，handler 指向節點上沒有的名稱。名稱用 `wasmtime-spin-v2`：這是已退場的 WASI node pool 提供的 RuntimeClass 名稱，也是 Day 6 裝好 shim 後應該要能用的那一個。這次是刻意讓它失敗，先看清楚失敗的樣子，Day 6 shim 沒裝好時就能直接認出來。
 
 ```bash
 cat > runtimeclass-missing.yaml <<'EOF'
@@ -328,7 +406,23 @@ $ kubectl apply -f runtimeclass-missing.yaml
 runtimeclass.node.k8s.io/wasmtime-spin-v2 created      ← 沒有警告
 ```
 
-**API server 收下了,連一句警告都沒有。** 然後把 pod 送上去:
+API server 直接收下，沒有任何警告，它不會去節點上確認 handler 存不存在。接著送一顆指定它的 Pod。映像用一定拉得到的 `pause`，排除映像本身的問題：
+
+```bash
+cat > pod-missing-handler.yaml <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-missing-handler
+  namespace: wasmlab
+spec:
+  runtimeClassName: wasmtime-spin-v2
+  containers:
+    - name: app
+      image: registry.k8s.io/pause:3.10
+EOF
+kubectl apply -f pod-missing-handler.yaml
+```
 
 ```console
 $ kubectl -n wasmlab get pod pod-missing-handler
@@ -341,55 +435,13 @@ Failed to create pod sandbox: rpc error: code = Unknown desc =
   no runtime for "wasmtime-spin-v2" is configured
 ```
 
-**驗收兩半都過。** 而這個失敗還有第二種長相,取決於 RuntimeClass 有沒有寫 `scheduling`——見[地雷 3](#mine-3)。
+Pod 已經排上節點，卡在 kubelet 請 containerd 建 sandbox 的那一步：containerd 的設定裡沒有 `wasmtime-spin-v2` 這個 handler。本課紀錄中 kubelet 大約每 14 秒重試一次，Pod 會一直停在 `ContainerCreating`，不會變成 `CrashLoopBackOff` 或 `Error`。如果告警規則只看這幾個狀態，這種失敗不會被發現。
 
-## 誠實的差距
+`no runtime for "…" is configured` 指的是 handler 沒有登記。若 handler 已登記，但 shim 執行檔不存在，會在尋找或啟動 shim 時出現另一種錯誤，不能混為一談。
 
-- **「註冊 feature flag 也沒用」是推論。** 依據是錯誤碼的性質(值被判定為淘汰,而非權限未開),不是實測。要實測得動訂閱層級的設定。
-- **單節點。** 今天所有節點層的觀察都來自一顆節點。跨節點的 handler 不一致(有些節點裝了 shim、有些沒有)是 Day 6 之後才會出現的情況。
-- **`untrusted` 這個 handler 只驗到「能起 pod」。** 它跟 `runc` 指向同一個執行體,所以沒有再往下追行為差異。
+## 步驟 5: 叢集裡本來就有一個跑不動的 RuntimeClass {#step-5}
 
-## 驗收 checkpoint
-
-| 驗證 | 判準 | 實測結果 |
-|---|---|---|
-| WASI node pool 確實叫不動 | 實際下指令,取得帶 `Code` 的錯誤 | `InvalidWorkloadRuntimeSettingError`,且 node pool 清單確認沒有殘留 |
-| Krustlet 的狀態有一手證據 | release 與 commit 的日期,而非官網外觀 | 最後 release 2021-07-27(全部 prerelease);最後提交只改 README |
-| 節點基準已存檔 | containerd 版本、設定全文、handler 清單、shim 二進位檔 | 四份都存了,**Day 8 的比對對象** |
-| **驗收第一半** | Pod 跑起來**且** CRI 回報的 `runtimeHandler` 等於預期 | `runtimeHandler='runc'`,七層可逐層指出 |
-| **驗收第二半** | handler 不存在時,取得明確的失敗訊息 | `no runtime for "wasmtime-spin-v2" is configured`,狀態停在 `ContainerCreating` |
-
-## 地雷記錄
-
-### 地雷 1:官方文件的 containerd 設定路徑,在 containerd 2.x 的節點上是錯的 {#mine-1}
-
-**症狀**:照文件複製一段 runtime 設定貼進節點的 `config.toml`,重啟 containerd,**沒有任何錯誤**,而 pod 起不來,訊息是 `no runtime for "…" is configured`——跟「shim 二進位檔沒複製到位」一模一樣。
-
-**根因**:Kubernetes 官方 RuntimeClass 文件(以及絕大多數 gVisor、Kata、SpinKube 的教學)寫的是:
-
-```text
-[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.${HANDLER}]
-```
-
-那是 containerd **1.x** 的 plugin ID。containerd 2.x 把 CRI 拆成兩個 plugin,實際路徑是:
-
-```text
-[plugins."io.containerd.cri.v1.runtime".containerd.runtimes.${HANDLER}]
-```
-
-而這座叢集的節點跑的是 **containerd 2.3.3**。
-
-更容易誤導的是,AKS 預設的設定檔是一份**混血**:第一行寫 `version = 2`,內容卻用 2.x 的 plugin 名,於是每次 `containerd config dump` 都會印一行:
-
-```console
-level=warning msg="Configuration migrated from version 2, use `containerd config migrate` to avoid migration"
-```
-
-**貼錯路徑的後果是安靜忽略。** containerd 把它當成一個不認識的 plugin 設定,不報錯、不警告。
-
-**修法與追查順序**:動手改節點之前先問 `containerd --version`,**而不是先去檢查 shim 有沒有複製到位**。containerd 自己的 CRI 設定文件有「Runtime classes」一節,用的就是 2.x 的路徑。
-
-### 地雷 2:叢集預設就有一個指向不存在 handler 的 RuntimeClass {#mine-2}
+本課建立的 AKS 叢集，還沒新增任何 RuntimeClass，就已經有以下兩個物件：
 
 ```console
 $ kubectl get runtimeclass          # 全新叢集,什麼都還沒做
@@ -398,15 +450,9 @@ kata-vm-isolation   kata      4m32s
 runc                runc      4m33s
 ```
 
-`runc` 對得上節點。**`kata-vm-isolation` 的 handler 是 `kata`,而這顆節點上沒有這個 handler,也沒有 kata 的 shim 二進位檔。**
+`runc` 對得上節點。`kata-vm-isolation` 的 handler 是 `kata`，但步驟 3 數過，節點上沒有這個 handler，也沒有 kata 的 shim。這個物件是 AKS 的 addon-manager（AKS 用來維護叢集內建元件的程式）放的，帶著 `addonmanager.kubernetes.io/mode: Reconcile` 標籤，刪掉也會被裝回來。可見 `kubectl get runtimeclass` 列得出來，不代表叢集跑得動它。
 
-它由 AKS 的 addon-manager 放置,帶著 `addonmanager.kubernetes.io/mode: Reconcile`——刪掉會被裝回來。
-
-**根因是分層**:RuntimeClass 是**叢集層**物件,handler 是**節點層**設定,**API server 對兩者的一致性不做任何校驗**。`kubectl apply` 一個 handler 不存在的 RuntimeClass,連警告都不會有(步驟 4 第二半親自驗過)。
-
-**教訓**:`kubectl get runtimeclass` 列得出來,**不代表叢集跑得動它**。
-
-順帶兩個對後面有用的欄位,都在那個預設物件上:
+用 `kubectl get runtimeclass kata-vm-isolation -o yaml` 看它的內容，有兩個欄位是我們自己建的 RuntimeClass 沒有的：
 
 ```yaml
 overhead:
@@ -417,76 +463,120 @@ scheduling:
     kubernetes.azure.com/kata-vm-isolation: "true"
 ```
 
-`overhead.podFixed` 是**把執行體自身開銷回饋給排程器的正式管道**(kata 要開一台輕量 VM,所以是 600Mi)。Day 5 量完 wasm 的記憶體足跡之後,這個欄位該填什麼才有答案。`scheduling` 則是[地雷 3](#mine-3) 的重點。
+`overhead.podFixed` 宣告這種執行方式本身的固定資源開銷，排程器會把它加進每顆 Pod 的資源需求。kata 要為每個 Pod 開一台輕量 VM，所以多算 600Mi 記憶體。wasm 的 shim 要不要填、填多少，要等 Day 5 量完才知道。
 
-### 地雷 3:同一個「handler 不存在」,寫不寫 `scheduling` 給你兩種完全不同的失敗 {#mine-3}
+`scheduling.nodeSelector` 限制用這個 RuntimeClass 的 Pod 只能排到有指定標籤的節點。這個排程條件不符合時，Pod 還不會走到建立 runtime 的階段。送一顆指定 `kata-vm-isolation` 的 Pod：
 
-**沒寫 `scheduling`**(步驟 4 建的那個):
+```bash
+cat > pod-kata-shipped.yaml <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-kata-shipped
+  namespace: wasmlab
+spec:
+  runtimeClassName: kata-vm-isolation
+  containers:
+    - name: app
+      image: registry.k8s.io/pause:3.10
+EOF
+kubectl apply -f pod-kata-shipped.yaml
+```
 
 ```console
-$ kubectl get pod pod-missing-handler
+$ kubectl -n wasmlab describe pod pod-kata-shipped | tail -2
+0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector
+```
+
+Pod 停在 `Pending`，訊息說沒有節點符合 node affinity/selector，完全沒提到 RuntimeClass。原因是 API server 收下 Pod 之前，RuntimeClass 的 admission 外掛（API server 在儲存物件前執行的檢查與改寫步驟）會把 `scheduling.nodeSelector` 合併進 Pod 的 spec。節點沒有 `kubernetes.azure.com/kata-vm-isolation=true` 這個標籤，排程器就找不到可以放的節點。
+
+追查時，用 `kubectl -n wasmlab get pod pod-kata-shipped -o jsonpath='{.spec.nodeSelector}'` 看 API server 上的 Pod 物件，會看到一個你的 manifest 裡沒寫過的 `nodeSelector`，順著它就能找到 RuntimeClass。要查的是 API server 回傳的物件，不是你送出去的 YAML 檔。
+
+回頭對照步驟 4 那顆沒寫 `scheduling` 的 Pod：
+
+```console
+$ kubectl -n wasmlab get pod pod-missing-handler
 NAME                  READY   STATUS              AGE
 pod-missing-handler   0/1     ContainerCreating   112s
 ```
 
-Pod **被成功排上節點**,scheduler 沒有意見。失敗發生在 kubelet 對 containerd 發出建立請求的時候,每 14 秒重試一次,狀態**永遠停在 `ContainerCreating`**。
+兩顆 Pod 被擋下的位置不同：一顆已經排上節點、找不到 handler；另一顆因標籤不符合，尚未交給節點執行。畫成圖，左邊是沒寫 `scheduling` 的 RuntimeClass，右邊是寫了的：
 
-**它不會進 `CrashLoopBackOff`,也不會變成 `Error`——只監控那幾個狀態的告警規則抓不到它。**
+![handler 不存在時的兩種失敗：左邊沒寫 scheduling，排程器照常把 Pod 排上節點，kubelet 請 containerd 建 sandbox 時失敗，Pod 停在 ContainerCreating 並每 14 秒重試；右邊寫了 scheduling.nodeSelector，admission 把 selector 併進 Pod spec，排程器找不到符合的節點，Pod 停在 Pending](../assets/diagrams/s3d1-two-failures.svg)
 
-**寫了 `scheduling.nodeSelector`**(預設那個 kata):
+我們可以看到兩件事：
 
-```console
-$ kubectl describe pod pod-kata-shipped | tail -2
-0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector
+1. 沒寫 `scheduling` 時，排程器不知道 handler 的事，照常把 Pod 排上節點，失敗由 kubelet 回報，訊息直接寫出找不到哪個 runtime。
+2. 寫了 `scheduling` 時，Pod 在排程器那一關就停下，訊息只說節點不符合 selector。
+
+該寫還是不寫？如果叢集裡有些節點裝了 shim、有些沒有，沒寫 `scheduling` 的 Pod 可能被排到沒裝的節點，同一個 Deployment 會有些副本正常、有些一直卡著，看起來像間歇性故障。本課的叢集只有一個節點，沒有實測這種情況，這是從上面兩種行為推出來的。寫了 `scheduling`，Pod 只會排到符合標籤的節點；標籤必須如實反映 runtime 安裝狀態，不能為了消除 Pending 就任意加上。Day 6 用的 SpinKube 安裝工具會替裝好 shim 的節點打標籤，所以那天建的 RuntimeClass 應該帶 `scheduling.nodeSelector`。
+
+## 收尾
+
+Day 2 會使用這座叢集與四份本機基準檔。RuntimeClass 是叢集層級物件，測試 Pod 則在 `wasmlab`。暫時不用時可以停機：
+
+```bash
+az aks stop -g <resource-group> -n <cluster>
 ```
 
-Pod 停在 `Pending`,而訊息**一個字都沒提到 RuntimeClass**。線索藏在活物件上:RuntimeClass 的 admission 外掛會把 `scheduling.nodeSelector` **併進 pod 的 spec**,所以 `kubectl get pod -o jsonpath='{.spec.nodeSelector}'` 會看到一個**你自己沒寫過的選擇器**——那就是「有人在 admission 動過手腳」的訊號,順著它查 RuntimeClass 才對得上。(自己手寫的 manifest 裡沒有這一欄,**要查 API server 回來的活物件,不是查你送出去的檔案**——這一點是 Day 7 實測後修正的。)
+<span id="mine-4"></span>停機會把節點的 VM 數量降到 0，但節點資源群組（AKS 自動建立、名稱以 `MC_` 開頭的資源群組）裡的 VNet、NSG、受管身分、load balancer 和 Standard 公用 IP 都還留著，要全部清掉只能刪除整座叢集。另外，這一章直接建立的 Pod 沒有 Deployment 之類的控制器管理，節點遭到替換時不會由控制器補回；需要重做測試時重新 `kubectl apply`。`node-shell` 由 DaemonSet 管理，會在符合條件的新節點建立 Pod。
 
-**取捨很實際:**
+## 疑難排解
 
-- **不寫**:在混合節點池裡(有些節點裝了 shim、有些沒有),Pod 會隨機挑到跑不動的節點,於是**同一個 Deployment 有些副本活著、有些卡著,看起來像間歇性故障**。
-- **寫了**:行為乾淨,但錯誤訊息難懂。
+### 照文件貼的 runtime 設定沒有生效 {#mine-1}
 
-**Day 6 的 shim 安裝器會替裝好的節點打標籤,所以那天建的 RuntimeClass 應該要帶 `scheduling`。**
+**症狀**：照文件把一段 runtime 設定貼進節點的 `config.toml`，重啟 containerd 沒有任何錯誤，Pod 卻起不來，訊息是 `no runtime for "…" is configured`；若是 shim 檔案缺失，應查看尋找或啟動執行檔的錯誤。
 
-### 地雷 4:`az aks stop` 不會刪掉節點資源群組裡的資源 {#mine-4}
+**原因**：本課的設定已使用新 plugin 名稱，安裝工具卻另加了舊路徑，新增 handler 沒有被解析到。containerd 2.x 本身仍支援 version 2 設定遷移，不能只憑舊路徑判斷失效。兩種路徑的對照見[步驟 3](#step-3)。
 
-`az aks stop` 之後,節點資源群組裡還留著六樣資源:
+另一個容易看錯的地方：AKS 的 `config.toml` 第一行宣告 `version = 2`（舊版的設定格式），內容卻是 2.x 的 plugin 名稱，所以每次執行 `containerd config dump` 都會印出這行警告：
 
-| 資源 | 停機後是否保留 |
-|---|---|
-| VMSS(capacity 歸零) | 保留定義,執行個體歸零 |
-| OS 磁碟(隨執行個體消失) | 否 |
-| VNet / NSG / 受管身分 | 保留 |
-| **Standard 公用 IP(Static)** | **保留** |
-| Standard Load Balancer | **未實測,不宣稱** |
+```console
+level=warning msg="Configuration migrated from version 2, use `containerd config migrate` to avoid migration"
+```
 
-**停機保留網路資源與公用 IP,不論叢集開著還是停著都在**。要完全清除這些資源,只能刪除整座叢集。
+看到 `version = 2` 不代表節點跑的是 containerd 1.x，要以 `containerd --version` 為準。
 
-## 帶得走的東西
+**修法**：改節點設定之前，先執行 `containerd --version`。2.x 的節點用 `io.containerd.cri.v1.runtime` 路徑，containerd 自己的 CRI 設定文件「Runtime classes」一節有 2.x 的寫法。追查時先確認版本，再檢查 shim 有沒有複製到位。
 
-- **文件寫的東西不算數,要下指令。** 那份封存文件說 WASI node pool 不能建了,但 `--help` 裡它還是合法值、還附範例。只有真的送出請求,才會拿到那個帶 `Code` 的拒絕。
-- **判定專案生死看 release 與 commit,不看官網。** Krustlet 的官網與文件站今天都回 200、3605 顆星還在,而 repo 的最後一次提交是五年前把 README 改成「不再維護」——同一頁下面三行還寫著「1.0 即將推出」。
-- **RuntimeClass 與節點設定之間沒有人負責校驗。** 叢集層宣告一個名字,節點層提供一個實作,兩邊對不上時 API server 不會說話,而失敗會延遲到 pod 要啟動的那一刻才出現。
-- **同一個錯誤有兩種長相,而其中一種躲得過告警。** handler 不存在時,沒有 `scheduling` 的會卡在 `ContainerCreating` 無限重試——不是 `CrashLoopBackOff`、不是 `Error`,只盯那幾個狀態的規則看不到它。
-- **停機不等於免費。** 這條在任何雲上都值得自己量一次:哪些資源隨執行個體消失,哪些按小時一直跳。
+### `kubectl get runtimeclass` 列得出來，指定它的 Pod 卻起不來 {#mine-2}
+
+**症狀**：全新的 AKS 叢集就有 `kata-vm-isolation` 這個 RuntimeClass，指定它的 Pod 一直停在 `Pending`。
+
+**原因**：本例先被 RuntimeClass 的 `scheduling.nodeSelector` 擋在排程階段：沒有節點符合它要求的標籤。節點同時也沒有 `kata` handler，但那不是這次 `Pending` 事件的直接原因，見[步驟 5](#step-5)。
+
+**修法**：先對照 Pod 的 Events 與 RuntimeClass 的 selector，再用 `kubectl get node -o jsonpath='{.items[0].status.runtimeHandlers}'` 確認節點上有沒有那個 handler。這個物件由 AKS 維護，刪掉會被裝回來，不必理它，自己的 Pod 不要指定它就好。
+
+### Pod 停在 `Pending`，訊息說 node affinity/selector 不符，但 manifest 沒寫 nodeSelector {#mine-3}
+
+**症狀**：Pod 指定了某個 RuntimeClass，停在 `Pending`，事件是 `didn't match Pod's node affinity/selector`。
+
+**原因**：那個 RuntimeClass 帶了 `scheduling.nodeSelector`，admission 把它併進 Pod spec，而沒有節點有那個標籤。未設定 `scheduling` 時，Pod 可能先排上節點，再因 handler 不存在而停在 `ContainerCreating`；其他原因也會產生這兩種狀態，必須看 Events。兩種情況的比較見[步驟 5](#step-5)。
+
+**修法**：用 `kubectl get pod <pod> -o jsonpath='{.spec.nodeSelector}'` 找出那個 selector，再確認哪些節點應該有這個標籤、那些節點上的 shim 有沒有裝好。
+
+## 想一想
+
+1. 同事在一台 containerd 2.x 的節點上，照一篇 gVisor 教學加了 `runsc` 的設定，重啟 containerd 沒有任何錯誤，但 `status.runtimeHandlers` 裡沒有出現 `runsc`。你會先懷疑什麼？
+2. 一個 Deployment 指定了 wasm 的 RuntimeClass，三個副本有兩個 `Running`、一個一直停在 `ContainerCreating`。你會如何對照三顆 Pod 的 Events、節點標籤與 runtime 設定？只有狀態差異，足以判定它有沒有帶 `scheduling` 嗎？
+3. 你找到一篇用 Krustlet 在叢集裡跑 wasm 的教學，文中的官網連結打得開，文件看起來也很完整。在照著做之前，你會先查什麼？
+
+## 小結
+
+wasm 進 Kubernetes 的兩條舊路都關了：WASI node pool 的請求會被 ARM 以 `InvalidWorkloadRuntimeSettingError` 拒絕，Krustlet 的 repo 早已停止維護，只是官網還開著。現行的 RuntimeClass 分成兩半，叢集裡宣告 handler 名稱，節點上的 containerd 設定提供實作，Kubernetes 不檢查兩邊是否一致。從 Pod 追下去，依序是 RuntimeClass、CRI 收到的 handler、`config.toml` 的區塊、shim 執行檔和行程。本章的兩個失敗例子分別卡在排程與 sandbox 建立。之後 Pod 起不來時，先看 Events 與節點指派，再用 `status.runtimeHandlers` 和 `containerd --version` 確認節點那一半。
 
 ## 延伸閱讀
 
-想往下深挖,從這幾份開始:
+想再深入，可以從這幾份開始：
 
-- **[AKS WASI node pool 的退場公告](https://github.com/Azure/AKS/issues/4770)** —— 第一方公告,2025-01-28 開、2025-05-06 關:2025-05-05 起無法建立新的 WASI node pool,要求改用 SpinKube 遷移。
-- **[那份已封存的 WASI node pool 文件](https://learn.microsoft.com/en-us/azure/aks/use-wasi-node-pools)** —— 已移入 previous-versions 並標註不被索引。值得看的是它同時包含「Krustlet 使用者請建立新的 WASI node pool」與「你無法建立新的 WASI node pool」兩段指示。
-- **[containerd 的 CRI 設定文件](https://github.com/containerd/containerd/blob/main/docs/cri/config.md)** —— 地雷 1 的一手來源:「Runtime classes」一節用的是 containerd 2.x 的 `io.containerd.cri.v1.runtime` 路徑。
-- **[Kubernetes RuntimeClass 文件](https://kubernetes.io/docs/concepts/containers/runtime-class/)** —— `handler`、`scheduling`、`overhead` 三個欄位的規格;注意它的設定範例仍是 containerd 1.x 的路徑。
+- **[AKS WASI node pool 的退場公告](https://github.com/Azure/AKS/issues/4770)** —— 第一方公告，2025-01-28 開、2025-05-06 關：2025-05-05 起無法建立新的 WASI node pool，要求改用 SpinKube 遷移。
+- **[已封存的 WASI node pool 文件](https://learn.microsoft.com/en-us/azure/aks/use-wasi-node-pools)** —— 已移入 previous-versions。步驟 2 引用的兩段互相矛盾的說明都在這一頁。
+- **[containerd 的 CRI 設定文件](https://github.com/containerd/containerd/blob/main/docs/cri/config.md)** —— 「Runtime classes」一節用的是 containerd 2.x 的 `io.containerd.cri.v1.runtime` 路徑，疑難排解第一項的修法以它為準。
+- **[Kubernetes RuntimeClass 文件](https://kubernetes.io/docs/concepts/containers/runtime-class/)** —— `handler`、`scheduling`、`overhead` 三個欄位的規格，以及 admission 把 `nodeSelector` 併進 Pod 的說明；它的設定範例仍是 containerd 1.x 的路徑。
 
 ## 下一步
 
-今天證明了機制存在,但**還沒有任何 wasm 在跑**——七層追到底,最後那個 shim 仍然是 `runc`。
-
-[Day 2](sprint3-day2-wasmcloud.md) 換上第一條路線 wasmCloud,而它的做法跟今天這條線**完全不同**:它不在節點上加 shim,它的 host 就是一般的 pod。所以那一天的驗收有兩半,第二半是**把節點的 containerd 設定跟今天存下來的基準逐字比對,證明它一個位元組都沒動**。
-
-三條路線之所以照「對節點的侵入程度由低到高」排,原因就在這裡:**最乾淨的那一條先做,後面的改動才不會污染前面的量測。**
+這一章追到最後，節點上跑的還是 `runc`，沒有任何 wasm。[Day 2](sprint3-day2-wasmcloud.md) 換上第一條路線 wasmCloud。它不在節點上加 shim，wasm 由一般 Pod 裡的 host 程式執行，所以 Day 2 結束時，節點的 containerd 設定應該跟這一章存下的基準完全相同，那一天會實際比對。三條路線照對節點的改動由少到多排，最後才動 containerd，前面的量測就不會受後面的改動影響。
 
 ---
 

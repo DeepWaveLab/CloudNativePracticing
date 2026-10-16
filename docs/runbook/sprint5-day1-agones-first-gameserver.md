@@ -1,34 +1,26 @@
-# Day 1: Agones 第一顆 GameServer——安裝、節點公網 IP、UDP 直連
+# Day 1：GameServer 已 Ready，外部玩家連得到嗎？
 
 ![Agones 官方標誌](../assets/logos/agones-icon-color.svg){ align=right width="90" }
 
-> Agones 的玩家連線模型是 client 直連 node IP 與 hostPort。今天在 AKS 上實際跑一次：開一組有節點公網 IP 的 game-server 節點池、安裝 Agones 1.60、建立第一顆 `GameServer`，最後從叢集外用 UDP 送出一行文字並收到 echo。
-
-!!! abstract "你在課程的哪裡"
-    - **Day 0**：已經知道 dedicated game server 為什麼不能被當成一般 stateless pod，以及 Agones 三個核心 CRD 的分工。
-    - **今天**：裝 Agones、建立第一顆 `GameServer`。驗收：`simple-game-server` 進入 `Ready`，取得 node 公網 IP 與動態 hostPort，外部 UDP client 收到 `ACK: Hello Agones from client`。
-    - **Day 2**：把單顆 `GameServer` 提升成 `Fleet`，讓 Agones 維持固定數量的 Ready server。
+第一個 GameServer 已經 Ready，但玩家從自己的電腦送出 UDP 訊息卻沒有回應。是遊戲程式沒準備好、連錯了動態埠，還是節點前的防火牆沒有放行？這章會依序確認控制元件、伺服器位址與外部 UDP 回應，讓你能分辨「伺服器已準備好」和「玩家真的連得上」。
 
 ## Agones 與 GameServer
 
-Deployment 假設 pod 可以隨時被殺掉重建，遊戲伺服器做不到這一點：對戰進行中，玩家的連線綁在**那一顆** pod 上，換一顆就是斷線。Agones 用幾個自訂資源（CRD）把「一台遊戲伺服器」變成 Kubernetes 認得的物件，並管好它從啟動、可以接受玩家連線、被分配給玩家，到結束的整個生命週期。
+Deployment 會維持副本數，但不知道哪個副本正持有一場對戰的記憶體狀態。遊戲進行中若換成另一個 Pod，新的副本不會自動接續原 session。Agones 用自訂資源定義（CRD，擴充 Kubernetes 可接受的物件種類）表達遊戲伺服器，並管好它從啟動、可以接受玩家連線、被分配給玩家，到結束的整個生命週期。
 
-最小的物件是 `GameServer`。一顆 `GameServer` 對應一個 pod，裡面跑你的遊戲程式，Agones 會自動在旁邊加上 SDK sidecar；遊戲程式透過它告訴 Agones「我準備好了」。Agones 另外做一件 Deployment 不會做的事：在節點上開一個 hostPort，把它記在 `GameServer.status.address` 與 `status.ports`，玩家直接連這組 node IP + port，中間沒有 Service。
+最小的物件是 `GameServer`。一個 `GameServer` 對應一個 Pod，裡面執行遊戲程式與 SDK sidecar；遊戲程式透過 sidecar 回報準備與健康狀態。Agones 會動態分配遊戲用的 hostPort，並把入口回報在 `GameServer.status.address` 與 `status.ports`。Deployment 的 Pod 也能設定 hostPort，但 Deployment 本身不提供這套遊戲入口分配與回報機制。本章玩家直接連這組 node IP + port，中間沒有 Service。
 
-```mermaid
-flowchart TB
-    CLI["kubectl create -f gameserver.yaml"] --> GS["GameServer CR"]
-    GS --> CTRL["agones-controller"]
-    CTRL --> POD["simple-game-server pod"]
-    POD --> NODE["gamesrv node<br/>public IP"]
-    CLIENT["local UDP client"] -->|"<NODE-IP>:7092"| NODE
-```
+先看玩家封包要經過哪些位置。GameServer Ready 只涵蓋伺服器狀態，還沒有驗證圖中的整條外部路徑。
+
+![外部 UDP 經 NSG 與節點 hostPort 抵達 GameServer](../assets/diagrams/s5d1-external-udp.svg)
+
+後面最後一步會從叢集外送出請求，補上這段路徑的證據。
 
 game server pod 用 `nodeSelector` 釘在 `role=gameserver` 的節點池，因為這組節點有公網 IP；`portPolicy: Dynamic` 讓 Agones 挑一個 hostPort，外部 client 連的是 `GameServer.status.address` 與 `status.ports[].port`。
 
 **你需要什麼**：
 
-- 一座 AKS 叢集，Kubernetes 版本在 Agones 1.60 支援範圍內（1.34–1.36）。本章的輸出來自 1.34.10。
+- 一座 AKS 叢集，本章驗證組合為 Kubernetes 1.34.10 與 Agones 1.60.0；使用其他組合前，先依 Agones 對應版本的支援矩陣確認。
 - 一個有節點公網 IP 的 game-server 節點池（步驟 1）。沒有節點公網 IP，client 就打不到 node:hostPort，只能改走 LoadBalancer 或其他路由層，那是 Day 4 的做法。
 - 本機的 `kubectl`、`helm`、`az` 與 `nc`。
 
@@ -48,7 +40,7 @@ $ az aks nodepool add -g <RESOURCE-GROUP> --cluster-name <CLUSTER> -n gamesrv \
 
 ## 步驟 2:安裝 Agones 1.60
 
-Agones 1.60 在 Kubernetes 1.34 上的預設 Helm 安裝會撞到 CRD 驗證問題（見[地雷 1](#mine-1)）。做法是把 CRD 與控制面拆開裝：CRD 用 `kubectl create --validate=false`，Helm release 則關掉 CRD 安裝。
+本課 Agones 1.60.0 與 Kubernetes 1.34.10 的安裝曾遇到 CRD 欄位驗證問題（見[疑難排解：CRD 安裝失敗](#mine-1)）。下面直接採用驗證成功的分開安裝流程。做法是把 CRD 與控制面拆開裝：CRD 用 `kubectl create --validate=false`，Helm release 則關掉 CRD 安裝。
 
 **CRD**：Agones chart 的 5 個 CRD 放在 `templates/crds/`。先加入 Agones 的 Helm repo，再用 `helm template --show-only` 只渲染這 5 個檔案，交給 `kubectl create --validate=false`：
 
@@ -64,7 +56,7 @@ $ helm template agones agones/agones --version 1.60.0 -n agones-system \
   | kubectl create --validate=false -f -
 ```
 
-用 `create` 是因為它不需要 patch；`--validate=false` 讓 apiserver 不因 CRD 裡那兩個不合法的欄位而拒收。建立成功時會印出 5 行 `customresourcedefinition... created`，對應 `fleets`、`fleetautoscalers`、`gameservers`、`gameserverallocationpolicies`、`gameserversets` 這 5 個 CRD。
+用 `create` 避開更新時的 typed patch 路徑；`--validate=false` 在支援 server-side field validation 的環境要求忽略未知欄位檢查，不是讓 API server 接受任何無效資源。這是針對本章已知額外欄位的處理，不能當成所有安裝錯誤的通用修法。建立成功時會印出 5 行 `customresourcedefinition... created`，對應 `fleets`、`fleetautoscalers`、`gameservers`、`gameserverallocationpolicies`、`gameserversets` 這 5 個 CRD。
 
 **控制面**：用 Helm 安裝，但 chart 不要碰 CRD：
 
@@ -75,9 +67,9 @@ $ helm install agones agones/agones --version 1.60.0 \
 STATUS: deployed
 ```
 
-裝完後，`kubectl -n agones-system get pods` 應看到 9 顆 pod 全部 `1/1 Running`：`agones-allocator` 3 顆、`agones-controller` 2 顆、`agones-extensions` 2 顆、`agones-ping` 2 顆。
+裝完後，`kubectl -n agones-system get pods` 在這組驗證配置看到 9 個 Pod 全部 `1/1 Running`：`agones-allocator` 3 顆、`agones-controller` 2 顆、`agones-extensions` 2 顆、`agones-ping` 2 顆。
 
-`agones-controller` 處理 `GameServer`、`Fleet` 與 `GameServerSet`。`agones-allocator` 是給叢集外呼叫 allocation 用的 gRPC／REST 服務；在叢集內建立 allocation 時，直接對 Kubernetes API 建立 `GameServerAllocation` 就好，不需要經過它。`agones-ping` 提供讓 client 量測延遲的 ping 服務。
+controller 是持續協調資源狀態的控制元件。`agones-controller` 處理 `GameServer`、`Fleet` 與 `GameServerSet`。`agones-allocator` 是給叢集外呼叫 allocation 用的 gRPC／REST 服務；在叢集內建立 allocation 時，直接對 Kubernetes API 建立 `GameServerAllocation` 就好，不需要經過它。`agones-ping` 提供讓 client 量測延遲的 ping 服務。
 
 ## 步驟 3:建立第一顆 GameServer
 
@@ -105,7 +97,7 @@ spec:
             limits: {memory: 64Mi, cpu: 20m}
 ```
 
-因為 metadata 用的是 `generateName`，這份檔案要用 `kubectl create`，不能用 `kubectl apply`（見[地雷 2](#mine-2)）：
+因為 metadata 用的是 `generateName`，這份檔案要用 `kubectl create`，不能用 `kubectl apply`（見[疑難排解：generateName 無法使用 apply](#mine-2)）：
 
 ```console
 $ kubectl create -f gameserver.yaml
@@ -119,7 +111,7 @@ simple-game-server-8vlf6   Ready   <NODE-IP>   7092   aks-gamesrv-18046246-vmss0
 
 ## 步驟 4:放行 Agones 使用的 UDP port range
 
-AKS 節點前面還有 NSG。`GameServer` 已經拿到 hostPort，不代表 Internet 可以打進去。這裡直接放行 `7000-8000/UDP`：
+AKS 節點前面還有 NSG（Network Security Group），也就是控制進出網路流量的規則。`GameServer` 已經拿到 hostPort，不代表 Internet 可以打進去。這裡直接放行 `7000-8000/UDP`：
 
 ```console
 $ az network nsg rule create -g <NODE-RESOURCE-GROUP> \
@@ -134,7 +126,7 @@ $ az network nsg rule create -g <NODE-RESOURCE-GROUP> \
 
 ## 步驟 5:從叢集外用 UDP 直連
 
-回到本機，對 `GameServer` status 回報的 address 與 port 送 UDP 封包：
+回到本機，對 `GameServer` status 回報的 address 與 port 送 UDP 封包。下面的 7092 是這次分配值，請連同 `<NODE-IP>` 一起換成你剛查到的結果：
 
 ```console
 $ printf 'Hello Agones from client\n' | nc -u -w4 <NODE-IP> 7092
@@ -143,24 +135,17 @@ ACK: Hello Agones from client
 
 client 沒有打 Kubernetes Service，也沒有打 LoadBalancer，直接打到 node 公網 IP 與 Agones 分配的 hostPort。收到 `ACK` 表示封包穿過 NSG、進到該 node 的 hostPort，最後被 `simple-game-server` 處理。
 
-## 自我檢查
+## 疑難排解
 
-- `kubectl -n agones-system get pods`：controller、extensions、allocator、ping 全部 `1/1 Running`。
-- `kubectl get crd | grep agones.dev`：列出 `fleets`、`gameservers`、`gameserversets`、`fleetautoscalers`、`gameserverallocationpolicies` 這 5 個 CRD。
-- `kubectl get gameserver -o wide`：`STATE` 是 `Ready`，`ADDRESS` 是 game-server 節點的公網 IP，`PORT` 落在 7000–8000。
-- 從本機用 `nc -u` 送到該 address 與 port，收到 `ACK:` 開頭的回應。
-
-## 地雷記錄
-
-### 地雷 1:Agones 1.60 CRD 在 Kubernetes 1.34 預設安裝失敗 {#mine-1}
+### 安裝 CRD 時出現 typed patch 或 unknown field 錯誤 {#mine-1}
 
 **症狀**：`helm install agones` 對 `fleets`、`gameservers`、`gameserversets` 三個 CRD 報 `server-side apply failed ... failed to create typed patch object`。改用 `kubectl apply --server-side` 會撞同一個錯；改 `kubectl create` 又會報 `strict decoding error: unknown field "...x-kubernetes-patch-strategy"` 與 `"...x-kubernetes-patch-merge-key"`。
 
-**根因**：這三個 CRD 內嵌 `PodTemplateSpec` schema，帶了 `x-kubernetes-patch-strategy` 與 `x-kubernetes-patch-merge-key`。這些不是合法的 CRD structural schema 擴充；Kubernetes 1.34 apiserver 的嚴格欄位驗證會拒收，server-side apply 也建不出 typed patch。Agones chart 又把 CRD 放在 `templates/crds/`，所以 `--skip-crds` 不會跳過它們。
+**根因**：這三個 CRD 內嵌 `PodTemplateSpec` schema，帶了 `x-kubernetes-patch-strategy` 與 `x-kubernetes-patch-merge-key`。這些不是合法的 CRD structural schema 擴充；驗證環境的嚴格欄位檢查會拒收，server-side apply 也建不出 typed patch。Agones chart 又把 CRD 放在 `templates/crds/`，所以 `--skip-crds` 不會跳過它們。
 
-**修法**：先從 Helm template 抽出 5 個 CRD，用 `kubectl create -f - --validate=false` 建立；接著 `helm install` 加 `--set agones.crds.install=false`，讓 chart 不再碰 CRD。安裝失敗過一次的叢集會留下 cluster-scoped 物件，重裝前要按名字清掉殘留的 PriorityClass、APIService、webhook、ClusterRoleBinding、ServiceAccount、Secret、RoleBinding 與 PDB。
+**修法**：先從 Helm template 抽出 5 個 CRD，用 `kubectl create -f - --validate=false` 建立；接著 `helm install` 加 `--set agones.crds.install=false`，讓 chart 不再碰 CRD。若曾安裝失敗，先確認 release 狀態與殘留物件的擁有者，再處理本次安裝留下的資源。清單可能同時包含叢集與命名空間物件，不能直接刪除同類型的所有物件。新建練習環境依前述流程即可，不需預先清理其他資源。
 
-### 地雷 2:kubectl apply 不接受 generateName {#mine-2}
+### kubectl apply 不接受 generateName {#mine-2}
 
 **症狀**：對使用 `metadata.generateName` 的 `GameServer` manifest 下 `kubectl apply`，會得到 `error: cannot use generate name with apply`。
 
@@ -168,25 +153,24 @@ client 沒有打 Kubernetes Service，也沒有打 LoadBalancer，直接打到 n
 
 **修法**：建立這類一次性 `GameServer` 時用 `kubectl create -f gameserver.yaml`。Day 2 的 `Fleet` 有固定 `metadata.name`，就可以回到 `kubectl apply`。
 
-## 帶得走的東西
+## 想一想
 
-- Agones 在 AKS 上可以用 UDP 直連模式，但節點池要有公網 IP，NSG 也要放行對應的 UDP port range。
-- `portPolicy: Dynamic` 的重點在 Agones 配出的 hostPort；client 連的是 status 裡的 address 與 port。
-- 在 Kubernetes 1.34 上，Agones chart 內嵌的 CRD 會讓 `helm install` 直接失敗；CRD 要先另外建立，chart 再關掉 CRD 安裝。
-- 有 `generateName` 的物件是「建立新實例」，不能用 `apply` 套用。
+1. GameServer Ready，卻沒有外部 ACK，除了遊戲程式外，還要查哪兩個入口條件？
+2. 第二次建立 GameServer 分配到另一個 hostPort，為什麼只放行 7092 會出問題？
+3. 使用 generateName 的檔案重複執行 create，會更新原伺服器，還是建立新實例？
+
+## 小結
+
+先確認 Agones 控制元件與 GameServer Ready，再使用 status 的實際位址和動態埠，從叢集外取得 UDP 回應。這樣才同時驗到伺服器狀態與外部路徑；Ready 本身不會替你開放 NSG。[Day 2](sprint5-day2-fleet-lifecycle.md) 會把單一 GameServer 包成 Fleet，觀察副本不足時如何補建。
 
 ## 延伸閱讀
 
-想往下深挖，從這幾份開始：
+想再深入，可以從這幾份開始：
 
 - **[Agones on Azure Kubernetes Service](https://agones.dev/site/docs/installation/creating-cluster/aks/)** —— 官方的 AKS 建叢集說明，包含 `--enable-node-public-ip` 與 NSG 放行 7000–8000/UDP 的做法。
 - **[Install Agones using Helm](https://agones.dev/site/docs/installation/install-agones/helm/)** —— Helm 安裝參數，包括本章用到的 `agones.crds.install`。
 - **[建立第一顆 GameServer](https://agones.dev/site/docs/getting-started/create-gameserver/)** —— 對照本章的 `kubectl get gs`、node address、port 與 `nc -u` 連線方式。
 - **[Agones releases](https://github.com/googleforgames/agones/releases)** —— 本章使用 `1.60.0`，升級前先看這裡的 release notes。
-
-## 下一步
-
-單顆 `GameServer` 證明了 UDP 直連可用。[Day 2](sprint5-day2-fleet-lifecycle.md) 把這份規格包成 `Fleet`，並驗證刪掉一顆 server 後 Agones 會自動補回來。
 
 ---
 

@@ -1,26 +1,14 @@
-# Day 3: Cilium mesh——WireGuard 傳輸加密、L7 政策與 mutual auth
+# Day 3：分開驗證 Cilium 的加密、HTTP 政策與身分
 
 ![Cilium 官方標誌](../assets/logos/cilium-icon-color.svg){ align=right width="76" }
 
-> Day 2 用 Istio ambient 做服務間的加密與斷路。今天換 Cilium 自己的 mesh,做同一組驗收——服務間加密、身分、一個 L7 介入。差別在 Cilium 用 eBPF 與 WireGuard 做這些;而「加密」和「身分綁定」是兩件常被混為一談的事,今天分開驗,其中一件會看到還沒到位。
+Cilium 狀態顯示 Encryption 已啟用，client 也能呼叫 web。這是否足以向團隊說明「服務之間已加密，而且互相驗證身分」？還不夠：狀態顯示設定，應用回應顯示可用性，兩者都沒有直接呈現網路上傳送的內容。這章會分開讀取封包、HTTP 正反例與身分後端狀態，判斷每項證據支持到哪裡。
 
-!!! abstract "你在課程的哪裡"
-    - **Day 2**:Istio ambient 做到服務間自動 mTLS(ztunnel 的 HBONE 隧道)加可設的斷路。
-    - **今天**:先乾淨拆掉 Istio,換成 Cilium mesh;抓包驗 WireGuard 傳輸加密、套一條 L7 policy、誠實看 mutual-auth 現況。
-    - **Day 4**:把 Istio 與 Cilium 兩邊的實測擺成一張決策表橫向比。
+## 先讓測試只經過預定的元件
 
-## 加密和身分是兩件事,先分清楚
+[Day 2](sprint4-day2-istio-ambient.md) 的 ztunnel 與 waypoint 仍可能處理流量。若直接加入 Cilium 政策，看到的結果可能混合兩套代理。因此本章使用已移除 Istio 的練習環境，保留 Cilium 1.20.0、`mesh-demo/client` 與 `web`。
 
-Istio ambient 的 mTLS 把兩件事一起做:ztunnel 的 HBONE 隧道同時把封包內容加密、又在兩端帶上 SPIFFE 身分。Cilium 把這兩件事拆成兩層,所以要分開驗:
-
-- **傳輸加密**:把節點之間的封包內容藏起來,抓包看不到明文。Cilium 用 **WireGuard** 在 eBPF 資料面做。這是加密,本身不綁「這條流量是哪個工作負載對哪個工作負載」。
-- **工作負載身分 / mutual auth**:確認 client 這個工作負載對 web 這個工作負載,用 SPIFFE 身分加雙向驗證。Cilium 這塊走 **SPIFFE/SPIRE**,官方標 beta。
-
-把它們分開的理由,今天就會看到:傳輸加密驗得過,身分綁定這層在本課環境起不來。今天要走的路:先乾淨拆 Istio → 抓包驗 WireGuard → 套一條 L7 policy → 看 mutual-auth 現況。
-
-## 步驟 1: 乾淨拆掉 Istio,不是口頭關
-
-Cilium 的 L7 要用它自己的 per-node Envoy 執行。如果 Day 2 的 ztunnel/waypoint 還在,它們會先攔截流量,量到的就不是 Cilium 這條路。所以先把 Istio 拆乾淨:移除 namespace 的 ambient 標籤,再 `istioctl uninstall --purge`。
+清理時除了取消 ambient 納管，也要刪除命名空間的 waypoint 資源、清除 `istio.io/use-waypoint` 標籤，並確認 waypoint Pod 已消失。接著移除 Istio 控制元件。以下節錄保留移除與檢查結果：
 
 ```text
 $ kubectl label ns mesh-demo istio.io/dataplane-mode-
@@ -30,15 +18,25 @@ $ kubectl -n istio-system get pods
 No resources found in istio-system namespace.
 ```
 
-## 步驟 2: WireGuard 傳輸加密——抓包看密文
+`istio-system` 沒有 Pod，只是檢查之一；還需確認 `mesh-demo` 沒有 waypoint 或 ambient 標籤。這項清理會撤除原有 mesh 保護，適用於隔離的練習環境，不是正式服務的遷移程序。
 
-Cilium 裝的時候開了 WireGuard。`cilium status` 看得到:
+## 從跨節點封包確認 WireGuard 加密
+
+**WireGuard** 使用金鑰建立加密通道。Cilium 整合核心的 WireGuard 功能保護支援範圍內的 Pod 流量；eBPF 參與封包處理與導引，實際加密不能一律歸為 eBPF 執行。
+
+這個測試需要兩個節點，client 與 web 分別排在不同節點，且 Cilium 已依[官方 WireGuard 設定](https://docs.cilium.io/en/stable/security/network/encryption-wireguard/)啟用加密。Day 1 的安裝命令沒有開啟 WireGuard，不能直接沿用那個狀態就期待以下結果。先確認 Cilium 狀態包含加密介面與對端：
 
 ```text
 Encryption:  Wireguard  [NodeEncryption: Disabled, cilium_wg0 (Port: 51871, Peers: 1)]
 ```
 
-`NodeEncryption: Disabled` 這行要看清楚:加密的是 **pod 流量**,不是節點自身的流量。驗的方法是抓包——讓 client(在一個節點)打 web(在另一個節點)200 次,同時在節點的 eth0 上抓,看跨節點的 pod 流量長什麼樣:
+`Peers: 1` 表示這個介面已有一個 WireGuard 對端；**NodeEncryption** 指節點自身流量的加密選項，這裡是 Disabled。因此後面只檢查選定的跨節點 Pod 流量，不能宣稱所有主機流量都受保護。
+
+抓包的位置會影響你看見的內容。下圖上排是 Pod 發出的應用請求，下排是節點網卡上要檢查的加密通道；本章的觀測位置是節點 `eth0`。
+
+![應用 HTTP 與節點網卡上的 WireGuard 通道](../assets/diagrams/s4d3-wireguard-observation.svg)
+
+應用程式可以繼續使用 HTTP，節點網卡上的跨節點封包則應走 WireGuard。驗證期間 client 向另一個節點的 web 發出 200 次請求，並同步擷取來源節點 `eth0` 流量：
 
 ```text
 # client(node A, 10.224.0.4)→ web/nginx(node B, 10.224.0.5),跨節點,200 次全部 200
@@ -55,11 +53,15 @@ IP 10.224.0.4.51871 > 10.224.0.5.51871: UDP, length 144
 IP 10.224.0.5.51871 > 10.224.0.4.51871: UDP, length 144
 ```
 
-200 次跨節點 HTTP 生出 **2412 個 WireGuard 密文封包**,而節點網卡上對 web pod 的明文是 **0**——pod 之間的 HTTP 全封在 WireGuard 隧道裡,eth0 上一個明文位元組都抓不到。這是傳輸加密的證據。但它只證明了「內容被藏起來」,沒有證明「兩端身分互相驗過」——那是下面 mutual-auth 的事。
+先看可用性：200 次請求全部成功。再看擷取結果：通往對端節點的 UDP 51871 封包有 2412 個，篩選 web Pod IP 與 TCP 80 的明文封包則為 0。結合 WireGuard 狀態與對端位址，這支持「這段跨節點測試流量經過 WireGuard」的判斷。
 
-## 步驟 3: 一條 Cilium L7 policy
+2412 個封包不等於 2412 次應用請求，不能拿它直接算 HTTP 成功率。明文為 0 也只涵蓋這個介面、篩選條件與觀測期間；它沒有驗證同節點流量、主機流量或所有其他工作負載。
 
-Cilium 的 L7 授權透過它的 per-node Envoy 執行。套一條 `CiliumNetworkPolicy`,只允許 `app=client` 對 web 發 `GET /`:
+## 用 HTTP 正反例檢查 L7 政策
+
+接著換一個要求：client 只能對 web 發出 `GET /`，不能讀取 `/admin`，也不能使用 POST。WireGuard 負責通道加密，不會解讀這些 HTTP 條件。
+
+**CiliumNetworkPolicy** 是 Cilium 的網路政策資源。它先選出目的工作負載，再指定允許的來源與連接埠；包含 HTTP 規則時，Cilium 會導引流量給 Envoy 執行 L7 判斷。以下政策需要 web Pod 有 `app=web`、client Pod 有 `app=client` 標籤：
 
 ```yaml
 apiVersion: cilium.io/v2
@@ -81,7 +83,7 @@ spec:
         - { method: "GET", path: "^/$" }
 ```
 
-`path` 是 regex,`^/$` 綁定完整的根路徑;method 與 path 不符的就被擋。從 client 打:
+`endpointSelector` 選 web，`fromEndpoints` 選 client。`path` 是正規表示式；`^/$` 限定完整根路徑，不會同時放行 `/admin`。套用後，驗證從同一個 client 分別送出三種請求：
 
 ```text
 GET  /       -> 200   (允許)
@@ -89,11 +91,13 @@ GET  /admin  -> 403   (path 不符)
 POST /       -> 403   (method 不符)
 ```
 
-`/admin` 的 403 由 Cilium 的 per-node Envoy 回,不是 nginx 的 404——L7 的判斷落在資料面,請求還沒到 nginx 就被擋掉了。
+第一個請求確認服務仍可用，另外兩個則分別改變路徑與方法。這樣才能區分「服務整體連不上」與「HTTP 條件被拒絕」。驗證中的 403 由 Cilium 管理的 Envoy 回覆，並非 nginx 找不到頁面的 404。
 
-## 步驟 4: mutual-auth 現況——加密有了,身分綁定沒有
+這項測試是 HTTP 授權，不是 [Day 2](sprint4-day2-istio-ambient.md) 的連線池限制。兩者都需要 HTTP 處理，但規則與驗證方式不同，後續比較時不應當成同一項測試。
 
-Cilium 的 mutual auth 在資料面已經啟用:
+## 身分後端未就緒，不能宣稱驗證成功
+
+Cilium 的 **mutual authentication（相互身分驗證）**另有身分機制。**SPIRE** 是提供 SPIFFE 工作負載身分的系統；它與 WireGuard 通道加密的角色不同。驗證環境中的設定包含：
 
 ```text
 cilium-config:
@@ -101,43 +105,36 @@ cilium-config:
   mesh-auth-spire-agent-socket = /run/spire/sockets/agent/agent.sock
 ```
 
-但它依賴的身分後端 SPIRE 在本課環境起不來:
+這只能說明功能旗標與 SPIRE socket 路徑已設定。還要檢查身分後端是否可用。該環境的結果如下：
 
 ```text
 cilium-spire/spire-server-0   1/2  CrashLoopBackOff  (30 restarts)
 cilium-spire/spire-agent-*    0/1  Init:Error        (25 restarts, ×2)
 ```
 
-旗標開著、後端卻不 ready,身分綁定實際上沒有生效。所以今天誠實的結論是:**傳輸加密(步驟 2)有,工作負載身分綁定沒有**。這一塊 Cilium 官方標 **beta**(截至 2026-08),本課不宣稱每條 east-west 流量都有 mTLS 式的身分綁定——加密和身分是兩件事,這裡剛好各自落在天平的兩端。
+SPIRE server 未就緒，agent 也未完成初始化，因此這組測試沒有完成工作負載相互驗證。WireGuard 抓包成功不能補足這個缺口，也不能因為單一環境啟動失敗，就推論 Cilium 在任何環境都無法提供身分驗證。
 
-## 驗收 checkpoint
+本課沒有驗證 Cilium 的連線池限制，也沒有完成 mutual-auth 的授權正反例。若需求包含這些能力，還要另做相應測試；目前可使用的證據是跨節點 WireGuard 傳輸與 HTTP 方法／路徑政策。
 
-| 驗證 | 判準 | 本課環境的結果 |
-|---|---|---|
-| WireGuard 傳輸加密 | 跨節點 pod 流量抓包看得到密文、看不到明文 | 200 次 HTTP → 2412 個 UDP 51871 密文封包;明文 HTTP = 0 |
-| Cilium L7 policy | 一條 method/path 授權在資料面生效 | GET / 200、GET /admin 403、POST 403 |
-| mutual-auth | 身分綁定可驗(或誠實標明缺口) | 旗標啟用但 SPIRE CrashLoop → 未 functional,記為 beta gap |
+## 想一想
 
-## 帶得走的東西
+1. WireGuard 封包存在、SPIRE 卻未就緒，你可以宣稱哪一項要求成立？哪一項還不能？
+2. client 和 web 排在同一節點時，沿用本章的 eth0 抓包結果，能否驗證跨節點加密？
+3. `GET /`、`GET /admin`、`POST /` 全部回 403，為什麼不算完整通過這條政策的測試？
 
-- **加密和身分是兩件事。** Istio 的 mTLS 把它們打包在一起,容易讓人以為「有加密就有身分」。Cilium 把兩層拆開,反而看得清楚:WireGuard 藏內容、SPIFFE 綁身分,今天前者過、後者還在 beta。
-- **WireGuard 是節點資料面的透明加密。** pod 與應用不用改任何設定,加密發生在 eBPF 資料面;驗它要抓包看密文,不是看「有沒有開」的旗標。
-- **eBPF 資料面做得到 L7 授權(method/path)。** 但那跟成熟的 traffic policy(斷路、重試)是兩回事,後者 Day 4 對比時會看到 Cilium 的侷限。
-- **beta 功能就照 beta 寫。** 旗標開得起來不等於功能 ready;身分後端 CrashLoop,就誠實記成缺口,不補圓成「可用」。
+## 小結
+
+加密、HTTP 授權與工作負載身分，需要各自的證據。這章確認選定的跨節點流量走 WireGuard，並用三種請求驗證 Cilium 的 HTTP 政策；SPIRE 未就緒則保留為未完成項目。[Day 4](sprint4-day4-istio-vs-cilium.md) 會把這些結果與 Istio 比較，連同測試範圍一起判斷選型。
 
 ## 延伸閱讀
 
-想往下深挖,從這幾份開始:
+想再深入，可以從這幾份開始：
 
-- **[Cilium — Transparent Encryption(WireGuard/IPsec)](https://docs.cilium.io/en/stable/security/network/encryption/)** —— 官方文件講清楚 WireGuard 與 IPsec 兩種透明加密的差別、以及 `NodeEncryption` 開關的語意。
-- **[Cilium — Mutual Authentication](https://docs.cilium.io/en/stable/network/servicemesh/mutual-authentication/mutual-authentication/)** —— 今天步驟 4 那條路的官方說明,含它為什麼是 SPIFFE/SPIRE out-of-band、以及目前的狀態界定。
-- **[Cilium — Layer 7 Policy(HTTP)](https://docs.cilium.io/en/stable/security/policy/layer7/#http)** —— 步驟 3 的 `CiliumNetworkPolicy` L7 規則語法,含 HTTP method/path 的比對規則。
-
-## 下一步
-
-Istio 與 Cilium 兩條路的同一組驗收都跑完了:Day 2 的 Istio ambient(mTLS 與身分打包、斷路成熟)、今天的 Cilium(加密與 L7 落在 eBPF、身分綁定還在 beta)。[Day 4](sprint4-day4-istio-vs-cilium.md) 不動手,把兩邊的實測數字擺成一張決策表——資源、延遲、節點侵入度都在同一座叢集量,看這兩軸的不對稱怎麼變成選型依據。
+- [Cilium WireGuard 加密](https://docs.cilium.io/en/stable/security/network/encryption-wireguard/)：啟用方式與流量範圍。
+- [Cilium mutual authentication](https://docs.cilium.io/en/stable/network/servicemesh/mutual-authentication/mutual-authentication/)：SPIRE 與身分驗證的分工。
+- [Cilium HTTP 政策](https://docs.cilium.io/en/stable/security/policy/layer7/#http)：HTTP 規則的欄位語意。
 
 ---
 
 !!! quote ""
-    Cilium 標誌為 CNCF(Linux Foundation)官方資產,此處作社群教學用途。WireGuard 抓包與 L7 驗證擷取自本課程實測。
+    Cilium 標誌為 CNCF（Linux Foundation）官方資產，此處作社群教學用途。封包與政策結果來自本課程實測。

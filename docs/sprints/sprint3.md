@@ -1,6 +1,6 @@
 # Sprint 3 · WebAssembly
 
-WebAssembly（wasm）是容器之外另一種在 Kubernetes 上執行程式的方式。這個 sprint 先說明 wasm 是什麼、Kubernetes 怎麼透過 RuntimeClass 與 containerd shim 執行它，再在 AKS 上操作三條路線：**wasmCloud**、**WasmEdge + runwasi**、**Spin/SpinKube**，了解各自的部署方式與對節點的改動。過程中也會量測 WasmEdge 與一般容器的冷啟動與記憶體用量，並練習移除 SpinKube、檢查節點上的殘留，最後一章整理成選型用的決策表。
+你想讓使用者提供的程式在叢集執行，又不想給它完整的主機權限。程式可以編成 wasm，但接下來仍要決定由誰載入、如何提供檔案與網路能力，以及 Kubernetes 要管理哪一種物件。這個 sprint 依序操作 wasmCloud、WasmEdge 與 SpinKube，從部署方式、節點改動與移除後的狀態比較差異。
 
 <div style="text-align: center;" markdown>
 
@@ -12,13 +12,13 @@ WebAssembly（wasm）是容器之外另一種在 Kubernetes 上執行程式的�
 &nbsp;&nbsp;&nbsp;&nbsp;
 [![SpinKube](../assets/logos/spinkube-icon-color.svg){ width="80" }](https://www.spinkube.dev/)
 
-*三條路線對節點的改動由小到大：wasmCloud 不改動節點，WasmEdge 要手動安裝 shim，SpinKube 由 operator 修改節點設定。*
+*三條路線的安裝責任不同：wasmCloud 不改動節點，WasmEdge 要手動安裝 shim，SpinKube 由 runtime-class-manager 修改節點設定。*
 
 </div>
 
-三條路線依對節點的改動由小到大排列。Day 1 會先存下原始節點的設定，之後每條路線都拿它比對，看出安裝時改了什麼、移除後還留下什麼。
+Day 1 會先存下原始節點設定，後續則在各次安裝前後比對。跨天操作前還要確認 VM 是否已被替換，才能判斷哪一份快照適合作為比較基準。
 
-Day 0 會提出三個選型問題：工作負載需不需要用一般的 Kubernetes 物件管理？導入的動機是冷啟動速度還是部署密度？選用的工具明年是否還在維護？每條路線結束時都用這三個問題判斷，Day 9 整理成決策表。
+Day 0 會提出三個選型問題：工作負載需不需要用一般的 Kubernetes 物件管理？需要改善的是啟動延遲、部署密度，還是隔離方式？選用的工具明年是否還在維護？每條路線結束時都用這三個問題判斷，Day 9 回到使用情境比較。
 
 ## 課程路線（Day 0–9）
 
@@ -46,7 +46,7 @@ Day 0 會提出三個選型問題：工作負載需不需要用一般的 Kuberne
 
     ---
 
-    安裝 wasmCloud 並執行第一個元件，了解它為什麼不經過 kubelet 與 CRI；比對節點設定確認這條路線沒有改動節點，並說明這種做法的代價。
+    安裝 wasmCloud 並執行第一個元件，了解元件如何在一般 host Pod 內執行，不另設 Wasm RuntimeClass；比對選定的節點設定，並說明這種做法的代價。
 
 -   ![wasmCloud](../assets/logos/wasmcloud-icon-color.svg){ width="44" }
 
@@ -66,11 +66,11 @@ Day 0 會提出三個選型問題：工作負載需不需要用一般的 Kuberne
 
 -   ![WebAssembly](../assets/logos/webassembly-icon-color.svg){ width="44" }
 
-    **Day 5 · [冷啟動、記憶體與映像大小](../runbook/sprint3-day5-cost-measurement.md)**
+    **Day 5 · [計時範圍、記憶體與映像大小](../runbook/sprint3-day5-cost-measurement.md)**
 
     ---
 
-    把同一份原始碼編成三個目標，在同一顆節點上比較冷啟動、記憶體與映像大小，並學會用對照組與信賴區間判斷量到的差異是否成立。
+    把同一份原始碼編成三個目標，在同一顆節點上解讀執行時間與記憶體的歷史樣本，並用對照組、信賴區間與退出碼條件判斷證據限制；映像大小另說明比較方法，未提供實測數值。
 
 -   ![SpinKube](../assets/logos/spinkube-icon-color.svg){ width="44" }
 
@@ -94,11 +94,11 @@ Day 0 會提出三個選型問題：工作負載需不需要用一般的 Kuberne
 
     ---
 
-    由上而下逐層移除 SpinKube，每移除一層就和 Day 1 的節點設定比對；對照設定有沒有手動改過的兩種情境，列出需要手動清理的殘留。
+    由上而下逐層移除 SpinKube，每移除一層就和同一台 VM 上的安裝前設定比對；對照設定有沒有手動改過的兩種情境，列出需要手動清理的殘留。
 
 -   ![WebAssembly](../assets/logos/webassembly-icon-color.svg){ width="44" }
 
-    **Day 9 · [綜合：三條路線的決策表](../runbook/sprint3-day9-decision-matrix.md)**
+    **Day 9 · [總結：依需求選擇執行方式](../runbook/sprint3-day9-decision-matrix.md)**
 
     ---
 

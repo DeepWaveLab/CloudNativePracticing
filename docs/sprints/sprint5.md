@@ -1,6 +1,6 @@
 # Sprint 5 · 遊戲伺服器平台
 
-多人遊戲的 dedicated game server 和一般 pod 的管理方式不同：玩家連線綁在特定 pod，封包多半走 UDP，對戰中途被驅逐就是斷線。這個 sprint 在 AKS 上依序組出一套遊戲伺服器平台：用 **Agones** 管理 GameServer 的生命週期與分配，用 **Quilkin** 依 token 把 UDP 封包轉送到正確的 server，用 **Nakama** 與 PostgreSQL 處理登入、儲存與配對，最後用 Python 與 Unity client 走完從登入、配對到連進 GameServer 的流程。
+玩家配對成功後，要連到同一場對戰的伺服器。把 Pod 重建回來，不代表剛才的遊戲狀態也回來了；還要有人分配伺服器、傳遞入口，並在對戰結束後釋放資源。這個 sprint 用 Agones 管理遊戲伺服器，用 Quilkin 轉送 UDP，再接上 Nakama 的玩家登入與配對，最後從 Python 與 Unity client 走完整個流程。
 
 <div style="text-align: center;" markdown>
 
@@ -16,7 +16,7 @@
 
 一場對戰在這套平台上的流程是：玩家向 Nakama 登入，透過 WebSocket 排隊；配對成立時，Nakama 的 hook 向 Agones 要一顆 server 並產生 routing token；玩家拿到入口後，UDP 封包帶著 token 經 Quilkin 送進 GameServer；對戰結束時 server 呼叫 `Shutdown()`，Fleet 補上新的 server。Day 1 到 Day 9 把這條流程一段一段接起來。
 
-Day 1 到 Day 3 只用 Agones，玩家直接連節點 IP；Day 4 起依序加上 Quilkin 與 Nakama。Day 9 需要在本機安裝 Unity 6000.3.19f1（Personal 授權即可）。
+Day 1 到 Day 3 只用 Agones，玩家直接連節點 IP；Day 4 起依序加上 Quilkin 與 Nakama。Day 9 的實測使用本機 Unity 6000.3.19f1 與已啟用授權，建置目標為 macOS。
 
 ## 課程路線（Day 0–10）
 
@@ -28,7 +28,7 @@ Day 1 到 Day 3 只用 Agones，玩家直接連節點 IP；Day 4 起依序加上
 
     ---
 
-    不需要安裝。說明 dedicated game server 為什麼不適合用一般的 Kubernetes 排程管理、Agones 的 `GameServer`、`Fleet`、`GameServerAllocation` 如何分工，以及玩家從登入到進入對戰會經過哪些服務與協定。
+    不需要安裝。說明一般 Deployment 為什麼不足以表達對戰分配與結束狀態、Agones 的 `GameServer`、`Fleet`、`GameServerAllocation` 如何分工，以及玩家從登入到進入對戰會經過哪些服務與協定。
 
 -   ![Agones](../assets/logos/agones-icon-color.svg){ width="44" }
 
@@ -44,7 +44,7 @@ Day 1 到 Day 3 只用 Agones，玩家直接連節點 IP；Day 4 起依序加上
 
     ---
 
-    用 `Fleet` 常備一組 Ready 的 game server，觀察從 `Scheduled` 到 `Ready` 的狀態轉移；刪掉其中一顆後，確認 Fleet 會自動補上新的 server。
+    用 `Fleet` 維持一組 GameServer 副本，觀察從 `Scheduled` 到 `Ready` 的狀態轉移；刪掉其中一顆後，確認 Fleet 會自動補上新的 server。
 
 -   ![Agones](../assets/logos/agones-icon-color.svg){ width="44" }
 
@@ -52,7 +52,7 @@ Day 1 到 Day 3 只用 Agones，玩家直接連節點 IP；Day 4 起依序加上
 
     ---
 
-    用 `GameServerAllocation` 把一顆 Ready 的 server 分配給玩家並取得連線位址，再用 `FleetAutoscaler` 的 buffer policy 維持固定數量的閒置 server。
+    用 `GameServerAllocation` 把一顆 Ready 的 server 分配給玩家並取得連線位址，再用 `FleetAutoscaler` 的 buffer policy 以預留 Ready 數為目標調整副本，並說明副本上限與啟動時間的限制。
 
 -   ![Quilkin](../assets/logos/quilkin-mascot.png){ width="48" }
 
@@ -92,7 +92,7 @@ Day 1 到 Day 3 只用 Agones，玩家直接連節點 IP；Day 4 起依序加上
 
     ---
 
-    用 Prometheus 收集 Agones controller 與 Quilkin proxy 的 metrics，觀察 GameServer 正常關閉、程序崩潰與節點失效時的狀態轉移，以及 metrics 多久才反映；也確認 Fleet 縮容只刪 Ready 的 server，進行中的對戰不受影響。
+    用 Prometheus 收集 Agones controller 與 Quilkin proxy 的 metrics，觀察 GameServer 正常關閉、程序崩潰與節點失效時的狀態轉移，以及 metrics 多久才反映；也觀察這次 Fleet 縮容刪除 Ready、保留 Allocated；不把這項結果外推到其他維運動作。
 
 -   ![Nakama](../assets/logos/nakama-icon-color.png){ width="40" }
 
@@ -108,13 +108,13 @@ Day 1 到 Day 3 只用 Agones，玩家直接連節點 IP；Day 4 起依序加上
 
     ---
 
-    不動手。回顧一場對戰從登入到結束經過的元件，說明哪些類型的遊戲需要這套架構、元件可以怎麼分階段導入，以及這門課沒有涵蓋的主題，例如遊戲網路同步、權威 server 與多區域部署。
+    不動手。回顧一場對戰從登入到結束經過的元件，依對戰狀態、路由與既有後端需求判斷需要哪些元件、元件可以怎麼分階段導入，以及這門課沒有涵蓋的主題，例如遊戲網路同步、權威 server 與多區域部署。
 
 </div>
 
 ## 學完之後
 
-- 能說明 dedicated game server 為什麼不能當一般 pod 管理，以及 Agones 用哪些物件處理這些需求。
+- 能說明遊戲伺服器需要哪些額外的生命週期狀態，以及 Agones 用哪些物件處理這些需求。
 - 能從 Agones 直連節點開始，依需求加上 Quilkin 的固定入口與 token 路由、Nakama 的登入與配對。
 - 知道 server 正常關閉、崩潰與節點失效時平台各會怎麼反應，並據此決定監控要看哪些訊號。
 

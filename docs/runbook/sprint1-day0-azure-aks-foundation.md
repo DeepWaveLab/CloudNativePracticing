@@ -1,50 +1,31 @@
-# Day 0: 環境建置——quota 申請、AKS 叢集與 T4 spot 節點池
+# Day 0: 環境建置——quota、GPU spot 節點池與 device plugin
 
 ![Kubernetes 官方標誌](../assets/logos/kubernetes-icon-color.svg){ align=right width="95" }
 
-> Sprint 1 要在 AKS 上把 KAI Scheduler、HAMi、DRA 三套 GPU 排程機制各學一輪。但在碰到任何排程器之前,得先蓋出一個「有 GPU、隨時能收工」的叢集。本章從 quota 盤點開始,一路走到第一個 CUDA pod 跑出 `nvidia-smi`,並且把「收工歸零、開工復原」的循環驗證到可以放心執行。本章有一顆雷特別值得記住:**device plugin 裝好了、rollout status 回報成功,實際上卻一個 pod 都沒起**;還有一顆會讓你以為 quota 夠了,其實有三個維度在各自卡人。
+想像你剛在叢集裡加了一台插著 T4（NVIDIA 給資料中心用的入門 GPU）的節點。`kubectl get nodes` 顯示它 `Ready`，可是 `kubectl describe node` 翻遍了都找不到 `nvidia.com/gpu`，要 GPU 的 pod 一顆也排不上去。
 
-!!! abstract "你在課程的哪裡"
-    - **起點**:只需要一個 Azure 訂閱,和一台裝了 az、kubectl、helm 的機器。
-    - **今天**:蓋出整個 sprint 共用的 AKS 叢集與 T4 spot pool。驗收:第一顆 CUDA pod 跑出 `nvidia-smi`,而且收工歸零、開工復原的循環實測可重複。
-    - **Day 1**:安裝 KAI Scheduler,學佇列與配額。
+這一章從零蓋出 Sprint 1 後面每一天都要用的 AKS 叢集：申請額度、建叢集、開兩台 T4 的 GPU 節點、裝上讓 Kubernetes 認得 GPU 的元件，最後跑出第一顆 `nvidia-smi`。一路上，GPU 會在三個地方「消失」：雲端額度不夠，VM 根本開不出來；讓 Kubernetes 認得 GPU 的元件沒有排上節點；節點重建之後，原本補上的標籤不見了。
+
+讀完之後，GPU 節點上看不到 `nvidia.com/gpu` 時，你能分辨問題出在額度、出在那個元件沒排上，還是出在節點重建後標籤掉了。
 
 !!! note "指令裡的佔位符"
     本課程的指令用 `<cluster>` 代表叢集名稱、`<resource-group>` 代表資源群組、`<subscription-id>` 代表訂閱 ID——照做時換成自己的值。
 
-## 環境需求:一座 1.34 以上的叢集,和兩張 T4 卡
+## 這門課需要什麼樣的叢集
 
-課程三個主題對環境的要求其實只有兩條。第一,DRA 的正式版 API 要 Kubernetes **1.34 以上**才有,所以叢集版本不能舊(本章步驟 4 會實測驗證這件事);第二,GPU 要能「隨開隨關」,學習型工作負載沒必要讓卡整天掛著。本課用 AKS 滿足這兩條——照著做時換成任何版本夠新的托管叢集都行,指令細節自行對應。
+Sprint 1 要比較三套分配 GPU 的工具，它們對叢集的要求只有兩條。
 
-選 T4 的理由也單純:`Standard_NC4as_T4_v3` 是 Azure 上規格最小的完整 GPU VM。HAMi 的 VRAM 切分不需要 MIG(Multi-Instance GPU,A100/H100 這類資料中心卡才有的硬體級分卡功能,把一張實體卡切成數張獨立的小卡),T4 完全夠用;KAI 的排程語意跟卡的型號無關;DRA 的最小驗證一張卡就能做。
+第一，Kubernetes 要 **1.34 以上**：Day 6–7 要用的一項 Kubernetes 功能，從 1.34 才有正式版。
 
-## 原理與架構
+第二，GPU 要能隨開隨關。學習用的工作負載沒有必要讓卡整天開著，所以 GPU 節點平常縮到 0 台，要用時再拉起來。
 
-```mermaid
-flowchart TD
-    Q["訂閱 quota(三個維度)"] --> AKS["AKS free tier · K8s 1.35"]
-    AKS --> SYS["system pool<br>1× D2as_v5(隨需)"]
-    AKS --> GPU["gpuspot pool<br>0–2× NC4as_T4_v3(spot)"]
-    GPU --> DP["nvidia device plugin<br>(Helm 自管)"]
-```
+本課程用 AKS 滿足這兩條。換成其他版本夠新的託管叢集也行，指令細節自行對應。
 
-幾個在動手前就要拍板的決定,以及背後的理由:
+GPU 選的是 T4：`Standard_NC4as_T4_v3` 是 Azure 上規格最小的完整 GPU VM，課程後面每一章的操作它都跑得動。怎麼讓多個 pod 共用一張卡、怎麼排程有限的卡，是後面幾章的主題。
 
-先說明一個之後每天都會出現的詞:**device plugin** 是 kubelet 的擴充機制,負責把節點上的特殊硬體(GPU、FPGA 之類)向叢集廣播成可以被排程的資源,例如 `nvidia.com/gpu: 1`。沒有它,節點上插著卡,Kubernetes 也看不到。
+## 步驟 1:查 GPU 相關的 quota,釋放被佔住的額度 {#step-1}
 
-**GPU driver 誰管?**AKS 對 GPU node pool 提供幾種管理模式:全託管(driver + device plugin 都是 AKS 的)、只管 driver、或全部自理。本課程選「**AKS 管 driver、device plugin 自己用 Helm 管**」——因為 Day 3 的 HAMi 要用自己的 device plugin 接管 `nvidia.com/gpu`,Day 6 的 DRA driver 更是與傳統 device plugin 互斥。如果讓 AKS 託管 device plugin,到時候會跟自己裝的元件打架。這個決定牽動三個階段,必須在 Day 0 定案,不能到 Day 3 才發現要重建 node pool。
-
-**Spot 的交易條件。**spot 節點的代價是 Azure 隨時可以回收。對批次或實驗性工作可以接受,但有兩件事要先知道:spot pool 會自動帶上 `kubernetes.azure.com/scalesetpriority=spot:NoSchedule` 的 taint,所有要排上去的 pod 都得聲明對應的 toleration;而 `--spot-max-price` 建立後不能改。另外 GPU pool 刻意**不開 cluster autoscaler**——Day 2 的 gang scheduling 示範需要「資源刻意不足」的情境,autoscaler 若自動擴節點,示範情境就不成立。
-
-**GPU pool 用「開工 scale 到 2、收工 scale 到 0」的循環操作。**常駐的只有 system pool 一台 D2as_v5。本章最後一步就是把這個循環實測一遍,確認 scale 歸零再拉回來之後,driver、標籤、device plugin 都會自己回來。
-
-今天要走的路,八步:盤點 quota → 送申請 → 建 RG 與 AKS → 上叢集驗 DRA API → 開 GPU spot pool → 裝 device plugin → 第一顆 CUDA pod → 收工循環實測。前兩步是行政流程(而且可能要等幾個工作天),後六步是技術操作——等待期能先做什麼,步驟 2 的結尾會講。
-
-## 步驟
-
-### 步驟 1:盤點 quota——它是三個維度,不是一個數字
-
-GPU VM 開不起來,十之八九是 quota。Azure 的 vCPU quota 至少有三個維度同時在管你,任何一個不夠都會擋:
+GPU VM 開不起來，最常見的原因是 quota：Azure 對每個訂閱、在每個區域能同時開多少 vCPU 設的上限。這個上限不只一個數字。先查和 GPU 有關的三行：
 
 ```console
 $ az vm list-usage --location japaneast --subscription <subscription-id> -o table | grep -E "NCASv3_T4|Low-priority|Total Regional vCPUs"
@@ -53,9 +34,16 @@ Total Regional vCPUs                      50              50
 Standard NCASv3_T4 Family vCPUs           0               0
 ```
 
-三行分別是:**spot 專用額度**(3,一台 NC4as 要 4,連一台都開不起)、**區域總 vCPU**(50/50,滿了)、**T4 家族額度**(0,GPU 家族預設就是 0,一定要申請)。GPU 節點的 vCPU 會同時吃家族額度與區域總額,所以三個都要過。
+每一行的兩個數字是「已用量」和「上限」。把三行對到建 VM 的過程，會是下面這張圖：
 
-這裡的 50/50 有個陷阱:區域總額是被幾台**已停機(deallocated)的舊 lab VM** 佔住的。停機不代表還額度——詳見[地雷 2](#mine-2)。清掉舊資源後額度才有空間:
+![兩條路：隨需的 GPU VM 要先後通過 T4 家族額度（已用 0、上限 0）與區域總 vCPU（已用 50、上限 50）兩關；spot GPU VM 走獨立的區域 spot 額度（已用 0、上限 3）。一台 NC4as_T4_v3 要 4 vCPU，例子裡三關都過不了](../assets/diagrams/s1d0-quota-gates.svg)
+
+我們可以從圖上看到兩件事：
+
+1. 一般的隨需（on-demand）VM 要同時通過兩關：**VM 家族額度**（`Standard NCASv3_T4 Family vCPUs`，T4 這一系列機型能用多少 vCPU）和**區域總額**（`Total Regional vCPUs`，這個區域所有 VM 加起來的上限）。GPU 家族的額度預設是 0，一定要申請。
+2. spot VM（Azure 用便宜價格出租的閒置容量，Azure 需要時可以收回，步驟 5 再細講）用的是另一池額度 `Total Regional Low-priority vCPUs`。這裡上限是 3，一台 NC4as 要 4 vCPU，連一台都開不起來。
+
+本課的 GPU 節點用 spot，但步驟 3 的 system pool 是隨需節點，一樣要從區域總額扣。這個例子裡，區域總額 50/50 已經滿了。要注意的是：**停機（deallocated，VM 關機並釋放運算資源，但 VM 和磁碟還留著）的 VM 仍然佔著區域額度**，只是關機不會還回來，要刪掉資源才會釋放（見[疑難排解：quota 夠了，VM 還是開不起來](#mine-2)）。刪掉不用的資源群組之後，再查一次：
 
 ```console
 $ az group delete -n <old-lab-rg> --subscription <subscription-id> --yes
@@ -63,21 +51,21 @@ $ az vm list-usage --location japaneast --subscription <subscription-id> -o tabl
 Total Regional vCPUs                      16              50
 ```
 
-### 步驟 2:送 quota 申請
+已用量降到 16，區域總額有空間了。spot 額度不夠的部分，下一步送申請。
 
-需要申請的兩項:`Standard NCASv3_T4 Family vCPUs` 調到 8 以上(兩台 NC4as_T4_v3),`Total Regional Low-priority vCPUs` 調到 8 以上(讓這兩台能用 spot 價)。建議一次多要一點(例如 16),免得之後再跑一次流程。
+## 步驟 2:送 quota 申請
 
-申請的路有三條,依你的訂閱型態而定:
+本課的 GPU 節點池用 spot，只需要把 `Total Regional Low-priority vCPUs` 調到 8 以上（兩台 NC4as_T4_v3，各 4 vCPU）。`Standard NCASv3_T4 Family vCPUs` 只有在你之後想改用隨需的 GPU 節點時才需要，可以先不申請。建議一次多要一點（例如 16），免得之後再跑一次流程。
 
-1. **`az quota create`**:最快,但需要你的身分在該訂閱有 quota 寫入權限。訂閱掛在另一個 tenant、以 B2B guest 身分登入時,直接吃了 `Unauthorized`(見[地雷 3](#mine-3))。
-2. **Portal 的 Quotas 頁**:搜尋 Quotas → Compute → 篩區域,勾選項目送出。多數自有訂閱走這條就通。
-3. **透過代理商(CSP 訂閱)**:CSP 型訂閱的 quota 常常只有代理商能動,寫信給他們,附上訂閱名稱、訂閱 ID、區域、quota 項目與目標值。這條路徑要等人工處理,實測等了幾個工作天。
+<span id="mine-3"></span>申請的路有三條，看你的訂閱是怎麼來的：自己或公司直接向 Azure 開的訂閱，走前兩條；向代理商買的訂閱，走第三條。不確定的話，先試第一條，回 `Unauthorized` 再往下換。
 
-等待期不必空轉:kind + 模擬 GPU 的本機練習(Day 1 的前置)完全不需要真卡,可以先跑。
+1. **`az quota create`**:最快,但需要你的身分在該訂閱有 quota 寫入權限。如果你是以 B2B guest 身分登入（帳號屬於別的組織，被邀請進這個訂閱所在的 tenant），這個指令常常只回 `(Unauthorized) Request failed`，改走下面兩條。
+2. **Portal 的 Quotas 頁**:搜尋 Quotas → Compute → 篩區域,勾選項目送出。多數自有訂閱走這條就通。帳號下掛著多個訂閱時，送出前確認選的是目標訂閱。
+3. **透過代理商(CSP 訂閱)**:向代理商（Cloud Solution Provider，雲端解決方案供應商）購買的訂閱，quota 常常只有代理商能調。寫信給他們,附上訂閱名稱、訂閱 ID、區域、quota 項目與目標值。這條路要等人工處理，可能要幾個工作天。
 
-### 步驟 3:建 RG 與 AKS
+## 步驟 3:建 RG 與 AKS
 
-所有課程資源集中在一個獨立的 resource group,收尾時 `az group delete` 一鍵全清,也不會誤傷訂閱裡的其他東西:
+所有課程資源集中在一個獨立的 resource group,收尾時 `az group delete` 一次全部清掉,也不會動到訂閱裡的其他東西:
 
 ```console
 $ az group create -n <resource-group> -l japaneast --subscription <subscription-id> --tags course=CloudNativePracticing sprint=1
@@ -88,9 +76,11 @@ $ az aks create -g <resource-group> -n <cluster> --subscription <subscription-id
     --generate-ssh-keys
 ```
 
-版本選 1.35 而不是最新的 1.36,是保守考量:DRA 需要的是 1.34+,而 Day 1 要裝的 KAI Scheduler 官方文件沒有明說支援到哪個版本,拿次新版(N-1)踩到相容性問題的機率低一點。system pool 用最小的 D2as_v5 隨需節點——AKS 規定 system pool 不能用 spot。
+AKS 用**節點池（node pool）**管理節點：一個節點池是一組規格相同的 VM，可以一起擴縮。這裡先建的是 system pool，專門跑 CoreDNS 這類叢集自己的元件。把它和 GPU 節點分開，GPU 節點縮到 0 台時叢集照樣運作。它用最小的 D2as_v5 隨需節點，因為 AKS 規定 system pool 不能用 spot。
 
-### 步驟 4:上叢集,先立一條紀律,再驗一個地基
+版本選 1.35 而不是最新的 1.36：1.34 以上就夠用，而 Day 1 要裝的 KAI Scheduler 官方文件沒有寫明支援到哪個版本。
+
+## 步驟 4:連上叢集,確認 DRA 的 API 在
 
 拉 kubeconfig:
 
@@ -98,7 +88,7 @@ $ az aks create -g <resource-group> -n <cluster> --subscription <subscription-id
 $ az aks get-credentials -g <resource-group> -n <cluster> --subscription <subscription-id>
 ```
 
-這裡有一個值得先知道的風險:`az aks get-credentials` 會順手把 current-context 切到新叢集。如果你的 kubeconfig 裡還有別的叢集,而且別的終端機正在用,這一切就是事故的開端——本課程就真的發生過一次,詳見[地雷 4](#mine-4)。
+這個指令會順手把 kubectl 的 current-context（沒指定叢集時 kubectl 預設操作的那一個）切到新叢集。如果你的 kubeconfig 裡還有其他叢集，之後的指令就可能打錯地方，見[疑難排解：指令打到了另一座叢集](#mine-4)。
 
 ```console
 $ kubectl get nodes
@@ -106,7 +96,7 @@ NAME                             STATUS   ROLES    AGE   VERSION
 aks-system-35459509-vmss000000   Ready    <none>   68s   v1.35.6
 ```
 
-接著驗 Day 6–7 的地基:DRA 的 API 群組在不在。DRA 在上游 1.34 進 GA(現行官方文件標示 v1.35 stable),GA 功能理應預設開啟,但「理應」要用實測換成「確定」:
+接著確認 Day 6–7 要用的 DRA（Dynamic Resource Allocation，讓 pod 用條件描述「我要什麼樣的裝置」的 Kubernetes API）都在。這就是開頭說要 1.34 以上的原因：DRA 在 Kubernetes 1.34 進入 GA（正式版），API 群組是 `resource.k8s.io`：
 
 ```console
 $ kubectl api-resources | grep resource.k8s.io
@@ -116,11 +106,11 @@ resourceclaimtemplates   resource.k8s.io/v1    true    ResourceClaimTemplate
 resourceslices           resource.k8s.io/v1    false   ResourceSlice
 ```
 
-四個 API 都在,而且是正式版 `v1`,不用開任何 feature gate。這一步值十秒鐘,卻讓後面兩天的課不必賭。
+四個 API 都在，而且是正式版 `v1`，不用開任何 feature gate。這四個物件各做什麼，Day 6 再講。
 
-### 步驟 5:開 GPU spot pool
+## 步驟 5:開 GPU spot pool
 
-quota 核准後,開兩台 T4 spot,固定節點數、不開 autoscaler:
+quota 核准後，加一個 GPU 節點池。這裡用的是 **spot VM**：Azure 把閒置的容量用便宜很多的價格賣出，代價是 Azure 需要容量時可以隨時收回（evict）。學習和批次實驗中斷了可以重跑，正好適合。
 
 ```console
 $ az aks nodepool add -g <resource-group> --cluster-name <cluster> -n gpuspot \
@@ -135,11 +125,26 @@ aks-gpuspot-21249019-vmss000000   Ready    <none>   102s   v1.35.6
 aks-gpuspot-21249019-vmss000001   Ready    <none>   106s   v1.35.6
 ```
 
-`--spot-max-price -1` 的意思是「跟著現價走,不因價格被回收」(容量不足仍可能被回收,這是 spot 的本質)。此時看節點會發現:taint 只有 spot 那條,而 `nvidia.com/gpu` 資源還不存在——AKS 裝好了 driver,但 device plugin 是我們自己的事,這正是步驟 6。
+指令裡有幾個設定之後會一直遇到：
 
-### 步驟 6:裝 device plugin——然後撞上 desired=0
+- `--spot-max-price -1` 表示「跟著現價走，不因為價格被收回」。容量不足時仍然可能被收回，這是 spot 本來的條件。這個值建立後不能改。
+- spot 節點池會自動帶上 `kubernetes.azure.com/scalesetpriority=spot:NoSchedule` 這個 taint。之後所有要排到 GPU 節點的 pod，都得寫上對應的 toleration。
+- `--labels pool=gpu` 是我們自己加的標籤，後面用 `nodeSelector` 把 GPU 工作導到這兩台。
+- 節點數固定為 2，**不開 cluster autoscaler**（AKS 依 Pending 的 pod 自動增減節點的功能）。Day 2 的示範需要「資源刻意不夠」的情境，autoscaler 自動補節點的話，情境就不成立。平常用完就手動縮到 0，步驟 8 會實際走一次。
 
-用 NVIDIA 官方的 Helm chart,限定只跑在 GPU pool、並容忍 spot taint:
+兩台都 `Ready` 了，但如果現在 `kubectl describe node` 其中一台，會看到和開場一樣的情況：沒有 `nvidia.com/gpu`。AKS 在節點映像裡裝好了 NVIDIA driver，可是 Kubernetes 還不知道這台機器有 GPU。中間缺的那一層叫 **device plugin**：它是 kubelet 的擴充機制，在每台節點上跑一個程式，找到節點上的特殊硬體（GPU、FPGA 之類），再向 kubelet 註冊成可以排程的資源，例如 `nvidia.com/gpu: 1`。
+
+AKS 有一種全託管模式，driver 和 device plugin 都由它裝。本課程選的是「AKS 管 driver、device plugin 自己用 Helm 裝」，原因在後面幾章：Day 3 的 HAMi 要用自己的 device plugin 接管 `nvidia.com/gpu`，Day 7 的 DRA driver 也要避免和傳統 device plugin 各自配置同一批實體 GPU。如果 device plugin 交給 AKS 託管，到時候會跟自己裝的元件衝突。
+
+## 步驟 6:裝 device plugin,讓節點回報 GPU {#step-6}
+
+裝之前，先把 GPU 從硬體到 pod 經過哪幾層畫出來。由下往上看：
+
+![四層：最下面是 Tesla T4 硬體；GPU 節點上，AKS 裝好的 NVIDIA driver 讓 device plugin 找到卡，device plugin 再向 kubelet 註冊；kubelet 把 nvidia.com/gpu: 1 寫進叢集裡 Node 物件的 allocatable；最上面要 GPU 的 pod 依 allocatable 排上節點。device plugin 沒排上節點時，allocatable 就不會出現 nvidia.com/gpu](../assets/diagrams/s1d0-gpu-layers.svg)
+
+我們可以從圖上看到，driver 和 kubelet 中間隔著 device plugin。device plugin 以 DaemonSet 的形式部署，每台符合條件的節點跑一份。它向 kubelet 註冊之後，kubelet 才會把 `nvidia.com/gpu` 寫進節點的 **allocatable**：這台節點可以分給 pod 的資源量。排程器只看 allocatable，所以少了 device plugin 這一層，卡插得再好，pod 也排不上去。
+
+用 NVIDIA 官方的 Helm chart 安裝，限定只跑在 GPU pool、並容忍 spot taint:
 
 ```console
 $ helm repo add nvdp https://nvidia.github.io/k8s-device-plugin
@@ -149,17 +154,47 @@ $ helm upgrade -i nvdp nvdp/nvidia-device-plugin \
     --set-json 'tolerations=[{"key":"kubernetes.azure.com/scalesetpriority","operator":"Equal","value":"spot","effect":"NoSchedule"},{"key":"nvidia.com/gpu","operator":"Exists","effect":"NoSchedule"}]'
 ```
 
-裝完檢查,rollout 一切「成功」——但 GPU 資源就是不出現:
+Helm 回報安裝完成：
 
-```console
-$ kubectl -n nvidia-device-plugin rollout status ds/nvdp-nvidia-device-plugin
-daemon set "nvdp-nvidia-device-plugin" successfully rolled out
-
-$ kubectl -n nvidia-device-plugin get pods
-No resources found in nvidia-device-plugin namespace.
+```text
+Release "nvdp" does not exist. Installing it now.
+NAME: nvdp
+LAST DEPLOYED: Mon Aug  3 11:48:59 2026
+NAMESPACE: nvidia-device-plugin
+STATUS: deployed
+REVISION: 1
+DESCRIPTION: Install complete
+TEST SUITE: None
 ```
 
-DaemonSet 的 desired 是 0:一個 pod 都不打算跑,而「0 個裡面 0 個就緒」對 rollout status 來說就是成功。真正的原因藏在 chart 預設的 nodeAffinity 裡,完整的診斷過程與修法見[地雷 1](#mine-1)。結論是給 node pool 補一個 NFD 風格的標籤——注意要在 **pool 層級**補,節點重建時才會自動帶回來:
+接著看兩台 GPU 節點的 allocatable 有沒有出現 GPU。這個查詢只印出每台節點名稱和 `nvidia.com/gpu` 的數量：
+
+```console
+$ kubectl get nodes -l pool=gpu \
+    -o jsonpath='{range .items[*]}{.metadata.name}: gpu={.status.allocatable.nvidia\.com/gpu}{"\n"}{end}'
+aks-gpuspot-21249019-vmss000000: gpu=
+aks-gpuspot-21249019-vmss000001: gpu=
+```
+
+`gpu=` 後面是空的，兩台都沒有，再等下去也只會逾時。這時去看 DaemonSet 本身：它打算跑幾份（desired），以及它的排程條件。下面這段把幾個檢查的輸出合在一起：第一行是等待逾時的訊息，後面四行是 DaemonSet 的 desired、nodeSelector、tolerations 和 affinity（查 desired 和 affinity 的指令寫法，見[疑難排解：device plugin 的 desired 是 0](#mine-1)）。先看 `desired` 是不是 0，再看 `affinity` 裡要求了哪些標籤：
+
+```text
+error: timed out waiting for the condition
+desired=0
+nodeSelector={"pool":"gpu"}
+tolerations=[{"effect":"NoSchedule","key":"kubernetes.azure.com/scalesetpriority","operator":"Equal","value":"spot"},{"effect":"NoSchedule","key":"nvidia.com/gpu","operator":"Exists"}]
+affinity={"nodeAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":{"nodeSelectorTerms":[{"matchExpressions":[{"key":"feature.node.kubernetes.io/pci-10de.present","operator":"In","values":["true"]}]},{"matchExpressions":[{"key":"feature.node.kubernetes.io/cpu-model.vendor_id","operator":"In","values":["NVIDIA"]}]},{"matchExpressions":[{"key":"nvidia.com/gpu.present","operator":"In","values":["true"]}]}]}}}
+```
+
+由上往下看：
+
+- `desired=0`：DaemonSet 一份都不打算跑。所以不是 pod 起不來，是根本沒有 pod。
+- `nodeSelector` 和 `tolerations` 是我們用 `--set` 傳進去的，都對。
+- `affinity` 不是我們設的，是 chart 預設帶的 nodeAffinity：節點必須符合三組條件的其中一組才排得上：`feature.node.kubernetes.io/pci-10de.present`（節點上有 NVIDIA 的 PCI 裝置，10de 是 NVIDIA 的 PCI 廠商代碼）、`feature.node.kubernetes.io/cpu-model.vendor_id=NVIDIA`（CPU 是 NVIDIA 自家的，例如 Grace），以及 `nvidia.com/gpu.present=true`。
+
+`feature.node.kubernetes.io/` 開頭的標籤，是 **NFD**（Node Feature Discovery）貼的。NFD 是一個會自動偵測節點硬體、把結果貼成節點標籤的元件；`nvidia.com/gpu.present` 則是 NVIDIA 的 **GFD**（GPU Feature Discovery）這類元件會貼的標籤。AKS 預設兩個都沒有裝，所以三組條件全部落空，DaemonSet 認為整個叢集沒有它該去的節點，desired 就是 0。
+
+修法是補上第三組條件要的標籤 `nvidia.com/gpu.present=true`。這個標籤要下在**節點池層級**，不要用 `kubectl label node` 直接貼在節點上，理由步驟 8 會看到。`--labels` 會整組取代原有的標籤，所以 `pool=gpu` 要一起帶上：
 
 ```console
 $ az aks nodepool update -g <resource-group> --cluster-name <cluster> -n gpuspot \
@@ -172,11 +207,11 @@ aks-gpuspot-21249019-vmss000000: gpu=1
 aks-gpuspot-21249019-vmss000001: gpu=1
 ```
 
-兩台節點各廣告出一張 GPU,device plugin 的日誌也印出 `Detected platform: nvml`——AKS 預裝的 driver 有被正確找到。
+兩台節點的 allocatable 各出現一張 GPU。device plugin 的日誌裡也印出 `Detected platform: nvml`，表示它透過 driver 提供的 NVML 函式庫找到了卡，對應圖上 driver 到 device plugin 那一段。
 
-### 步驟 7:第一個 CUDA pod
+## 步驟 7:第一個 CUDA pod
 
-驗收整條鏈:排程器 → spot toleration → device plugin → driver → 真的卡。
+最後送一顆真的要 GPU 的 pod，把圖上每一層都走一次：排程器依 allocatable 挑節點、toleration 讓它進得了 spot 節點、device plugin 把卡分給它、driver 讓容器裡的 `nvidia-smi` 讀得到卡。
 
 ```yaml
 # gpu-smoke.yaml
@@ -214,11 +249,11 @@ $ kubectl logs gpu-smoke
 +-----------------------------------------+------------------------+----------------------+
 ```
 
-Tesla T4、16 GB VRAM 、driver 580 系列。地基完工。
+容器裡看到的是一張 Tesla T4、16 GB VRAM（`16384MiB`），driver 是 580 系列。
 
-### 步驟 8:收工循環——scale 歸零,再拉回來驗一次
+## 步驟 8:縮到 0 再拉回來,確認一切會自己回來 {#step-8}
 
-每次下課的標準動作是把 GPU pool 縮到 0。但「縮得回去」只值一半,「拉回來一切如常」才算數——尤其我們在步驟 6 補的標籤,是不是真的會跟著新節點回來?實測一輪:
+GPU pool 每次用完都要縮到 0。但縮下去只是一半，下次拉回來時 GPU 也要自動出現才算數。特別是步驟 6 補的標籤：它會不會跟著新節點回來？實際走一輪：
 
 ```console
 $ kubectl delete pod gpu-smoke
@@ -233,26 +268,23 @@ aks-gpuspot-21249019-vmss000002: gpu=1 labels-ok=true
 aks-gpuspot-21249019-vmss000003: gpu=1 labels-ok=true
 ```
 
-注意節點名稱從 `vmss000000/000001` 變成了 `vmss000002/000003`——這是兩台全新的 VM,不是原機重開。pool 層級的標籤自動補上、device plugin 的 DaemonSet 自動排上、driver 隨新節點的映像就位,全程不需要人工介入。驗完把 pool 縮回 0,收工。
+注意節點名稱從 `vmss000000/000001` 變成了 `vmss000002/000003`：這是兩台全新的 VM，不是原本那兩台重開機。新節點身上有標籤、allocatable 有 GPU，代表三件事都自動回來了：driver 跟著節點映像裝好、標籤由節點池套上、device plugin 的 DaemonSet 依標籤排上新節點。
 
-## 驗收 checkpoint
+標籤之所以會回來，是因為它下在節點池上。把兩種做法並排比較：
 
-| 檢查項 | 指令 | 期待結果 |
-|---|---|---|
-| 三維度 quota 到位 | `az vm list-usage -o table` | T4 家族 ≥8、spot ≥8、區域總額有餘裕 |
-| 叢集版本 | `kubectl get nodes` | v1.35.x,system 節點 Ready |
-| DRA API | `kubectl api-resources \| grep resource.k8s.io` | 四個 `resource.k8s.io/v1` 資源 |
-| GPU 資源廣告 | 節點 allocatable | 每台 GPU 節點 `nvidia.com/gpu: 1` |
-| CUDA 煙霧測試 | `kubectl logs gpu-smoke` | `nvidia-smi` 印出 Tesla T4 |
-| 收工循環 | scale 0 → 2 | 新節點自帶標籤、GPU 資源自動回來 |
+![兩列對照：標籤用 kubectl 下在節點 vmss000000 上，pool 從 0 拉回 2 之後，新節點 vmss000002 沒有這個標籤；標籤下在節點池 gpuspot 上，新節點 vmss000002 建立時就帶上標籤](../assets/diagrams/s1d0-label-scope.svg)
 
-## 地雷記錄
+我們可以從圖上看到，縮到 0 再拉回來，節點本身是換掉的，貼在舊節點上的東西全部跟著消失。spot 節點被 Azure 收回後手動補上時也一樣。所以會被重建的節點，標籤和 taint 都要下在節點池層級。
 
-### 地雷 1:device plugin 的 rollout「成功」,desired 卻是 0 {#mine-1}
+確認完，把 pool 縮回 0。之後每一章開始時，再照這一步拉回 2 台。
 
-**症狀**:Helm 安裝正常、`rollout status` 回報 successfully rolled out,但 namespace 裡沒有任何 pod,節點也沒有 `nvidia.com/gpu` 資源。
+## 疑難排解
 
-**診斷**:看 DaemonSet 實際 render 出來的排程條件——
+### device plugin 的 desired 是 0,節點沒有 `nvidia.com/gpu` {#mine-1}
+
+**症狀**:Helm 回報 `STATUS: deployed`，但節點的 allocatable 沒有 `nvidia.com/gpu`，namespace 裡也沒有 device plugin 的 pod。
+
+**原因**:chart 預設的 nodeAffinity 要求的標籤，AKS 的節點上都沒有，DaemonSet 的 desired 是 0。用下面的指令確認，修法見[步驟 6](#step-6)；標籤要下在節點池層級的理由見步驟 8。
 
 ```console
 $ kubectl -n nvidia-device-plugin get ds nvdp-nvidia-device-plugin \
@@ -264,51 +296,42 @@ affinity={"nodeAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":{"nod
   {"matchExpressions":[{"key":"nvidia.com/gpu.present","operator":"In","values":["true"]}]}]}}}
 ```
 
-chart 預設帶了一組 nodeAffinity,要求節點有 NFD(Node Feature Discovery)風格的標籤才肯排。AKS 的素節點沒裝 NFD,三個條件全落空,DaemonSet 於是「合理地」認為全叢集沒有它該去的地方。而 desired=0 的 DaemonSet 在 rollout status 看來毫無問題——**檢查 DaemonSet 永遠要看 desired 數字,不能只看 rollout 結果**。
+### quota 夠了,VM 還是開不起來 {#mine-2}
 
-**修法**:補上三個條件之一的 `nvidia.com/gpu.present=true`。關鍵是用 `az aks nodepool update --labels` 在 pool 層級補,不要 `kubectl label node`——spot 節點會被回收重建、scale 歸零再回來也是全新 VM,節點層級的標籤活不過任何一次重建。注意 `--labels` 是整組覆蓋,原有的標籤要一起帶上。
+**症狀**:VM 開不出來，可是你以為 quota 已經夠了。
 
-### 地雷 2:quota 有三個維度,停機的 VM 還在佔額度 {#mine-2}
+**原因**:看錯了 quota 的維度（spot 看的是 `Total Regional Low-priority vCPUs`），或區域總額被停機的 VM 佔住。查法和釋放額度的做法見[步驟 1](#step-1)。
 
-**症狀**:確認過 GPU 家族 quota 核准了,VM 還是開不出來;或反過來,區域總額看起來夠,GPU 就是起不來。
+### 指令打到了另一座叢集 {#mine-4}
 
-**原因**:`az vm list-usage` 裡至少三個維度同時生效——VM 家族額度、`Total Regional vCPUs`、spot 專用的 `Total Regional Low-priority vCPUs`。GPU 節點要同時通過家族與區域兩關,用 spot 再多一關。更陰的是:**已停機(deallocated)的 VM 在這份帳上仍然佔著區域額度**——實測案例:區域總額 50/50 全滿,佔額度的是幾台停機多月的 VM,刪掉 resource group 才拿回 34 個 vCPU。停機省的是計算費,不是 quota。
+**症狀**:指令沒有錯，操作的叢集卻不是你以為的那一座。
 
-### 地雷 3:B2B guest 身分送不動 quota API {#mine-3}
+**原因**:kubectl 沒帶 `--context` 時，操作的是 kubeconfig 裡的 current-context。`az aks get-credentials` 會切換它，其他終端機或腳本也可能切換它。
 
-**症狀**:`az quota create` 直接回 `(Unauthorized) Request failed`,連錯誤細節都不給。
+**修法**:kubeconfig 裡有多座叢集時，kubectl 一律帶 `--context`、helm 一律帶 `--kube-context`，不依賴 current-context。本課的指令為了好讀沒有帶這個旗標，照做前先用 `kubectl config current-context` 確認它指向你要操作的叢集。
 
-**原因與繞法**:訂閱掛在別的 tenant、你的帳號是 B2B guest 時,quota 的 ARM API 常常不放行,而且 CSP 型訂閱的 quota 有時只有代理商後台能調。先用 Portal 的 Quotas 頁試,不行就直接找代理商,附齊四樣東西:訂閱名稱、訂閱 ID、區域、quota 項目與目標值。另外在 Portal 開 support request 時,**確認訂閱下拉選單選的是目標訂閱**——帳號下掛著多個訂閱時,預設選中的往往不是你要的那個。
+## 想一想
 
-### 地雷 4:kubectl 不帶 context,打到別人的叢集 {#mine-4}
+- 同事在另一座叢集加了一個 GPU 節點池，用的是另一份 device plugin 安裝設定。節點都 `Ready`，GPU pod 卻一直 Pending，事件說 `Insufficient nvidia.com/gpu`。你會先看哪個數字，它是多少時代表什麼？
+- 你要把 GPU pool 從 0 拉回 2 台，`az` 回報超過 quota，可是 T4 家族額度明明核准了 16。這個節點池是 spot 的。你會去查哪一行？
+- 有人用 `kubectl label node` 補了 device plugin 需要的標籤，當天一切正常。隔天早上把 pool 從 0 拉回來，GPU 又不見了。為什麼？要怎麼改才不會再發生？
 
-**症狀**:指令下對了,叢集是錯的。
+## 小結
 
-**原因**:current-context 是 kubeconfig 裡的一個共享可變狀態,`az aks get-credentials` 會改它,任何一個終端機、任何一個自動化腳本也都可能改它。真實案例:一次例行的 `kubectl get nodes` 沒帶 `--context`,打到了 kubeconfig 裡另一個生產叢集——那次只是唯讀查詢,沒造成損害,但同一個失誤配上 `delete` 就是事故。
-
-**修法**:在多叢集環境裡工作時,把「kubectl 一律帶 `--context`、helm 一律帶 `--kube-context`」當成肌肉記憶,不依賴、也不去改 current-context。(本課的教學指令為了好讀沒有帶這個旗標,照做前請先確認 `kubectl config current-context` 指向的是你打算操作的叢集。)
-
-## 帶得走的東西
-
-- Azure 的 vCPU quota 至少三個維度同時在管:家族、區域總額、spot。查的時候三個都看,申請的時候想好未來量一次要足。
-- 停機的 VM 仍佔區域 quota。清環境要刪資源,不是關機。
-- 託管 K8s 的 GPU 棧是分層的:driver 一層、device plugin 一層、(未來的)DRA driver 一層。誰管哪層要在最開始拍板,因為換手等於重建 node pool。
-- DaemonSet 的健康不能看 rollout status,要看 desired 數字——0 個目標的部署永遠「成功」。
-- 會被重建的節點(spot、scale-to-0)身上不能放手工狀態,標籤、taint 都要下在 pool 層級。
-- current-context 是共享可變狀態。顯式 `--context` 是一行的成本,換掉一整類事故。
+這一章蓋出了 Sprint 1 共用的叢集：一座 1.35 的 AKS、一個平常縮在 0 台的 T4 spot 節點池，以及自己用 Helm 裝的 device plugin。GPU 要讓 pod 用到，中間每一層都要接上：雲端額度讓 VM 開得出來，driver 讓節點認得卡，device plugin 把卡註冊成 `nvidia.com/gpu`，最後才出現在節點的 allocatable。之後哪一天 GPU 又「不見了」，就照這個順序往下查：VM 有沒有開出來、device plugin 的 DaemonSet desired 對不對、節點重建後標籤還在不在。
 
 ## 延伸閱讀
 
-想往下深挖,從這幾份開始:
+想再深入，可以從這幾份開始：
 
 - [Add an Azure Spot node pool to an AKS cluster](https://learn.microsoft.com/en-us/azure/aks/spot-node-pool) —— spot pool 的 taint/label 行為、限制與 max price 機制
-- [Supported Kubernetes versions in AKS](https://learn.microsoft.com/en-us/azure/aks/supported-kubernetes-versions) —— 版本支援週期與 N-2 政策
+- [Supported Kubernetes versions in AKS](https://learn.microsoft.com/en-us/azure/aks/supported-kubernetes-versions) —— AKS 支援哪幾個 Kubernetes 版本、各自支援到什麼時候
 - [NVIDIA device plugin for Kubernetes](https://github.com/NVIDIA/k8s-device-plugin) —— Helm 部署選項與 GFD 標籤機制
-- [Dynamic Resource Allocation | Kubernetes](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/) —— DRA 概念與 API 物件(現行文件標示 v1.35 stable)
+- [Dynamic Resource Allocation | Kubernetes](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/) —— DRA 概念與 API 物件
 
 ## 下一步
 
-地基有了:一個 1.35 的叢集、兩張要用才開的 T4、一套收工不燒錢的循環。Day 1 進入第一套機制——KAI Scheduler,NVIDIA 開源的批次排程器。先讓它以 secondary scheduler 的身分與預設排程器共存,跑通第一個 GPU 任務,然後建立兩個 Queue,看排程公平性怎麼在「線上推論」與「離線批次」之間分 GPU。
+叢集準備好了，兩張 T4 要用時才開。可是兩張卡要分給好幾個團隊時，Kubernetes 原生的排程雖然有 PriorityClass 和搶占，卻沒辦法替每個團隊設定保底幾張、閒置時能借幾張，也沒辦法讓一組 pod 全部排上或全部不排。Day 1 安裝第一套工具 KAI Scheduler：讓它和預設排程器並存，跑通第一個 GPU 任務，再建立兩個佇列，看它怎麼在「線上推論」與「離線批次」之間分配 GPU。[Day 1](sprint1-day1-kai-queue-basics.md)
 
 ---
 

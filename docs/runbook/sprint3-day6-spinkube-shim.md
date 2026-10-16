@@ -2,46 +2,291 @@
 
 ![SpinKube 官方標誌](../assets/logos/spinkube-icon-color.svg){ align=right width="88" }
 
-> 三條路線的最後一條,也是唯一一條**由 operator 替你改節點**的。[Day 4](sprint3-day4-wasmedge.md) 手動做過同一件事——下載 shim、改 `config.toml`、重啟 containerd——今天把它交給 `runtime-class-manager`,看自動化到底做了什麼、又在哪一步出事。
+[Day 4](sprint3-day4-wasmedge.md) 在一台節點上手動裝好 WasmEdge 的 shim：下載執行檔、在 `config.toml` 加一段 runtime 設定、重啟 containerd。一台節點這樣做還可以。叢集有十幾台節點、spot 節點隨時被回收、節點映像升級時整批換新，[Day 5](sprint3-day5-cost-measurement.md#mine-1) 也看過節點層的改動撐不過一次 VM 汰換，每台新節點都得重做一次。這件事適合交給 controller 自動做。
 
-!!! abstract "你在課程的哪裡"
-    - **Day 4**:手動把 WasmEdge 的 shim 裝上節點,量出「第 3 步開始節點不一樣」。
-    - **今天**:SpinKube 的節點側。cert-manager → runtime-class-manager → shim 佈建。**spin-operator 是 Day 7 的事,今天不碰。**
-    - **Day 8**:把這一切拆乾淨,拿 Day 1 的基準驗證。
+這一章用 SpinKube 的 runtime-class-manager 自動佈建 shim。裝完之後，`kubectl get shim` 顯示 READY、節點標著 `provisioned`、安裝用的 Job 是 Complete，送一顆 pod 進去，卻得到 `no runtime for "spin-v2" is configured`。我們會一步一步找出原因，修好它，最後讓一個 Spin 應用回應 HTTP 200。
 
-這一天要先回答整個 sprint 風險最高的問題:「SpinKube 在現行 AKS 節點映像上還裝得起來嗎?」**裁決是裝得起來——但 `runtime-class-manager` v0.2.0 開箱不生效,而且不生效的方式是完全靜默的。差一個字串。**
+讀完之後，一個自動化工具回報「節點已佈建」時，你能判斷 containerd 是否真的載入了那段設定；pod 起不來時，能分辨是 plugin 路徑寫錯、RuntimeClass 被同名物件佔住，還是映像缺少進入點。
 
-## 今天要走的路
+## 從手動安裝到交給 controller
 
-| 步驟 | 做什麼 | 節點變了嗎 |
-|---|---|---|
-| 1 | 查版本現況,修正一筆 health check | — |
-| 2 | 本機打包 Spin App,推公開 registry | — |
-| 3 | cert-manager | **沒有** |
-| 4 | runtime-class-manager | **沒有** |
-| 5 | Shim CR + 節點標籤 | **從這裡開始不一樣** |
-| 6 | 處理一個 RuntimeClass 撞名 | 沒有(只動 API server) |
-| 7 | 跑起來——先撞牆,再修一個字串 | 兩行置換 |
+先回想 Day 4 在節點上做的三件事：把 shim 執行檔放上節點、在 `config.toml` 寫一段 runtime 設定、重啟 containerd 讓設定生效。再加上一個 API server 端的動作：建一個 RuntimeClass 指向那個 handler。
 
-!!! danger "先講一件事:不要照 AKS 官方文件裝"
-    `learn.microsoft.com/…/deploy-spinkube`(`updated_at: 2026-07-03`,查證 2026-08-11)教的安裝路徑是從明文 `http://kwasm.sh/` 裝 kwasm-operator——**那個專案已於 2026-05-15 封存退休**,README 自己指向本章要用的 runtime-class-manager,網域只保證解析到 2027-01-20。本章走的是上游現行的那條路。
+**SpinKube** 是一組讓 Spin 應用跑在 Kubernetes 上的專案。Spin 是一個用 WebAssembly 寫 HTTP 服務的框架，它的應用由 shim `containerd-shim-spin` 執行。SpinKube 把工作分成兩半：節點側由 **runtime-class-manager**（以下簡稱 rcm）負責，它是一個 controller，替符合條件的節點裝 shim、改設定、建 RuntimeClass；應用側由 spin-operator 負責，把 Spin 應用變成 Deployment，那是 Day 7 的內容。
 
-## 步驟 1: 版本現況——先修正自己的 health check
+下圖把今天會碰到的元件按位置分開，上半部是 API server 裡的物件，下半部是節點上的檔案：
 
-`gh api` 查證(repo 已由 `spinkube/*` 遷至 `spinframework/*`):
+![SpinKube 的元件分布：叢集側有 runtime-class-manager controller、描述要裝哪支 shim 的 Shim 資源，以及它建立的 RuntimeClass；節點側由每台節點一個的 install Job 寫入 /opt/rcm/bin 下的 shim、config.toml 檔尾的一段設定和 rcm-lock.json；spin-operator 與 cert-manager 是 Day 7 才用到的元件](../assets/diagrams/s3d6-spinkube-parts.svg)
 
-| repo | 最新 release | 發佈日 | repo 最後 push |
-|---|---|---|---|
-| `spin` | v4.0.2 | 2026-06-24 | 2026-08-10 |
-| `containerd-shim-spin` | v0.25.1 | 2026-06-12 | 2026-06-22 |
-| `runtime-class-manager` | v0.2.0 | 2026-03-17 | 2026-08-03 |
-| **`spin-operator`** | **v0.6.1** | **2025-07-09** | 2026-07-20 |
+照著圖看：rcm 讀 Shim 資源，決定要裝哪支 shim、裝到哪些節點；真正動手改節點的是它替每台節點建立的 install Job。節點側那三樣東西，前兩樣就是 Day 4 手動做過的事，第三樣 `rcm-lock.json` 是手動路線沒有的。接下來的步驟會一個一個看到它們。
 
-只看發版日期會下這樣的判斷:「spin-operator 13 個月沒發版,同層元件同步靜止」——**後半句不成立**。shim 今年連發三版,rcm 今年才第一次有正式 release、八月還有 push。**今天要動手的兩個元件都是活的;真正停住的是 Day 7 才會碰的 spin-operator。**
+本課程用的版本：`spin` CLI v4.0.2、`containerd-shim-spin` v0.25.1、rcm v0.2.0、cert-manager v1.21.1，節點的 containerd 是 2.3.3。專案已經從 `spinkube/*` 搬到 GitHub 的 `spinframework/*`，查文件和 chart 時用新位置。
 
-這一條直接改寫風險排序:**真正的風險集中在 Day 7,不在今天。**
+AKS 官方文件有一篇部署 SpinKube 的教學，教的是從 `http://kwasm.sh/` 裝 kwasm-operator。這個專案已在 2026-05-15 封存，README 自己指向 rcm，網域也只保證解析到 2027-01-20。照本章的 rcm 路線裝，不要照那篇文件。
 
-宣告面還有一段要先讀——rcm 怎麼決定 containerd 的 plugin 路徑(`internal/containerd/configure.go`,v0.2.0 逐字):
+## 開始之前
+
+節點上的指令透過 Day 1 的 `node-shell` DaemonSet 執行。先確認目前節點的 Pod 已就緒，重新取得名稱：
+
+```bash
+kubectl -n wasmlab rollout status ds/node-shell --timeout=5m
+NODE_SHELL_POD=$(kubectl -n wasmlab get pod -l app=node-shell -o jsonpath='{.items[0].metadata.name}')
+```
+
+以下 `kubectl`、Helm 與 Spin 命令在本機執行；需要進節點時，命令會明列 `exec` 與 `nsenter`。
+
+下載[節點取樣腳本](../assets/labs/s3d6/node-snapshot.sh)，存為 `node-snapshot.sh`。它沿用本課七份取樣的內容，只把原作者的 kubeconfig context 改成必填參數。先用 `kubectl config get-contexts` 找出本課 context，設定 `CTX`；`KUBECONFIG` 沿用 Day 2 的專用檔案。在本機執行：
+
+```bash
+export CTX=<lab-context>
+bash node-snapshot.sh day6-s0
+```
+
+本次 Day 6 使用的是替換後的新 VM，`day6-s0` 的 containerd 設定已回到 Day 1 基準，沒有 Day 5 的 WasmEdge handler 與映像拉取設定。若沿用 Day 5 的原節點，請記錄仍在的差異；仍可操作 SpinKube，但不能把這個環境的映像拉取結果當成「未加設定」的對照。
+
+每個階段換一個輸出前綴，例如 `day6-s1`，再逐份用 `diff` 比對。腳本假設只有一台測試節點；若有多台，要分別選定節點取樣，不能把第一筆 Node 與另一台 node-shell 的結果混用。
+
+## 步驟 1:打包一個 Spin 應用 {#step-1}
+
+本機需要 Spin CLI 4.0.2 與 `static-fileserver` 範本；安裝方式見 [Spin CLI 官方說明](https://spinframework.dev/v4/install)。請依文件的指定版本方式選 4.0.2，再用 `spin --version` 確認；直接安裝最新版不一定與本課相同。二進位檔手動安裝不會附範本，需依同頁的 Templates 段落另裝。先準備等一下要跑的應用。用 `spin` CLI 的 `static-fileserver` 範本建一個 app（`spin new -t static-fileserver`，依提示輸入專案名稱），它把 `assets/` 目錄裡的檔案當成靜態網頁回應。切換到新建專案目錄，後面的 `spin registry push` 也在該目錄執行。在 `assets/index.html` 放一行 `Sprint3 Day6 SpinKube probe`。這個範本的 wasm 元件是官方預先編好的，不需要裝 Rust 之類的編譯工具。
+
+推到 ttl.sh。ttl.sh 是不用帳號的公開 registry，tag 寫 `:1h` 表示映像保留一小時，適合做實驗；`<tag>` 換成你自己取的名字：
+
+```console
+$ spin registry push ttl.sh/<tag>:1h
+Pushed with digest sha256:5e551527…
+```
+
+
+把這個映像的 manifest 從 registry 拉回來看，layers 欄位是這樣：
+
+```json
+"layers": [
+  { "mediaType": "application/vnd.wasm.content.layer.v1+wasm",         "size": 3781679 },
+  { "mediaType": "application/vnd.fermyon.spin.application.v1+config", "size": 609 }
+]
+```
+
+
+Day 4 看過的三種打包都只有一層，Spin 的有兩層。第一層是 wasm 本體。第二層 609 B 叫 **locked app**：Spin 應用的完整描述，包括用什麼觸發（這裡是 HTTP）、哪個路徑交給哪個元件、元件從哪裡來。28 B 的 `index.html` 也被 base64 編碼後直接放進 locked app，沒有另開一層。
+
+image config 只有 209 B，裡面只有一個指向 locked app 的 label，沒有 `Cmd`，也沒有 `Entrypoint`。這一點在步驟 6 會讓 pod 起不來，先記著。
+
+把它併進 [Day 4 的打包對照表](sprint3-day4-wasmedge.md#gate)，現在有四欄：
+
+| | wasmCloud | runwasi tar | runwasi wasm-layer | **Spin App** |
+|---|---|---|---|---|
+| layer mediaType | `application/wasm` | `…layer.v1.tar` | `…wasm.component.layer.v0+wasm` | **`…wasm.content.layer.v1+wasm` + `…fermyon.spin.application.v1+config`** |
+| 層數 | 1 | 1 | 1 | **2** |
+| 進入點 | 列 WIT 介面 | `Entrypoint` | `Entrypoint` + label | **沒有,config label 指向 locked app** |
+| `os` 欄位 | `wasip2` | `wasip1` | `wasip1` | **`wasip1`(但 payload 其實是 component)** |
+| 誰讀得懂 | wasmCloud | WasmEdge | WasmEdge | containerd-shim-spin |
+
+最右欄跟前三欄的 mediaType 都不同。wasm 的 OCI 打包沒有共通約定，mediaType 由各家自己定義，同一個 registry 裡的映像，不一定是同一種東西，要看哪個 shim 讀得懂。另外，用 Day 4 的方法看 wasm 檔的前 8 個位元組，是 `0d 00 01 00`，代表 component；image config 的 `os` 欄位卻寫 `wasip1`。所以在 Spin 的打包裡，不能用 `os` 欄位判斷裡面是 component 還是 core module。
+
+## 步驟 2:安裝 cert-manager 與 runtime-class-manager
+
+先裝 cert-manager。它是管理 TLS 憑證的元件，Day 7 的 spin-operator 需要它；rcm 本身不需要。rcm 0.2.0 的 chart 只有六個 template，沒有 webhook，也沒有任何 Certificate 資源。官方安裝指引把 cert-manager 排在第一步，是為了後面的 spin-operator，只裝 shim 可以略過，這裡先裝好給 Day 7 用。cert-manager 的 chart 在 jetstack 的 Helm repo，還沒加過的話，先 `helm repo add jetstack https://charts.jetstack.io`。
+
+```console
+$ helm upgrade --install cert-manager jetstack/cert-manager -n cert-manager \
+    --create-namespace --version v1.21.1 --set crds.enabled=true --wait
+$ helm upgrade --install runtime-class-manager \
+    oci://ghcr.io/spinframework/charts/runtime-class-manager --version 0.2.0 \
+    -n rcm --create-namespace --wait
+```
+
+rcm 的 chart 裝了一個 Deployment（controller 本身）、一個 `Shim` CRD（`shims.runtime.spinkube.dev`）、ServiceAccount 與 RBAC。
+
+跟 Day 4 一樣，每一步前後都比對一次節點：`config.toml`、`containerd config dump`、`runtimeHandlers`、shim 執行檔清單、RuntimeClass 清單，今天再加上 containerd 設定目錄和節點標籤，共七項。裝完這兩個 chart，七項都跟裝之前一樣。controller 跑起來了，但它還沒碰任何節點。
+
+## 步驟 3:告訴 rcm 要裝什麼、裝到哪些節點
+
+rcm 從 **Shim 資源**得知要做什麼。Shim 是 rcm 定義的自訂資源，一份 Shim 描述一支 shim：從哪裡下載、雜湊值是多少、要裝到哪些節點、裝完要建什麼名字的 RuntimeClass。
+
+`containerd-shim-spin` 的每個 release 都附了一份官方 Shim 資源。下載本課保存的 [v0.25.1 官方 Shim YAML](../assets/labs/s3d6/shim-spin-v2.yaml)，存成 `shim-spin-v2.yaml`，不做任何修改，然後 `kubectl apply -f shim-spin-v2.yaml`。它的重點欄位是這幾個：
+
+```yaml
+spec:
+  nodeSelector: {spin: "true"}
+  fetchStrategy:
+    platforms:
+      - {os: linux, arch: x86_64, location: "…/containerd-shim-spin-v2-linux-x86_64.tar.gz",
+         sha256: "1755fbeb…"}
+  runtimeClass: {name: wasmtime-spin-v2, handler: spin-v2}
+```
+
+
+由上往下看：`nodeSelector` 指定只有帶 `spin=true` 標籤的節點會被安裝；`fetchStrategy.platforms` 依 CPU 架構列出下載位置和 sha256，完整檔案裡另外還有一筆 aarch64；`runtimeClass` 指定要建的 RuntimeClass 叫 `wasmtime-spin-v2`，handler 是 `spin-v2`。
+
+套用之後，看 rcm 有沒有動作：
+
+```console
+$ kubectl get shim -o wide
+NAME      RUNTIMECLASS       READY   NODES
+spin-v2   wasmtime-spin-v2   0       0
+
+$ kubectl get jobs -A
+No resources found
+```
+
+`READY 0`、`NODES 0`，也沒有任何 Job，節點的七項比對全都沒變。叢集裡沒有節點帶 `spin=true`，所以 rcm 什麼都不做。安裝範圍完全由 `nodeSelector` 決定，預設一台都沒有。Day 4 的手動路線，範圍是「你連進了哪台節點」，沒有地方記錄；這裡的範圍寫在一個 YAML 欄位裡，查得到。
+
+替節點貼上標籤：
+
+```console
+$ kubectl label node --all spin=true
+```
+
+
+貼完之後，叢集裡出現一個 Job，幾秒內就 Complete。這是 rcm 替這台節點建立的 **install Job**，真正改節點的就是它。把它的結構攤開來：
+
+```text
+initContainer: downloader   → 下載 tarball,逐字比對 sha256,不符就失敗
+container:     provisioner  → 掛 hostPath /,裝 shim、改 config.toml、經 D-Bus 重啟 containerd
+兩者皆 privileged
+```
+
+
+把貼標籤之後的流程畫成圖，由上往下是時間順序：
+
+![貼上 spin=true 標籤之後的五個步驟：節點符合 Shim 的 nodeSelector；runtime-class-manager 替這台節點建 install Job；initContainer downloader 下載壓縮檔並比對 sha256；privileged 的 provisioner 掛載節點根目錄，放 shim、改 config.toml、寫 rcm-lock.json、重啟 containerd；節點被標上 spin-v2=provisioned](../assets/diagrams/s3d6-install-job.svg)
+
+照著圖上的編號看，第 3 步和第 4 步是兩個容器。downloader 先跑，下載 shim 壓縮檔並比對 sha256，雜湊對不上就失敗，Job 不會往下走；Day 4 有在本機核對雜湊，但節點另外下載的那份沒有再次核對；rcm 則在節點上的下載程序驗證。provisioner 以 privileged 模式掛載整台節點的根目錄，做的就是 Day 4 手動做的那幾件事，最後透過 systemd 重啟 containerd。
+
+再比對一次節點，這次有變化：
+
+```text
+config.toml       +6 行(檔尾,# RCM runtime config for spin-v2 起)
+/opt/rcm/bin/containerd-shim-spin-v2     83.9 MiB
+/opt/rcm/rcm-lock.json                   記錄 shim 名、sha256、路徑
+節點標籤          +spin=true、+spin-v2=provisioned
+```
+
+
+shim 放在 `/opt/rcm/bin/`，不在 `PATH` 裡。rcm 在 `config.toml` 的 `runtime_type` 直接寫這支執行檔的絕對路徑，containerd 2.x 接受這種寫法，所以 shim 不需要放進 `PATH`。如果你沿用 Day 4 的方式，掃 `/usr/bin` 和 `/usr/local/bin` 確認 shim 在不在，會以為沒裝，見[疑難排解：在 `/usr/bin` 找不到 shim](#mine-5)。
+
+`/opt/rcm/rcm-lock.json` 記錄這台節點裝了哪支 shim、雜湊值、放在哪裡。手動安裝完，節點上沒有任何地方記得這支檔案是誰放的、對應哪個版本；有了 lock 檔，事後查得出來。
+
+## 步驟 4:先處理同名的 RuntimeClass {#step-4}
+
+從控制面看，安裝已經完成，每個指標都是成功：
+
+```console
+$ kubectl get shim -o wide
+NAME      RUNTIMECLASS       READY   NODES
+spin-v2   wasmtime-spin-v2   1       1
+
+節點標籤:  "spin-v2": "provisioned"
+install Job: Complete,log 沒有任何 warning,最後一行是 restarting containerd
+```
+
+
+Shim 的 `RUNTIMECLASS` 欄寫著 `wasmtime-spin-v2`。可是叢集裡本來就有一顆同名的 RuntimeClass，是 [Day 1 步驟 4](sprint3-day1-three-generations.md#step-4) 刻意建的對照組，handler 指向不存在的實作。SpinKube 的官方 Shim 資源用的也是這個名字，YAML 註解寫明這是 spin-operator 的預設值。看看 rcm 怎麼處理這個衝突：
+
+```console
+{"level":"debug","shim":"spin-v2","message":"RuntimeClass found: wasmtime-spin-v2"}
+
+$ kubectl get runtimeclass wasmtime-spin-v2 -o yaml
+handler: wasmtime-spin-v2       ← 還是 Day 1 那個壞 handler
+resourceVersion: "2402"         ← 完全沒被改過
+```
+
+
+rcm 的 log 說它找到了這顆 RuntimeClass，然後就沒有下文。RuntimeClass 的 handler 還是 Day 1 的 `wasmtime-spin-v2`，`resourceVersion` 沒變，表示沒有被改過，rcm 也沒有報任何錯誤。rcm 的原始碼只用名字檢查 RuntimeClass 是否存在，存在就跳過建立，不比對裡面的欄位，見[疑難排解：同名的 RuntimeClass 沒有被更新](#mine-2)。
+
+處理方式是刪掉 Day 1 那顆，讓 rcm 重建。Day 1 的對照組要示範的是「handler 不存在會怎樣」，跟名字無關，所以先用一個不會撞名的名字建一顆替代品，再刪原件：
+
+```bash
+cat > runtimeclass-day1-control-renamed.yaml <<'EOF'
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: wasm-day1-missing-handler
+handler: wasmtime-spin-v2
+EOF
+kubectl apply -f runtimeclass-day1-control-renamed.yaml
+kubectl delete runtimeclass wasmtime-spin-v2
+```
+
+刪掉之後等一陣子，`wasmtime-spin-v2` 不會自己回來。rcm 只監看 Shim、Node、Job 三種資源的變化，RuntimeClass 被刪掉不會觸發它重新處理（reconcile）。對 Shim 做任何一次更新就能觸發，例如加一個 annotation：
+
+```console
+$ kubectl annotate shim spin-v2 day6/poke=<任意值> --overwrite
+```
+
+rcm 隨即重建 RuntimeClass，見[疑難排解：刪掉的 RuntimeClass 沒有自動重建](#mine-3)。重建出來的這一顆長這樣：
+
+```yaml
+handler: spin-v2
+metadata:
+  ownerReferences:
+    - {kind: Shim, name: spin-v2, controller: true}
+scheduling:
+  nodeSelector: {spin: "true"}
+```
+
+
+這顆有兩個欄位是 Day 4 手動建的 `wasmedge` 沒有的。`scheduling.nodeSelector` 在 [Day 1 的疑難排解](sprint3-day1-three-generations.md#mine-3)看過：指名這個 RuntimeClass 的 pod，只會被排到帶 `spin=true` 的節點；沒寫這一欄的 `wasmedge`，pod 可能被排到沒裝 shim 的節點再失敗。本課只有一台節點，多節點時的過濾行為沒有實際測過。`ownerReferences` 表示這顆 RuntimeClass 屬於 Shim `spin-v2`，刪掉 Shim 時，Kubernetes 會連帶刪掉它，Day 8 拆除時會用到這一點。
+
+## 步驟 5:送一顆 pod 進去 {#step-5}
+
+現在 RuntimeClass 的 handler 是 `spin-v2`。寫一顆最簡單的 Pod 指名它，不經過 spin-operator，直接問節點「`spin-v2` 這個 handler 能不能用」。映像換成步驟 1 推上去的那一個：
+
+```bash
+cat > pod-spinapp-probe.yaml <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: spinapp-probe
+  namespace: wasmlab
+spec:
+  runtimeClassName: wasmtime-spin-v2
+  restartPolicy: Never
+  containers:
+    - name: app
+      image: ttl.sh/<tag>:1h
+EOF
+kubectl apply -f pod-spinapp-probe.yaml
+```
+
+`kubectl -n wasmlab describe pod spinapp-probe` 的事件：
+
+```console
+Warning  FailedCreatePodSandBox  kubelet
+  no runtime for "spin-v2" is configured
+```
+
+
+這是 [Day 1](sprint3-day1-three-generations.md#step-4) 看過的訊息：containerd 不認得這個 handler。可是 install Job 明明改過 `config.toml`，也重啟過 containerd。用 Day 4 的方法分三層查，分別看設定檔寫了什麼、設定檔經 containerd 解析後包含什麼、kubelet 回報的 handler 清單：
+
+```console
+$ kubectl -n wasmlab exec "$NODE_SHELL_POD" -- nsenter -t 1 -m -- grep -c spin-v2 /etc/containerd/config.toml
+$ kubectl -n wasmlab exec "$NODE_SHELL_POD" -- nsenter -t 1 -m -- sh -c 'containerd config dump | grep -c spin-v2'
+$ kubectl get node -o jsonpath='{.items[0].status.runtimeHandlers}'
+```
+
+三層的結果：
+
+```text
+config.toml 命中 spin-v2 的行數 = 4      檔案總行數 = 27       ← 宣告面:有
+containerd config dump 命中     = 0      dump 總行數 = 308      ← 實際載入面:沒有
+node.status.runtimeHandlers = ['', 'runc', 'untrusted']         ← 綁定粒度:沒有
+```
+
+
+`config.toml` 裡有 4 行提到 `spin-v2`，設定檔的解析結果裡一行都沒有。dump 本身有 308 行，跟沒裝任何東西時一樣，這指出 rcm 寫入的 handler 沒有出現在設定解析結果；重啟後的 Node 回報也沒有它。kubelet 回報的 handler 清單裡也沒有 `spin-v2`。
+
+回頭看 rcm 寫進 `config.toml` 的那一段，第一行是這樣：
+
+```toml
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.spin-v2]
+```
+
+
+`io.containerd.grpc.v1.cri` 是 containerd 1.x 的路徑。[Day 4](sprint3-day4-wasmedge.md#mine-2) 遇過一樣的情況：containerd 2.x 把 runtime 設定搬到 `io.containerd.cri.v1.runtime`，寫在舊路徑下的 runtime 區塊會被丟掉，不報錯也不警告。節點的 containerd 是 2.3.3，rcm 為什麼寫了 1.x 的路徑？
+
+rcm 決定路徑的程式在 `internal/containerd/configure.go`，v0.2.0 的原文：
 
 ```go
 func generateConfig(shimPath string, runtimeName string, runtimeOptions map[string]string, configData []byte) string {
@@ -55,173 +300,64 @@ func generateConfig(shimPath string, runtimeName string, runtimeOptions map[stri
 }
 ```
 
-**它不問 containerd 的版本,它 grep 設定檔內文有沒有 `version = 3` 這個字串。** 而 [Day 1](sprint3-day1-three-generations.md) 就看過,AKS 的 `config.toml` 是一份混血檔:**第一行宣告 `version = 2`,內容卻用 2.x 的 plugin 路徑**。
 
-把這兩件事放在一起,結局已經可以預測了。先往下裝,看它怎麼發生。
+它沒有問 containerd 是哪個版本，而是在設定檔內文裡找 `version = 3` 這個字串：找到就用 2.x 路徑，找不到就用 1.x 路徑。[Day 1](sprint3-day1-three-generations.md) 看過 AKS 節點的 `config.toml`：第一行宣告 `version = 2`，內容卻已經用 2.x 的 plugin 路徑。把這兩件事放在一起：
 
-## 步驟 2: 本機打包,第四種 OCI 格式
+![rcm 的判斷流程：AKS 的 config.toml 第一行是 version = 2、內容是 io.containerd.cri.v1.runtime；rcm 在檔案裡找不到 "version = 3"，當成 containerd 1.x，寫入 io.containerd.grpc.v1.cri；containerd 2.3.3 從 io.containerd.cri.v1.runtime 讀 runtime，所以那一段沒被載入；修正方式是把那兩行的路徑換成 io.containerd.cri.v1.runtime](../assets/diagrams/s3d6-plugin-path.svg)
 
-`spin` CLI v4.0.2,`static-fileserver` 範本,推上 ttl.sh(匿名公開 registry,免開 ACR):
+我們可以從圖上看到，rcm 的判斷依據是設定檔裡的一個字串，不是 containerd 的版本。AKS 的設定檔版本號跟內容不一致，判斷就落在錯的一邊，在這份混用格式的設定中，寫出未被採用的新增路徑。Day 4 手動寫設定之前，先用 `containerd -c <file> config dump` 在副本上確認過路徑，所以沒有遇到這個問題；rcm 用字串比對取代了這一步，而且判斷錯了也不會報錯。
 
-```console
-$ spin registry push ttl.sh/<tag>:1h
-Pushed with digest sha256:5e551527…
-```
+rcm 的官方文件 `supported_distros.md` 把 Azure Kubernetes 列為官方支援。在 AKS 上照做，一定會遇到這個情況。
 
-拉回 manifest 一看,**Spin 的打包跟前三種都不一樣——兩層**:
+## 步驟 6:改一個字串，讓 pod 跑起來 {#step-6}
 
-```json
-"layers": [
-  { "mediaType": "application/vnd.wasm.content.layer.v1+wasm",         "size": 3781679 },
-  { "mediaType": "application/vnd.fermyon.spin.application.v1+config", "size": 609 }
-]
-```
-
-第二層那 609 B 是 Spin 的 locked app(trigger、route、component 來源);28 B 的 `index.html` **被 base64 內嵌進去而不是另開一層**。而 image config 只有 209 B,**沒有 `Cmd` 也沒有 `Entrypoint`**——這件事在步驟 7 會造成失敗。
-
-併進 [Day 4 那張打包表](sprint3-day4-wasmedge.md#gate),現在是四欄:
-
-| | wasmCloud | runwasi tar | runwasi wasm-layer | **Spin App** |
-|---|---|---|---|---|
-| layer mediaType | `application/wasm` | `…layer.v1.tar` | `…wasm.component.layer.v0+wasm` | **`…wasm.content.layer.v1+wasm` + `…fermyon.spin.application.v1+config`** |
-| 層數 | 1 | 1 | 1 | **2** |
-| 進入點 | 列 WIT 介面 | `Entrypoint` | `Entrypoint` + label | **沒有,config label 指向 locked app** |
-| `os` 欄位 | `wasip2` | `wasip1` | `wasip1` | **`wasip1`(但 payload 其實是 component)** |
-| 誰讀得懂 | wasmCloud | WasmEdge | WasmEdge | containerd-shim-spin |
-
-**四種打包、四種讀法。wasm 的 OCI 打包沒有共通約定,`mediaType` 是各家自己定的——「同一個 registry」不等於「同一種東西」。** 還有一處值得盯著:Spin 的 wasm 前 8 個位元組是 `0d 00 01 00`(component),而 `os` 欄位寫 `wasip1`——**`os` 欄位在 Spin 的打包裡不能拿來判斷 payload 形態。**
-
-## 步驟 3–4: 兩個 Helm chart,節點七份取樣全部不變
+修法只動 rcm 寫的那兩行：把 `io.containerd.grpc.v1.cri` 換成 `io.containerd.cri.v1.runtime`，再重啟 containerd。shim、Shim 資源都不用動，也不用重裝。先備份，再替換、重啟：
 
 ```console
-$ helm upgrade --install cert-manager jetstack/cert-manager … --version v1.21.1   # 38 秒
-$ helm upgrade --install runtime-class-manager \
-    oci://ghcr.io/spinframework/charts/runtime-class-manager --version 0.2.0      # 9 秒
+$ kubectl -n wasmlab exec "$NODE_SHELL_POD" -- nsenter -t 1 -m -- cp /etc/containerd/config.toml /etc/containerd/config.toml.rcm-1x-backup
+$ kubectl -n wasmlab exec "$NODE_SHELL_POD" -- nsenter -t 1 -m -- sed -i 's|io\.containerd\.grpc\.v1\.cri"\.containerd\.runtimes\.spin-v2|io.containerd.cri.v1.runtime".containerd.runtimes.spin-v2|g' /etc/containerd/config.toml
+$ kubectl -n wasmlab exec "$NODE_SHELL_POD" -- nsenter -t 1 -m -- systemctl restart containerd
 ```
 
-兩步之後,節點的七份取樣(config.toml、config dump、runtimeHandlers、shim 清單、目錄、標籤、RuntimeClass)**全部 IDENTICAL**。
+這是手動修改節點上的檔案，節點汰換之後就會消失，rcm 在新節點上會再寫一次錯的路徑。正式環境要等上游修正，或另外想辦法讓它在每台新節點上自動套用；本課沒有測過把 `config.toml` 第一行改成 `version = 3` 的做法。另外，rcm 解除安裝時是用字串比對找出自己寫的那一段再刪掉，手改過之後字串對不上，Day 8 會實際走一次。
 
-順帶查出一件官方安裝指引不會告訴你的事:**cert-manager 是 spin-operator 的相依,不是 rcm 的。** rcm 的 chart 只有六個 template,沒有 webhook、沒有 Certificate、沒有對 cert-manager 的任何引用。官方把它排在第一步,讀者很容易以為裝 shim 需要它——今天先裝純粹是為了 Day 7。
-
-## 步驟 5: 節點從「貼標籤」那一刻開始不一樣
-
-套用 `containerd-shim-spin` v0.25.1 官方附的 Shim CR(逐字未改):
-
-```yaml
-spec:
-  nodeSelector: {spin: "true"}
-  fetchStrategy:
-    platforms:
-      - {os: linux, arch: x86_64, location: "…/containerd-shim-spin-v2-linux-x86_64.tar.gz",
-         sha256: "1755fbeb…"}
-  runtimeClass: {name: wasmtime-spin-v2, handler: spin-v2}
-```
-
-**只 apply CR、不貼標籤:什麼都沒發生。** `kubectl get shim` 是 `READY 0 / NODES 0`,沒有 Job,節點取樣不變。**`nodeSelector` 是實打實的閘門,佈建範圍是宣告式的,而且預設是空集合**——這是 rcm 相對手動路線最直接的優點。
-
-貼上標籤:
+重啟之後，再用步驟 5 的方法查 dump 和 handler 清單（下面輸出的前兩行，是在 dump 裡數 `spin-v2` 出現幾次）。這次 `spin-v2` 出現了。刪掉步驟 5 那顆 pod，用同一份 YAML 再建一次，事件變成另一種錯誤：
 
 ```console
-$ kubectl label node --all spin=true
+$ kubectl -n wasmlab delete pod spinapp-probe
+$ kubectl apply -f pod-spinapp-probe.yaml
 ```
-
-10 秒內出現一個 **Job**(不是 DaemonSet),16 秒 `Complete`。它的結構值得攤開:
-
-```text
-initContainer: downloader   → 下載 tarball,逐字比對 sha256,不符就失敗
-container:     provisioner  → 掛 hostPath /,裝 shim、改 config.toml、經 D-Bus 重啟 containerd
-兩者皆 privileged
-```
-
-裝完的節點差異:
-
-```text
-config.toml       +6 行(檔尾,# RCM runtime config for spin-v2 起)
-/opt/rcm/bin/containerd-shim-spin-v2     83.9 MiB
-/opt/rcm/rcm-lock.json                   記錄 shim 名、sha256、路徑
-節點標籤          +spin=true、+spin-v2=provisioned
-```
-
-**注意落點:`/opt/rcm/bin/`,不在 `PATH` 裡。** Day 4 式的「掃 `/usr/bin` 檢查有沒有裝」在這裡會誤判成沒裝([地雷 5](#mine-5))。rcm 在 `runtime_type` 直接寫絕對路徑,containerd 2.x 接受。
-
-而 `rcm-lock.json` 是手動路線完全沒有的東西:**手動裝完,節點上沒有任何地方記得「這支檔案是誰放的、對應哪個版本」。**
-
-### 但是——那 6 行寫在哪個路徑下?
-
-```toml
-[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.spin-v2]
-```
-
-**1.x 的路徑。** 步驟 1 讀到的那段 `strings.Contains` 走進了錯的分支。三層一起看:
-
-```text
-config.toml 命中 spin-v2 的行數 = 4      檔案總行數 = 27       ← 宣告面:有
-containerd config dump 命中     = 0      dump 總行數 = 308      ← 實際載入面:沒有
-node.status.runtimeHandlers = ['', 'runc', 'untrusted']         ← 綁定粒度:沒有
-```
-
-而控制面這一側,**每一個指標都是綠的**:
-
-```console
-$ kubectl get shim -o wide
-NAME      RUNTIMECLASS       READY   NODES
-spin-v2   wasmtime-spin-v2   1       1
-
-節點標籤:  "spin-v2": "provisioned"
-install Job: Complete,log 沒有任何 warning,最後一行是 restarting containerd
-```
-
-containerd 真的被 rcm 重啟過(時間戳可查)。**重啟做了,設定沒生效。** 丟一顆 pod 進去:
-
-```console
-Warning  FailedCreatePodSandBox  kubelet
-  no runtime for "spin-v2" is configured
-```
-
-這就是[地雷 1](#mine-1),今天最大的一顆。
-
-## 步驟 6: RuntimeClass 撞名——Day 1 埋的種子發芽了
-
-叢集上本來就有一顆 `wasmtime-spin-v2`——**[Day 1 驗收第二半](sprint3-day1-three-generations.md#step-4)刻意建的「handler 不存在」對照組**。而 SpinKube 官方 Shim CR 要建的 RuntimeClass,**名字就叫 `wasmtime-spin-v2`**(官方 YAML 註解寫明:這是 spin-operator 的預設值)。
-
-**不是巧合,是 Day 1 挑名字時就撞上了 SpinKube 的預設。** 先不刪,看 rcm 怎麼處理:
-
-```console
-{"level":"debug","shim":"spin-v2","message":"RuntimeClass found: wasmtime-spin-v2"}
-
-$ kubectl get runtimeclass wasmtime-spin-v2 -o yaml
-handler: wasmtime-spin-v2       ← 還是 Day 1 那個壞 handler
-resourceVersion: "2402"         ← 完全沒被改過
-```
-
-**rcm 沒有覆蓋,也沒有報錯。** 原始碼:`runtimeClassExists()` 只用名字查存在,存在就整個跳過([地雷 2](#mine-2))。諷刺的是,它的部署函式用的是 server-side apply 加 `Force: true`——**只要走得到就會覆蓋,但它走不到**。
-
-處理決策(三條理由都寫進日誌了):**刪掉 Day 1 那顆,讓 rcm 重建;對照組的語意用新名字 `wasm-day1-missing-handler` 保住**——它要驗的是「handler 不存在會怎樣」,跟名字無關。
-
-刪掉之後還有一層:**rcm 不 watch RuntimeClass,刪了它不會自動重建**([地雷 3](#mine-3))。要戳一下 Shim CR(加個 annotation)才會觸發 reconcile。重建出來的那顆:
-
-```yaml
-handler: spin-v2
-metadata:
-  ownerReferences:
-    - {kind: Shim, name: spin-v2, controller: true}
-scheduling:
-  nodeSelector: {spin: "true"}
-```
-
-**[Day 1 地雷 3](sprint3-day1-three-generations.md#mine-3) 的預告成立:rcm 建的 RuntimeClass 帶 `scheduling.nodeSelector`。** 對照 Day 4 手動建的 `wasmedge`(沒有 `scheduling`):多節點時,前者讓 scheduler 先過濾節點,後者讓 pod 排到任何節點再失敗。**這是行為差異,不是裝飾。** 而 `ownerReferences` 指回 Shim——**刪掉 Shim CR,RuntimeClass 會被 GC 連帶刪除**,Day 8 的拆除驗收要把這條算進去。
-
-## 步驟 7: 跑起來——修一個字串就好
-
-先撞第一面牆(步驟 2 預告過的):
 
 ```console
 Warning  Failed  Error: … failed to generate spec: no command specified
 ```
 
-Spin 映像沒有 `Cmd`/`Entrypoint`,直接手寫 Pod 要自己補 `command: ["/"]`([地雷 4](#mine-4))。補上之後撞第二面牆——就是地雷 1 的 `no runtime for "spin-v2" is configured`。
 
-修法只有一個字串:把 rcm 寫的那兩行 plugin domain 換成 `io.containerd.cri.v1.runtime`,重啟 containerd。**不必動 shim、不必動 Shim CR、不必重裝任何東西:**
+映像拉下來了，sandbox 也建好了，卡在產生容器規格這一步。原因在步驟 1：Spin 映像的 image config 沒有 `Cmd` 也沒有 `Entrypoint`，容器執行時不知道要執行什麼。spin-operator 產生的 Deployment 會自己補上 `command: ["/"]`，直接手寫 Pod 就要自己補，見[疑難排解：pod 停在 `no command specified`](#mine-4)。
+
+補上 `command` 另建一顆：
+
+```bash
+cat > pod-spinapp-probe-cmd.yaml <<'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: spinapp-probe-cmd
+  namespace: wasmlab
+spec:
+  runtimeClassName: wasmtime-spin-v2
+  restartPolicy: Never
+  containers:
+    - name: app
+      image: ttl.sh/<tag>:1h
+      command: ["/"]
+      ports:
+        - containerPort: 80
+EOF
+kubectl apply -f pod-spinapp-probe-cmd.yaml
+```
+
+pod 進入 Running 之後，看它的 log，再從叢集裡另開一顆 curl pod 打它。`<pod-ip>` 用 `kubectl -n wasmlab get pod spinapp-probe-cmd -o wide` 查；curl 的指令是 `kubectl -n wasmlab run day6-curl --image=curlimages/curl:8.11.1 -- -sS -i http://<pod-ip>/static/index.html`，回應用 `kubectl -n wasmlab logs day6-curl` 看。下面把修正後的檢查、pod 的 log 與回應整理在一起：
 
 ```console
 --- 有效設定裡出現幾次 spin-v2(改前是 0)
@@ -238,121 +374,91 @@ HTTP/1.1 200 OK
 Sprint3 Day6 SpinKube probe
 ```
 
-**本機打包 → 公開 registry → 節點拉取 → containerd-shim-spin 執行 → HTTP 200,整條走完——而且沒有用到 spin-operator。**
 
-## rcm 自動化了 Day 4 手動做的哪些事
+修正之後，containerd 的有效設定裡出現 3 行 `spin-v2`，handler 清單多了 `spin-v2`，Spin 應用在 80 port 回應 HTTP 200，內容就是步驟 1 放進 `index.html` 的那一行。從本機打包、推到公開 registry、節點拉取映像、`containerd-shim-spin` 執行，到 HTTP 回應，整條路都走通了，而且沒有用到 spin-operator。
 
-今天最有價值的一張表:
+還有一件事跟 Day 4 不一樣。Day 4 的 runwasi 映像要在 containerd 加 `use_local_image_pull = true` 才拉得動，本次新節點的 Spin 映像沒有加任何映像拉取設定就拉成功了。可能跟打包形態有關（Spin 的 layer 不是 tar，沒有東西要解開），本課沒有做對照實驗確認。
+
+## rcm 自動化了 Day 4 的哪些事
+
+把 Day 4 的手動步驟和 rcm 的做法並排比較：
 
 | Day 4 手動 | rcm 自動化 | 誰做得比較好 |
 |---|---|---|
-| `curl` 下載,自己挑版本與架構 | `fetchStrategy.platforms`,依節點 `arch` 選 | **rcm**——宣告式、跨架構 |
-| **沒有校驗雜湊** | downloader 逐字比對 sha256,不符就失敗 | **rcm**——供應鏈這格 Day 4 是空白 |
-| 沒有任何安裝紀錄 | `rcm-lock.json` 記 shim 名、sha256、路徑 | **rcm** |
-| 手寫 8 行設定,**先離線 parse 確認路徑才寫** | `strings.Contains(cfg, "version = 3")` 猜路徑 | **Day 4 手動做得對**——rcm 猜錯,而且錯了不報 |
-| 重啟時機人決定 | provisioner 自己重啟 | rcm 方便,但時機不可控、沒有 drain |
-| RuntimeClass 沒帶 `scheduling` | 帶 `scheduling.nodeSelector` + `ownerReferences` | **rcm** |
-| 佈建範圍 = 人工連進哪顆節點 | `nodeSelector`,預設空集合 | **rcm**——可稽核 |
-| 新節點加入:什麼都不會發生 | controller watch `Node`,理論上會補 | **待驗**(Day 7 的第一件事) |
+| `curl` 下載，自己挑版本與架構 | `fetchStrategy.platforms`，依節點的 CPU 架構選 | rcm：寫在 YAML 裡，一份涵蓋多種架構 |
+| 本機核對 SHA256，節點再次下載未重驗 | downloader 在節點比對 sha256，不符就失敗 | rcm：核對實際安裝的下載檔 |
+| 沒有任何安裝紀錄 | `rcm-lock.json` 記 shim 名、sha256、路徑 | rcm |
+| 手寫設定，**先離線 parse 確認路徑才寫** | 在設定檔裡找 `version = 3` 字串決定路徑 | Day 4：rcm 在 AKS 上選錯路徑，而且不報錯 |
+| 人決定什麼時候重啟 | provisioner 自己重啟 | rcm 比較方便，但重啟時機無法控制，也不會先把節點上的工作移走 |
+| RuntimeClass 沒帶 `scheduling` | 帶 `scheduling.nodeSelector` 與 `ownerReferences` | rcm |
+| 安裝範圍是「連進了哪台節點」 | `nodeSelector`，預設一台都沒有 | rcm：範圍查得到 |
+| 新節點加入時什麼都不會發生 | controller 監看 Node，應該會自動補裝 | 還沒驗證，Day 7 第一件事 |
 
-**一句話:rcm 把「取得、校驗、放置、記錄、範圍、生命週期」六件事都做了,唯一做壞的是「決定寫到哪個 plugin 路徑」——而那正是 Day 4 靠離線 parse 先驗過才敢寫的那一步。**
+取得檔案、校驗、放置、記錄、範圍、RuntimeClass 的生命週期，rcm 都比手動做得完整。它選錯的是「設定要寫到哪個 plugin 路徑」，而這正是 Day 4 先在副本上驗證過才寫進節點的那一步。
 
-## 驗收 checkpoint
+## 疑難排解
 
-| 要求 | 判定 | 支撐證據 |
-|---|---|---|
-| 節點被標記為已佈建 shim | **達成** | 節點標籤 +`spin-v2: provisioned`;`kubectl get shim` READY 1/1;`rcm-lock.json` |
-| 指出 containerd 設定被改了哪一段 | **達成** | config.toml 檔尾 6 行,999 B → 1247 B,diff 逐字 |
-| (加碼)那一段有沒有生效 | **原本沒有,改一個字串後有** | dump 命中 0 → 3;handler 出現 |
-| (加碼)端到端跑通 | **達成** | HTTP/1.1 200,body `Sprint3 Day6 SpinKube probe` |
+### rcm 回報已佈建，pod 卻是 `no runtime for "spin-v2" is configured` {#mine-1}
 
-!!! note "「已佈建」與「能跑」是兩件事"
-    **「節點被標記為已佈建」與「節點真的能跑」是兩件事**——今天這兩件事在同一顆節點上先後成立與不成立過。驗收只要求前者,前者確實達成;**但如果只驗到這裡就停手,交出去的是一份所有指標都綠、pod 起不來的環境。**
+**症狀**：Shim `READY 1/1`、節點標著 `spin-v2=provisioned`、shim 在磁碟上、install Job `Complete` 且 log 沒有 warning，指名該 RuntimeClass 的 pod 卻卡在 `FailedCreatePodSandBox`。
 
-## 誠實的差距
+**原因**：rcm v0.2.0 用設定檔裡有沒有 `version = 3` 來選 plugin 路徑。AKS 的 `config.toml` 宣告 `version = 2`、內容是 2.x 寫法，rcm 寫進 1.x 路徑，containerd 2.3.3 不載入那一段。完整過程見[步驟 5](#step-5)。
 
-- **rcm 面對新 VM 會不會自動重新佈建,今天沒驗。** 它有 watch `Node`(啟動 log 可查),但那是「理論上會」。驗它需要一次停開機——答案在 Day 7 叢集重啟後的前五分鐘。
-- **Spin 映像為什麼不需要 Day 4 的 `use_local_image_pull` 就拉得動,沒有解釋。** 合理猜測是打包形態(沒有 tar 層要解開),**但沒做對照實驗**。
-- **shim 行程數只有單次取樣**(一顆 pod 8 個行程,量級同 Day 5 的 wasmedge),沒有線性擬合,不能跟 Day 5 的常駐/邊際數字並列。記憶體完全沒量。
-- **今天跑的不是 Day 5 那份 Rust 原始碼**(用官方預編的 static-fileserver 元件),「同一支程式跨三條路線」這條線在 SpinKube 側斷了,要補一次編譯才接得上。
-- **plugin domain 的修正是手改,不是上游修法。** 沒測改 AKS 設定檔第一行的做法,也沒向上游開 issue(確認過沒有對應的 open issue)。
-- **只有單節點**,`nodeSelector` 的過濾與 rollout 行為沒有多節點實測。
+**修法**：把那兩行的 `io.containerd.grpc.v1.cri` 換成 `io.containerd.cri.v1.runtime`，重啟 containerd，指令在[步驟 6](#step-6)。任何會自動改 containerd 設定的元件，裝完都用 `containerd config dump` 確認，不要只看 `config.toml`：前者是磁碟設定經解析、補上預設值的結果；它不是執行中服務的查詢，還要在重啟後檢查 `runtimeHandlers` 並跑實際 Pod。
 
-## 地雷記錄
+### 同名的 RuntimeClass 沒有被更新 {#mine-2}
 
-### 地雷 1:rcm 用「設定檔內文有沒有 `version = 3`」猜 plugin 路徑,在 AKS 上猜錯,而且錯了不報 {#mine-1}
+**症狀**：叢集裡已經有一顆同名的 RuntimeClass（handler 是別的值），套上 Shim 之後 `kubectl get shim` 照樣 READY，那顆 RuntimeClass 的欄位卻都沒變，`resourceVersion` 也沒變。
 
-**症狀**:Shim `READY 1/1`、節點標 `provisioned`、shim 在磁碟上、containerd 被重啟過、install Job `Complete` 且 log 無 warning——**每一個指標都綠**。而指名該 RuntimeClass 的 pod 卡在 `no runtime for "spin-v2" is configured`。
+**原因**：rcm 只用名字檢查 RuntimeClass 存不存在，存在就跳過建立，不比對欄位。RuntimeClass 是叢集層級的資源，沒有 namespace 可以隔開，前一次安裝的殘留、其他 wasm 方案或手動實驗，都可能先用掉 `wasmtime-spin-v2` 這個名字。
 
-**根因**:`generateConfig()` 不查 containerd 版本,而是 `strings.Contains(configData, "version = 3")`。AKS 的 `config.toml` **宣告 `version = 2`、內容用 2.x 語法**,於是 rcm 走進 1.x 分支,寫出的區塊被 containerd 2.3.3 **靜默丟棄**([Day 4 地雷 2](sprint3-day4-wasmedge.md#mine-2) 的機制,這次是 operator 自己踩)。
+**修法**：裝 rcm 之前先 `kubectl get runtimeclass <name> -o yaml`；有同名的就先刪掉，再讓 rcm 重建，做法見[步驟 4](#step-4)。刪掉之後還要觸發一次重建，見下一項。
 
-**三層診斷**:config.toml 命中 4 行/27 行;dump 命中 0/308 行;`runtimeHandlers` 沒有 `spin-v2`。
+### 刪掉的 RuntimeClass 沒有自動重建 {#mine-3}
 
-**修法**(實驗環境的做法,不是正式環境的正解):把那兩行 domain 換成 `io.containerd.cri.v1.runtime`,重啟 containerd。不必動 shim、不必重裝。
+**症狀**：刪掉 RuntimeClass 之後，controller 的 log 沒有任何反應，`kubectl get shim` 的 `RUNTIMECLASS` 欄還印著那個已經不存在的名字。
 
-**為什麼要記**:官方 `supported_distros.md` 把 Azure Kubernetes 標為 ✅ officially supported,上游沒有對應的 open issue。**「猜設定檔語法版本」跟「查執行檔版本」不是同一件事**,而混血設定檔在雲廠商的節點映像上很常見。
+**原因**：rcm 只監看 Shim、Node、Job 三種資源（controller 啟動時的 log 列出了這三個），RuntimeClass 被刪掉不會觸發它重新處理。
 
-**判斷準則:任何自動化改 containerd 設定的元件,裝完一律用 `containerd config dump` 驗,不看 `config.toml`。前者是 containerd 認的,後者只是你寫了什麼。**
+**修法**：對 Shim 做一次更新，例如 `kubectl annotate shim <name> k=v --overwrite`，RuntimeClass 隨即重建。
 
-### 地雷 2:rcm 對同名的既有 RuntimeClass 只檢查「存在」,不對帳欄位 {#mine-2}
+### pod 停在 `no command specified` {#mine-4}
 
-**症狀**:叢集上先有一顆同名 RuntimeClass(handler 是別的值),套上 Shim CR 之後 `kubectl get shim` 照樣 READY 1,而那顆 RuntimeClass 的每一個欄位都維持原樣(`resourceVersion` 沒變)。
+**症狀**：handler 已經出現、映像也拉下來了，pod 卻是 `failed to generate spec: no command specified`。錯誤訊息裡沒有提到 wasm、Spin 或 shim。
 
-**根因**:`if !rcExists { handleDeployRuntimeClass(…) }`,而 `runtimeClassExists()` 只用名字 `Get` 一次。
+**原因**：Spin 映像的 image config 沒有 `Cmd` 也沒有 `Entrypoint`，進入點資訊在 locked app 裡，容器執行時不認得那個 label。見[步驟 1](#step-1)與[步驟 6](#step-6)。
 
-**為什麼特別容易中**:`wasmtime-spin-v2` 這名字是 spin-operator 的預設值,相當通用;而 **RuntimeClass 是叢集層資源,沒有 namespace 可以隔離**——前一次安裝的殘留、其他 wasm 方案、手動實驗都可能佔住這個名字。
+**修法**：Pod spec 補上 `command: ["/"]`。用 spin-operator 部署時它會自動補，只有自己手寫 Pod 或 Deployment 時會遇到。
 
-**判斷準則**:裝 rcm 之前先 `kubectl get runtimeclass <name> -o yaml`;有同名的**先刪再讓 controller 重建**,不要指望它對帳。刪完還要看下一顆。
+### 在 `/usr/bin` 找不到 shim {#mine-5}
 
-### 地雷 3:rcm 不 watch RuntimeClass,刪掉之後不會自動重建 {#mine-3}
+**症狀**：install Job `Complete`、log 印 `shim installed`，但掃 `/usr/bin`、`/usr/local/bin` 確認 shim 在不在，會判斷成沒裝。
 
-**症狀**:刪掉 RuntimeClass 之後等 20 秒,controller log 完全沒反應。`kubectl get shim` 的 `RUNTIMECLASS` 欄位還印著那個已經不存在的名字。
+**原因**：rcm 把 shim 放在自己的目錄 `/opt/rcm/bin/`，並在 `runtime_type` 寫絕對路徑，shim 不需要在 `PATH` 裡。官方文件沒有寫這個位置。
 
-**根因**:controller 註冊的 EventSource 只有 `Shim`、`Node`、`Job` 三種(啟動 log 逐字列出),RuntimeClass 的刪除事件進不了 workqueue。
+**修法**：換一種安裝方式，就要重新確認 shim 放在哪裡。依可靠程度，依序查 `containerd config dump` 裡的 `runtime_type`、`/opt/rcm/rcm-lock.json`、install Job 的 log。不要用「掃某幾個目錄」判斷有沒有裝。
 
-**修法**:對 Shim 做任何一次 update(`kubectl annotate shim <name> k=v --overwrite`)觸發 reconcile,RuntimeClass 隨即重建。
+## 想一想
 
-**跟地雷 2 是一對**:先刪同名物件、然後以為 controller 會補上——**結果一個都不會發生,而且沒有任何訊息告訴你在等一個不會來的事件。**
+- 你在一座新的叢集上用 rcm 裝另一支 shim，節點的 `config.toml` 第一行是 `version = 3`。步驟 5 的問題還會出現嗎？裝完之後你會用哪個指令確認？
+- 同事說：「`kubectl get shim` 是 READY，節點也標了 `provisioned`，所以 shim 裝好了。」你會請他再看哪兩樣東西，才能確定 pod 跑得起來？
+- 一顆 Spin pod 一直卡在 `ContainerCreating`，事件是 `no runtime for "spin-v2" is configured`。叢集裡有好幾台節點，只有部分節點貼了 `spin=true`。依照本章看到的 RuntimeClass 欄位，這顆 pod 有可能被排到沒裝 shim 的節點嗎？你接下來會查什麼？
 
-### 地雷 4:Spin 映像沒有 `Cmd`/`Entrypoint`,手寫 Pod 會停在 `no command specified` {#mine-4}
+## 小結
 
-**症狀**:shim 已生效、映像拉下來了,pod 反覆 `failed to generate spec: no command specified`。**錯誤訊息裡沒有 wasm、沒有 spin、沒有 shim,完全不像 wasm 問題。**
-
-**根因**:image config 只有 209 B,進入點資訊在 label 指向的 locked app 層裡,CRI 不認得那個 label。
-
-**修法**:Pod spec 補 `command: ["/"]`(spin-operator 產出的 Deployment 就是這麼做的,Day 7 會看到)。
-
-**為什麼要記**:只有在「不用 operator、自己寫 Pod」時會遇到——**而教學上那正是最該做一次的事,因為它把 operator 到底替你做了什麼攤開來。**
-
-### 地雷 5:rcm 把 shim 裝在 `/opt/rcm/bin/`,靠「掃某幾個目錄」的檢查會誤判成「沒裝」 {#mine-5}
-
-**症狀**:Job `Complete`、log 印 `shim installed`,但用「掃 `/usr/bin`、`/usr/local/bin` 看有沒有」這種存在性檢查,會判成什麼都沒裝。
-
-**根因**:rcm 用自己的目錄(`/opt/rcm/bin/`),並在 `runtime_type` 直接寫絕對路徑,所以 shim 不需要進 `PATH`。官方文件沒寫落點。
-
-**判斷準則**:換一條佈建路線就要重新確認落點。可靠來源優先序:`containerd config dump` 的 `runtime_type` → `rcm-lock.json` → install Job 的 log。**不要用「掃某幾個目錄」當存在性檢查,那是在賭別人跟你放同一個地方。**
-
-## 帶得走的東西
-
-- **自動化會把人的判斷換成一個啟發式,而啟發式錯的時候不會報錯。** Day 4 手動路線之所以沒踩這顆雷,是因為動手前先離線 parse 過;rcm 用一個字串比對代替了那次驗證。**評估一個 operator,要看的不是它做了多少事,是它在哪些地方用猜的。**
-- **「所有指標都綠」的環境可以是壞的。** Shim READY、節點 provisioned、Job Complete、log 無 warning——四個綠燈,pod 起不來。**每一層的「成功」只代表那一層自己的動作做完了,沒有一層驗過下一層真的收到。**
-- **叢集層的名字是全域資源。** RuntimeClass 沒有 namespace,`wasmtime-spin-v2` 這種通用名字誰都可能先佔住,而 controller 對同名物件的處理方式(對帳/跳過/覆蓋)決定了殘留會不會變成陷阱。
-- **供應鏈與紀錄是自動化真正的價值所在。** sha256 校驗、lock 檔、宣告式範圍——這三格 rcm 都比手動做得好,而它們恰好是手動流程最常省略的。
-- **對照組要提前種。** Day 1 那顆「handler 不存在」的 RuntimeClass在今天長成了兩顆地雷的觸發器;Day 4 的手動安裝在今天變成了對照表的另一半。**這個 sprint 的每一天都在替後面的天數準備對照材料。**
+runtime-class-manager 把 Day 4 手動做的事交給 controller：Shim 資源描述要裝哪支 shim、裝到哪些節點，節點貼上符合 `nodeSelector` 的標籤後，rcm 替它建一個 install Job，下載並比對 sha256、放好執行檔、在 `config.toml` 加一段設定、寫一份 `rcm-lock.json`、重啟 containerd。控制面的每個指標都顯示成功，只代表各自那一步做完了，不代表 containerd 真的載入了設定。在 AKS 上，rcm 依設定檔裡的字串選錯 plugin 路徑，要用 `containerd config dump` 和節點的 `runtimeHandlers` 才看得出來；改掉那兩行的路徑之後，Spin 應用就能跑起來。之後遇到任何自動改節點設定的工具，記得檢查 設定檔經 containerd 解析後包含什麼；遇到叢集層級的資源名稱，先確認有沒有同名的物件。
 
 ## 延伸閱讀
 
-想往下深挖,從這幾份開始:
+想再深入，可以從這幾份開始：
 
-- **[runtime-class-manager](https://github.com/spinframework/runtime-class-manager)** —— 今天的重點。README 寫明它管「RuntimeClass 與 containerd shim 二進位檔的建立與安裝」;`internal/containerd/configure.go` 就是地雷 1 那段 `strings.Contains` 的出處,值得整檔讀完。
-- **[containerd-shim-spin](https://github.com/spinframework/containerd-shim-spin)** —— shim 本體。release 附的 Shim CR 是今天逐字使用的那份,注意它註解裡自己說明了為什麼 RuntimeClass 叫 `wasmtime-spin-v2`。
-- **[Day 4 的地雷 2](sprint3-day4-wasmedge.md#mine-2)** —— 站內連結。1.x plugin 路徑被靜默丟棄的完整機制與離線驗證法,今天 rcm 踩的就是它。
+- **[runtime-class-manager](https://github.com/spinframework/runtime-class-manager)** —— 本章的主角。README 寫明它負責建立 RuntimeClass 與安裝 containerd shim 執行檔；`internal/containerd/configure.go` 是步驟 5 那段 `strings.Contains` 的出處。
+- **[containerd-shim-spin](https://github.com/spinframework/containerd-shim-spin)** —— shim 本體。release 附的 Shim 資源就是本章使用的那份，註解裡說明了 RuntimeClass 為什麼叫 `wasmtime-spin-v2`。
+- **[Day 4 的疑難排解：1.x 的 plugin 路徑被靜默丟棄](sprint3-day4-wasmedge.md#mine-2)** —— 站內連結。1.x 路徑被丟棄的機制，以及改節點前先在副本上驗證的做法。
 
 ## 下一步
 
-節點側裝好了,但**修那個字串是手動的**——而 Day 5 已經證明節點層改動撐不過一次停機。所以 [Day 7](sprint3-day7-spinkube-operator.md) 叢集重啟後的前五分鐘有一個一次性的觀察窗口:**新 VM 上,rcm 會自動重新佈建嗎?** 標籤還在嗎?如果它重佈建,它會再寫一次錯的路徑嗎?
-
-之後才是 Day 7 的正題:裝那個停了 13 個月的 spin-operator,以及本 sprint 最重要的一個驗證——**不經 operator、只用 Deployment + `runtimeClassName` 跑同一支程式**。如果成立,就證明了 operator 是便利層,真正的執行機制是 Day 1 建立的那條 RuntimeClass 鏈。
+節點側裝好了，但修 plugin 路徑那一步是手動改的，節點一汰換就會消失。[Day 7](sprint3-day7-spinkube-operator.md) 叢集重新開機後，先看新節點上的標籤還在不在、rcm 會不會自動重新安裝、會不會又寫一次錯的路徑。接著才是 Day 7 的主題：安裝 spin-operator。它的最新版本 v0.6.1 發布於 2025-07，之後就沒有新版，這一組元件裡只有它停在那裡。Day 7 也會試試不經過 operator，只用 Deployment 加上 `runtimeClassName` 跑同一個應用。
 
 ---
 

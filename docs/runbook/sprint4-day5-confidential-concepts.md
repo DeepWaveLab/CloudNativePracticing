@@ -1,102 +1,70 @@
-# Day 5: 機密運算的威脅模型——Kata 與 CoCo 的定位
+# Day 5：傳輸加密之後，誰能讀到處理中的資料？
 
 ![Kubernetes 官方標誌](../assets/logos/kubernetes-icon-color.svg){ align=right width="80" }
 
-> Part 1 把流量邊界交給基礎設施:eBPF 在核心看封包、mesh 在 L7 管加密與路由。共同的前提是**主機看得到工作負載在做什麼**——愈看得清楚愈好治理。Part 2 換一個威脅模型:當節點本身、連 root、連雲廠商都不該被信任時,怎麼讓 pod 的記憶體**連主機都讀不到**。這一章不裝東西,先把「防的是誰」講清楚,因為它跟前四天的立場剛好相反。
+付款服務已使用加密連線，資料在網路上不會直接以明文傳送。但服務計算時仍要把資料解開；如果資料擁有者不希望宿主機管理者讀取這份明文，前幾章的網路保護還不夠。這章會先指出要防範的對象，再判斷一般 Kata 隔離與機密容器各能處理哪一段風險。
 
-!!! abstract "你在課程的哪裡"
-    - **來時路**:Part 1(Day 0–4)——eBPF 拿下 L4、mesh 管 L7,基礎設施接管了「流量」這件事。
-    - **今天**:純概念。機密運算(Confidential Computing)防的是誰、Kata 與 CoCo 的關係與治理邊界、以及機密運算跟 eBPF 在「主機該不該看得到工作負載」上正好相反的立場。
-    - **接下來**:[Day 6](sprint4-day6-kata-sandboxing.md) 動手把 pod 跑進獨立 kernel 的輕量 VM(Kata),[Day 7](sprint4-day7-katacc.md) 再加上硬體記憶體加密(kata-cc)。
+## 先寫清楚攻擊者與要保護的資料
 
-## 先分清楚兩種「隔離」在防誰
+**威脅模型**描述誰可能攻擊、要保護什麼，以及哪些元件仍受信任。對同一個「隔離 Pod」要求，團隊可能有兩種不同意思：平台希望不受信任的程式無法控制節點；資料擁有者則希望節點管理者不能讀取程式的私密資料。
 
-「把 pod 隔離起來」這句話,在 Part 2 有兩個完全不同的意思,而它們**保護的方向相反**。
+這兩種需求都合理，但需要不同證據。先看一般容器：它使用宿主機核心，透過 namespace 等機制隔開工作負載。若需求是降低惡意程式利用共享核心影響宿主機的風險，可以考慮在工作負載與宿主機之間加入 VM 邊界。
 
-### 一般 Kata:保護主機不被 guest 害
+**Kata Containers** 會把 Pod 放進具有自身核心的輕量 VM。VM 內的環境稱為 **guest**；管理 VM 執行的虛擬化層稱為 **hypervisor**。一般 Kata 的目標包含保護宿主機免受不受信任工作負載影響，但沒有提供「即使宿主機不可信，guest 記憶體仍保密」的保證。[Kata 威脅模型](https://github.com/kata-containers/kata-containers/blob/main/docs/threat-model/threat-model.md)
 
-早年的容器共用主機 kernel;一個容器踩到 kernel 漏洞逃逸,就能碰到主機與其他容器。**Kata Containers 把每個 pod 裝進一台獨立 kernel 的輕量 VM**,逃逸要先突破 VM 邊界。它的威脅模型講得很直白——官方原文說 Kata 要「**prevent an untrusted container workload or user … to gain control of, obtain information from, or tamper with the host infrastructure**」。
+## 改變的是信任範圍
 
-看清楚方向:**攻擊者是容器裡的工作負載,被保護的是主機**。主機是被信任的一方;Kata 不隱藏 guest 的記憶體不讓主機看——那不是它的目標。
+**Confidential Containers（CoCo，機密容器）**以機密 VM 隔開工作負載與不受信任的宿主環境。Kata 提供 Pod 與 VM 的整合基礎，CoCo 再結合硬體保護、guest 內政策與遠端證明流程。
 
-### 機密運算(CoCo):保護 guest 不被主機看
+下圖分別列出兩種需求。重點是中間的保護機制及最右邊受保護的對象，而不是把「用了 VM」直接當成機密運算。
 
-機密運算把箭頭反過來。它假設**主機不可信**——主機作業系統、hypervisor、kubelet、containerd,甚至雲端營運商,全部列為 untrusted。CoCo 的信任模型原文:「Everything on the host outside of the enclave is **untrusted**. This includes the Kubelet, CRI runtimes like containerd, **the host kernel**…」,並提供「**the untrusted host cannot access guest data**」的技術保證。
+![一般 Kata 防範工作負載影響宿主，CoCo 保護 guest 的機密資料](../assets/diagrams/s4d5-trust-boundary.svg)
 
-做到這件事靠的是 **CPU 的硬體記憶體加密**(AMD SEV-SNP 或 Intel TDX):guest 的記憶體內容在實體 RAM 上就是密文,主機拿得到那塊記憶體,但沒有金鑰、解不開。
+一般 Kata 提供獨立核心與 VM 邊界；機密容器還要求特定硬體與軟體組合，使宿主環境不能直接讀取受保護的 guest 私有記憶體明文。CoCo 的信任模型把 guest 外的 kubelet、containerd、宿主核心與 Kata shim 都列為不受信任，而 guest 內的核心、韌體與輔助元件仍在信任範圍內。[CoCo 信任模型](https://confidentialcontainers.org/docs/architecture/trust-model/trust-model/)
 
-一句話對照——
+因此不能把機密容器理解成「不需要信任任何人」。你仍依賴硬體機制、guest 軟體與驗證政策，也必須避免應用程式自己透過 API 或日誌洩漏資料。
 
-| | 一般 Kata | 機密運算(CoCo) |
-|---|---|---|
-| 攻擊者假設是誰 | 容器裡的工作負載 | **主機 / root / hypervisor / 雲營運商** |
-| 被保護的是誰 | **主機**與其他 pod | **guest 的記憶體明文** |
-| 主機被信任嗎 | 是 | **否** |
-| 靠什麼 | 獨立 kernel 的 VM | VM + **CPU 硬體記憶體加密** |
+## TEE 保護執行中的私有記憶體
 
-!!! warning "措辭要準:是「讀不到明文」,不是「完全看不到」"
-    硬體加密的是記憶體的**明文可讀性**。主機仍拿得到那塊記憶體的密文、也看得到 metadata——只是沒有金鑰、解不出內容。教材與對話都用「主機讀不到 guest 記憶體**明文**」,別講成「主機完全看不到」,那會被較真的人抓到。
+**TEE（Trusted Execution Environment，可信執行環境）**提供硬體支援的隔離範圍。本課接下來使用 VM 層級的 TEE：AMD **SEV-SNP**；Intel **TDX** 是另一種 VM 層級技術。它們不只是在磁碟上加密檔案，而是保護 VM 執行時的記憶體與相關隔離屬性。實際保證依硬體平台與設定而異。
 
-## CoCo 站在 Kata 上,而它們分屬兩個基金會
+這項保護也不表示宿主機什麼都看不到。宿主環境仍負責排程 VM、提供網路與裝置，可以觀察部分外部行為，也可以不讓工作負載執行。拒絕服務並不因為記憶體受保護就消失；guest 主動輸出的資料也不會自動保密。[CoCo 信任範圍與限制](https://confidentialcontainers.org/docs/architecture/trust-model/trust-model/)
 
-機密容器不是從零長出來的,它疊在 Kata 上:Azure 官方講得很清楚——「With many TEE technologies requiring a boundary between the host and guest, **Kata Containers are the basis for the Kata CoCo initial work**」。Day 6 的 Kata 底座,Day 7 換一個 handler 就變成 kata-cc。
+所以需求應寫成具體範圍，例如「解密金鑰只交給符合指定條件的 guest，私有記憶體不向宿主環境暴露明文」，而不是「用了 TEE 就完全安全」。
 
-有一個治理上的張力值得記:
+## 遠端服務如何知道這個 guest 符合條件？
 
-- **Confidential Containers(CoCo)** 是 **CNCF** 專案,2022-03-08 進 CNCF,**2026-07-08 升到 Incubating**、**2026-07-22 CNCF 發公告**(生效日與公告日不同,引用時分清楚)。
-- **Kata Containers** 隸屬 **Open Infrastructure Foundation**(前身 OpenStack Foundation),2019 年成為它第一個從 pilot 畢業的頂層專案。
+資料擁有者不能只接受工作負載自己說「我在機密 VM 裡」。**遠端證明（remote attestation）**讓另一方驗證由硬體與執行環境產生的證據，再依政策決定是否釋出秘密。
 
-也就是說,**一個 CNCF 專案的執行底座,住在另一個基金會**。這不是問題,但評估長期依賴時要知道責任分屬兩邊。
+這個流程至少分成取得證據、驗證證據、檢查政策、交付秘密。硬體證據涵蓋哪些開機元件，與容器映像是否另有簽章或政策驗證，必須分清楚；一份硬體報告不會自動證明應用程式邏輯正確。[CoCo 證明流程](https://confidentialcontainers.org/docs/attestation/)
 
-## eBPF 與 CoCo:對主機可見性的相反立場
+這也說明為什麼後面不能只看 Pod Running。Running 回答的是工作負載是否啟動；「秘密只交給符合條件的環境」還需要另一套允許與拒絕測試。
 
-把 Part 1 和 Part 2 並排,會浮出一個乾淨的對立:
+## 主機觀測能力會在哪裡改變？
 
-- **eBPF(Part 1 / Sprint 2)讓主機看清楚工作負載**——主機核心觀測、治理 guest 的 syscall、封包、流量。看得愈清楚,治理愈有力。
-- **CoCo(Part 2)要「讓主機看不到 guest」**——主機被列為 untrusted,連記憶體明文都不給。
+前面使用 eBPF 觀察宿主核心處理的封包與事件。工作負載改放進 VM 後，guest 的系統呼叫在 guest 核心內執行，不能再假定宿主機能用原來的方式直接觀測。同時，宿主機仍可能看到 VM 程序、外層網路流量與資源使用。
 
-**兩者對「主機該不該看得到工作負載」的立場正好相反。** 一個把治理能力建立在可見性上,一個把安全保證建立在不可見性上。這正是把「服務網格(流量邊界)」和「機密運算(記憶體邊界)」放進同一個 sprint 的回報——它們是同一個問題「基礎設施跟工作負載的信任關係」的兩個極端。
+eBPF 與機密容器可以出現在同一個系統，只是觀測範圍受執行位置與信任邊界限制。若希望取得 guest 內的應用指標，需要在受信任環境內安排觀測與輸出方式，並確認輸出不洩漏原本要保護的資料。
 
-## 兩個硬體名詞,一個流程名詞
+## 想一想
 
-後面幾天會一直用到,先立起來:
+1. 平台要執行不受信任的外掛程式，主要擔心容器逃逸。一般 Kata 能提供哪一層額外隔離？這是否同時保證宿主機讀不到資料？
+2. Pod 已 Running，秘密服務是否就應該交付金鑰？還缺哪些判斷？
+3. 宿主機能停止一台機密 VM，是否表示記憶體機密性已失效？這涉及哪種不同的安全要求？
 
-- **SEV-SNP(AMD)與 TDX(Intel)**:都是 **VM 層級的 TEE**,用 CPU 硬體加密整台 guest VM 的記憶體、把 hypervisor 排除在信任邊界外。差別在實作——SEV-SNP 用 AMD Secure Processor 管的 per-VM 金鑰加密,SNP 擴充再加記憶體完整性(擋 hypervisor 的 page remap/replay);TDX 建一個隔離的 Trust Domain,用硬體擴充加密與檢查它的記憶體。本課的硬體走 **AMD SEV-SNP**。
-- **遠端證明(remote attestation)**:向遠端第三方**以密碼學證明**這個工作負載跑在真的 TEE 裡、而且組態符合預期,通過了才把祕密交給它。CoCo 的原文:「Before a confidential workload is granted access to sensitive data, it should be **attested**」——證明先行,拿祕密在後。這是 [Day 8](sprint4-day8-attestation.md) 的主題,也是機密運算真正有用的一步:不是「跑起來」,是「證明給遠端看它值得信任」。
+## 小結
 
-## 驗收 checkpoint
-
-這一章沒有指令可跑,驗收是三個你要能自己答出來的問題——每題都要命中關鍵字才算過。
-
-| 驗證 | 判準(答案要點) |
-|---|---|
-| **機密運算防的是誰** | 主機 / root / hypervisor / 雲廠商**讀不到 guest 記憶體明文**;並能跟一般 Kata sandboxing 的「防逃逸、保護主機、不防主機窺視」分清楚 |
-| **Kata 與 CoCo 的關係與治理** | **CoCo 以 Kata 為底座**;**CoCo = CNCF、Kata = OpenInfra**,執行底座在另一個基金會 |
-| **eBPF 與 CoCo 的對立** | eBPF 讓主機看清楚 guest、CoCo 讓主機讀不到 guest 記憶體,兩者對主機可見性**立場相反** |
-
-三題答得出來,表示這一章的主要內容吸收了。
-
-## 帶得走的東西
-
-- **「隔離」在 Part 2 有兩個相反的方向。** 一般 Kata 保護主機不被 guest 害(主機被信任);機密運算保護 guest 不被主機看(主機不被信任)。看到「confidential」要先問一句:防的是逃逸,還是防主機窺視?
-- **機密運算加密的是明文可讀性,不是「消失」。** 主機拿得到密文與 metadata,只是沒金鑰解不開。講「讀不到明文」比講「看不到」準。
-- **CoCo 疊在 Kata 上,而兩者分屬 CNCF 與 OpenInfra。** 執行底座跟專案在不同基金會,是評估長期依賴時該知道的事。
-- **可見性是能力也是風險,看你站哪一邊。** eBPF 把治理建立在看得清楚;CoCo 把安全建立在看不到。同一個 sprint 收了這兩端,不是湊在一起,是刻意對照。
+先指出攻擊者與資料位置，才能選對隔離機制。一般 Kata 提供獨立核心與 VM 邊界；CoCo 進一步結合 TEE、guest 政策及遠端證明，保護不受信任宿主環境中的敏感工作負載。[Day 6](sprint4-day6-kata-sandboxing.md) 先驗證一般 Kata 的執行環境，[Day 7](sprint4-day7-katacc.md) 再加入機密運算硬體，[Day 8](sprint4-day8-attestation.md) 則檢查秘密是否依證明結果釋出。
 
 ## 延伸閱讀
 
-想往下深挖,從這幾份開始:
+想再深入，可以從這幾份開始：
 
-- **[CoCo 的信任模型](https://confidentialcontainers.org/docs/architecture/trust-model/trust-model/)** —— 「防的是誰」最硬的一手依據:host kernel、hypervisor、kubelet、containerd 全被列為 untrusted,以及「untrusted host cannot access guest data」的保證。
-- **[Kata Containers 的威脅模型](https://github.com/kata-containers/kata-containers/blob/main/docs/threat-model/threat-model.md)** —— 對照組。它保護的是主機不被 guest 危害,跟 CoCo 的方向正好相反,兩份並讀最清楚。
-- **[AKS Confidential Containers 總覽](https://learn.microsoft.com/en-us/azure/aks/confidential-containers-overview)** —— 本課實作的一手來源:kata-cc 的透明度/可稽核/完整證明/隔離設計,以及「只支援 Azure Linux」等限制。
-- **[CoCo 升 CNCF Incubating 的公告](https://www.cncf.io/blog/2026/07/22/confidential-containers-becomes-a-cncf-incubating-project/)** —— 治理現況;注意 7/8 是生效日、7/22 是公告日。
-
-## 下一步
-
-概念立好了,從最基本的隔離開始動手。[Day 6](sprint4-day6-kata-sandboxing.md) 用 **Kata Pod Sandboxing** 把一個 pod 跑進獨立 kernel 的輕量 VM——先證明「不共用主機 kernel」是什麼感覺,而它走的還是 Sprint 3 那條 RuntimeClass → handler → shim 的老路,只是換一個 handler。硬體記憶體加密留到 [Day 7](sprint4-day7-katacc.md)。
+- [Kata 威脅模型](https://github.com/kata-containers/kata-containers/blob/main/docs/threat-model/threat-model.md)：工作負載與宿主的隔離需求。
+- [CoCo 信任模型](https://confidentialcontainers.org/docs/architecture/trust-model/trust-model/)：guest 內外的信任範圍與不涵蓋的攻擊。
+- [AKS 機密容器總覽](https://learn.microsoft.com/en-us/azure/aks/confidential-containers-overview)：本課後續使用的整合方式。
 
 ---
 
 !!! quote ""
-    Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,此處作社群教學用途。
+    Kubernetes 標誌為 CNCF（Linux Foundation）官方資產，此處作社群教學用途。

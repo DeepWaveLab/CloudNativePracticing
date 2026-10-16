@@ -1,6 +1,6 @@
 # Sprint 1 · GPU 排程三部曲
 
-線上推論與離線批次共用同一批 GPU 時，要決定誰先拿到卡、每個容器能用多少 VRAM，以及怎麼依條件挑選裝置。這個 sprint 在 AKS 的 T4 spot 節點池上依序操作 **KAI Scheduler**（佇列與排程）、**HAMi**（VRAM 配額與隔離，搭配 WebUI 查看用量）與 **Kubernetes DRA**（描述與挑選裝置），最後一章整理三者的分工。
+線上推論正在使用 GPU，離線批次也需要同一批卡。只看節點還有沒有空閒 GPU，無法回答每個團隊應保留多少，也無法限制共用一張卡的程式各用多少 VRAM。這個 sprint 在 AKS 的 T4 spot 節點上操作 KAI Scheduler、HAMi 與 Kubernetes DRA，逐步區分排程、記憶體隔離與裝置選擇。
 
 <div style="text-align: center;" markdown>
 
@@ -22,7 +22,7 @@
 
     ---
 
-    申請 GPU 配額，建立 AKS 叢集與 T4 spot 節點池，跑出第一顆 CUDA pod 的 `nvidia-smi`；也建立收工時把 GPU 節點縮到零、開工時復原的流程。
+    申請 GPU 配額，建立 AKS 叢集與 T4 spot 節點池，跑出第一顆 CUDA pod 的 `nvidia-smi`；也建立用完後把 GPU 節點縮到零、再次使用時復原的流程。
 
 -   ![KAI Scheduler](../assets/logos/kai-scheduler-icon-color.svg){ width="44" }
 
@@ -42,19 +42,19 @@
 
 -   ![HAMi](../assets/logos/hami-icon-color.svg){ width="44" }
 
-    **Day 3 · [HAMi 安裝與 VRAM 硬隔離](../runbook/sprint1-day3-hami-memory-isolation.md)**
+    **Day 3 · [HAMi 安裝與 VRAM 用量限制](../runbook/sprint1-day3-hami-memory-isolation.md)**
 
     ---
 
-    用 HAMi 取代 NVIDIA device plugin，讓一張 T4 同時給多個容器使用。設定 VRAM 配額後，容器內只看得到分配到的大小，超用時只有該容器 OOM。
+    用 HAMi 取代 NVIDIA device plugin，讓一張 T4 同時給多個容器使用。設定 VRAM 配額後，觀察容器內回報的大小，並以超額配置與另一個容器的資料校驗檢查影響範圍。
 
 -   ![HAMi](../assets/logos/hami-icon-color.svg){ width="44" }
 
-    **Day 4 · [HAMi 進階與 KAI 整合](../runbook/sprint1-day4-hami-kai-integration.md)**
+    **Day 4 · [HAMi 與 KAI 整合](../runbook/sprint1-day4-hami-kai-integration.md)**
 
     ---
 
-    比較 HAMi 的 binpack 與 spread 放置策略，再照官方文件用 HAMi-core 把 VRAM 隔離接到 KAI Scheduler，讓走 KAI 排程的 pod 也能共用一張卡。
+    照官方文件用 HAMi-core 把 VRAM 隔離接到 KAI Scheduler，讓走 KAI 排程的 pod 也能共用一張卡，並找出兩套 GPU 方案裝在同一座叢集時為什麼會互相卡住。
 
 -   ![HAMi-WebUI](../assets/logos/hami-webui-logo.png#only-light){ width="150" }
     ![HAMi-WebUI](../assets/logos/hami-webui-logo-dark.png#only-dark){ width="150" }
@@ -79,12 +79,12 @@
 
     ---
 
-    安裝 NVIDIA 的 DRA driver，用 ResourceClaim 把一張實體 T4 配給 pod，確認容器內看到的 GPU 與申請一致；也說明 DRA driver 為什麼不能和傳統 device plugin 放在同一個節點。
+    安裝 NVIDIA 的 DRA driver，用 ResourceClaim 把一張實體 T4 配給 pod，確認容器內看到的 GPU 與申請一致；也說明如何避免 DRA driver 與傳統 device plugin 重複分配同一張卡。
 
--   **Day 8 · [綜合：三者分工決策表](../runbook/sprint1-day8-decision-matrix.md)**
+-   **Day 8 · [Sprint 1 總結](../runbook/sprint1-day8-decision-matrix.md)**
 
     ---
 
-    不動手。整理 KAI、HAMi、DRA 各自適合的場景，附場景選型練習，以及導入自家叢集時的建議清單。
+    不動手。回頭看三套工具各管哪一層，拿到一個 GPU 需求時怎麼選，以及導入既有叢集前要先查什麼。
 
 </div>

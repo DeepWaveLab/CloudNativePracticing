@@ -1,34 +1,16 @@
-# Day 2: Istio ambient——服務間 mTLS 與斷路
+# Day 2：從連得上，進一步驗證服務身分與連線限制
 
 ![Istio 官方標誌](../assets/logos/istio-icon-color.svg){ align=right width="72" }
 
-> [Day 1](sprint4-day1-envoy-gateway.md) 做完了入口(north-south)。今天換服務**之間**(east-west):讓兩個服務互打時流量自動加密、而且各自帶身分,再對其中一個服務設斷路,壓到門檻時看它把多的連線擋掉。用的是 Istio 的 **ambient 模式**——不塞 sidecar,疊在 Day 1 裝的 Cilium 上。
+入口已經可以服務外部請求，但內部的 client 呼叫 web 仍只知道「回了 200」。團隊還想知道：連線兩端分別是哪個工作負載？流量突然增加時，代理能否限制送往 web 的連線？這章會分別讀取身分紀錄與拒絕訊號，判斷這兩個要求是否成立。
 
-!!! abstract "你在課程的哪裡"
-    - **[Day 1](sprint4-day1-envoy-gateway.md)**:north-south 那層——Envoy Gateway 收入口流量、開 HTTP/3。
-    - **今天**:east-west 那層——Istio ambient 給服務之間裝上 mTLS 與斷路。
-    - **[Day 3](sprint4-day3-cilium-mesh.md)**:換 Cilium 的 mesh 做**同一組**驗收,Day 4 兩邊橫向對比。
+## 讓既有 Pod 加入 ambient
 
-環境續用 Day 1 的 `cnp-mesh`,先 `az aks start` 把它從停機叫回來——一啟動就撞到一顆跟 AKS 停開機有關的雷,見[地雷 1](#mine-1)。
+**ambient** 是 Istio 將代理與應用 Pod 分開部署的模式。每個節點的 **ztunnel** 負責帶有工作負載身分的加密通道；它不會替應用解析所有 HTTP 規則。前章已介紹的 mTLS，會在這裡驗證連線雙方的憑證。
 
-## 今天要走的路
+本章沿用 [Day 1](sprint4-day1-envoy-gateway.md) 的 Cilium 1.20.0 與 `mesh-demo/web`，使用 Istio 1.30.3。開始前需有相應版本的 istioctl，並確認 Cilium 設為 `cni.exclusive=false`、`socketLB.hostNamespaceOnly=true`，以及這組環境使用的 iptables masquerade。這些是已驗證的共存設定，不能只把兩套元件裝上去就假定流量導引正確。
 
-| 步驟 | 做什麼 | 對應 |
-|---|---|---|
-| 1 | 在 Cilium 上裝 Istio ambient | 收 Day 1 `cni.exclusive=false` 的伏筆 |
-| 2 | 把 namespace 標成 ambient,驗服務間 mTLS + 身分 | gate:流量加密且帶 SPIFFE 身分 |
-| 3 | 佈 waypoint、對 web 設斷路、壓到跳開 | gate:斷路 trip |
-
-先講幾個今天會一直用到的詞:
-
-- **ambient**:Istio 的無 sidecar 模式。舊的 sidecar 模式是每個 pod 旁邊塞一個 Envoy(Day 0 講過為什麼退場);ambient 改成每個**節點**一個 **ztunnel**(輕量 L4 元件,負責加密),要動到 L7 的時候才另外起一個 **waypoint**(Envoy proxy)。
-- **mTLS**(mutual TLS):雙向 TLS——不只客戶端驗伺服器,伺服器也驗客戶端,兩邊都拿憑證證明自己是誰。
-- **SPIFFE 身分**:一種標準化的工作負載身分格式,長得像 `spiffe://cluster.local/ns/<命名空間>/sa/<service account>`。mTLS 兩端互驗的就是這個身分。
-- **斷路**(circuit breaking):一個服務被太多並發請求壓住、或開始出錯時,mesh 直接把多出來的請求擋掉(回 503),而不是讓它們全部塞在那裡把整條鏈拖垮。就像電路過載時保險絲跳開。
-
-## 步驟 1: 在 Cilium 上裝 Istio ambient
-
-Day 1 裝 Cilium 時設了 `cni.exclusive=false`,當時說是「留位子給 Istio」——今天就是用它的時候。istio-cni(ambient 需要的一個元件)要掛在 Cilium 的 CNI 鏈上,`cni.exclusive=false` 讓 Cilium 不獨佔、容得下它。
+以下安裝 ambient 元件。輸出分別列出控制平面、CNI 與 ztunnel：
 
 ```console
 $ istioctl install --set profile=ambient -y
@@ -38,25 +20,70 @@ $ istioctl install --set profile=ambient -y
 ✔ Ztunnel installed
 ```
 
-裝完 istio-cni 跟 Cilium 兩個 CNI 的 DaemonSet 並存,誰也沒踩誰:
+Istio CNI 負責準備 ambient 所需的流量導引，原有 Cilium 仍提供 Pod 網路。兩個 DaemonSet 在驗證環境都正常執行：
 
 ```text
 istio-cni-node   1/1   Running   (istio-system)
 cilium           1/1   Running   (kube-system)
 ```
 
-這一步就是開工前的 spike A3:Istio ambient 疊在 Cilium 上會不會搶節點資料面。這座叢集上一次裝成、不用退回 sidecar——關鍵是 Day 1 那三個 Cilium 設定(`cni.exclusive=false`、`socketLB.hostNamespaceOnly=true`、保持 iptables masquerade 不開 `bpf.masquerade`)。
+這個狀態只證明元件已啟動；下一步必須發出應用請求，才能確認工作負載真的加入 mesh。
 
-## 步驟 2: 標成 ambient,驗服務間 mTLS + 身分
+先準備具有獨立 ServiceAccount 的 client。以下設定來自本章使用的 client manifest；`serviceAccountName: client` 會在稍後的身分紀錄中出現。
 
-把 Day 1 那個 `mesh-demo` namespace 標成 ambient,再放一個帶專屬 service account 的 client 去打 web:
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: client
+  namespace: mesh-demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: client
+  namespace: mesh-demo
+  labels:
+    app: client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: client
+  template:
+    metadata:
+      labels:
+        app: client
+    spec:
+      serviceAccountName: client
+      containers:
+        - name: curl
+          image: curlimages/curl:8.11.1
+          command: ["sleep", "infinity"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+```
+
+client 容器會保持執行，供你從容器內向 `web.mesh-demo.svc.cluster.local:80` 發出 HTTP 請求。接著為命名空間加上 ambient 標籤。以下第二行是三次請求結果摘要，並非可執行的 shell 指令：
 
 ```console
 $ kubectl label ns mesh-demo istio.io/dataplane-mode=ambient
 $ client → web:  req1 200  req2 200  req3 200
 ```
 
-三個 200 只證明打得通。要證明它**走了 mTLS 且帶身分**,去看 ztunnel 的連線紀錄:
+三次 200 表示請求成功，還沒有回答身分與加密問題。加入 ambient 不需要把代理注入每個應用 Pod；驗證中既有工作負載可在標籤更新後納管，但仍要檢查實際連線紀錄。
+
+## 從 ztunnel 紀錄找出身分與目的地
+
+**SPIFFE** 是工作負載身分的標準表示方式。這裡的 `spiffe://cluster.local/ns/mesh-demo/sa/client` 把信任網域、命名空間與 ServiceAccount 組合成身分。它不等同於 Pod IP，也不代表已授權執行所有操作。
+
+**HBONE** 是 ambient 傳送服務流量使用的通道協定，使用 mTLS 保護通道。下圖把通道保護與稍後加入的 HTTP 處理分開，避免把 ztunnel 當成 HTTP 代理。
+
+![ztunnel 處理通道身分，waypoint 處理 HTTP](../assets/diagrams/s4d2-ambient-path.svg)
+
+上排用於服務身分與加密，加入 waypoint 後才有下排的 HTTP 代理處理。以下是 ztunnel 的連線紀錄節錄：
 
 ```text
 src.workload="client-..."  src.identity="spiffe://cluster.local/ns/mesh-demo/sa/client"
@@ -65,59 +92,68 @@ dst.service="web.mesh-demo.svc.cluster.local"
 dst.identity="spiffe://cluster.local/ns/mesh-demo/sa/default"
 ```
 
-兩個地方是關鍵:
+`dst.addr` 的 15008 是 HBONE 通道端點，`dst.hbone_addr` 的 80 是應用目的連接埠。`src.identity` 對應 client ServiceAccount，`dst.identity` 對應 web 使用的 default ServiceAccount。這些欄位要一起看；單獨看到 15008 這個連接埠，不足以證明任意流量都已加密。
 
-- `dst.addr=…:15008` 配上 `dst.hbone_addr=…:80`——應用打的是 `web:80`,但兩個節點之間實際走的是 **15008 這個 HBONE 埠**(ambient 的 mTLS 隧道)。也就是說,原本明文的 `client→web` 被 ztunnel 換成了節點間的加密隧道,應用完全沒改。
-- `src.identity` 與 `dst.identity` 是兩個不同的 SPIFFE 身分(`sa/client` 對 `sa/default`)——mTLS 兩端各自證明了自己是誰。
+這組紀錄來自單節點練習，不能把它說成已驗證跨節點傳輸。它證明的是 ambient 通道與工作負載身分，[Day 3](sprint4-day3-cilium-mesh.md) 會改驗 Cilium WireGuard 的跨節點加密；那份結果不能補成 Istio 的跨節點證據。
 
-還有一個細節:client 跟 web 都是 Day 1 就在跑的 pod,標成 ambient 之後**沒有重啟**就被納管(ztunnel 在節點層攔截,不像 sidecar 要重建 pod)。這是 ambient 跟 sidecar 一個實際的差別。
+## 加入 waypoint，再限制送往 web 的連線
 
-## 步驟 3: waypoint + 斷路
-
-斷路是 L7 的事(要看得懂 HTTP 才能算並發),所以要先給 web 佈一個 **waypoint**——ambient 裡負責 L7 的 Envoy:
+**waypoint** 是 ambient 中處理 HTTP 流量的 Envoy 代理。本章的 HTTP 連線池限制在 waypoint 執行；ztunnel 的通道保護不會自動包含這項規則。先建立 waypoint，並把命名空間的服務加入它的處理範圍：
 
 ```console
 $ istioctl waypoint apply -n mesh-demo --enroll-namespace
 ✅ waypoint applied; namespace labeled istio.io/use-waypoint: waypoint
 ```
 
-(這個指令**沒有 `-y` 旗標**,照 sidecar 的習慣加會報錯。)
+此命令使用 `--enroll-namespace` 完成命名空間設定，不需要另外加 `-y`。接著套用 **DestinationRule**，也就是針對目的服務設定流量政策的 Istio 資源。這份設定把 **connection pool（連線池）**上限壓低，讓超出容量的請求容易被拒絕：
 
-再套一條把並發壓到極低的 `DestinationRule`(`maxConnections: 1`、`http1MaxPendingRequests: 1`),然後從 client 一次丟 50 個並發請求:
+```yaml
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: web-cb
+  namespace: mesh-demo
+spec:
+  host: web.mesh-demo.svc.cluster.local
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 1
+      http:
+        http1MaxPendingRequests: 1
+        maxRequestsPerConnection: 1
+    outlierDetection:
+      consecutive5xxErrors: 1
+      interval: 1s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 100
+```
+
+`maxConnections: 1` 限制連線數，`http1MaxPendingRequests: 1` 限制等待連線的 HTTP 請求。`outlierDetection` 另外處理連續錯誤後的後端排除；不能把這兩種機制混成同一個上限。設定刻意偏低，只用於觀察，不是正式服務的容量建議。
+
+套用設定後，驗證以 50 個並行請求呼叫 web，得到以下分布：
 
 ```text
   22 200
   28 503        ← 斷路 trip
 ```
 
-一半以上被擋。看被擋的那些回應標頭:
+200 與 503 的數量會受連線時序影響，不應要求每次都重現 22 比 28。判斷連線池限制是否介入，還要看失敗回應的標頭。驗證中可觀察到：
 
 ```text
 x-envoy-overloaded: true
 x-envoy-decorator-operation: web.mesh-demo.svc.cluster.local:80/*
 ```
 
-`x-envoy-overloaded: true` 是 Envoy 明確說「這個請求是被斷路擋掉的」(連線池溢出);`x-envoy-decorator-operation` 那行證明流量經過了 waypoint 的 Envoy 做 L7 判斷。斷路成立。
+`x-envoy-overloaded: true` 是 Envoy 容量限制介入的線索；搭配本章刻意降低的連線池設定，支持部分請求由代理拒絕的判斷。`x-envoy-decorator-operation` 提供代理處理的服務資訊，不能單憑它推定所有 503 都由同一項限制造成。原始紀錄中帶 overload 標頭的回應數與 503 總數不同，這裡不把所有 503 一概歸因。
 
-## 驗收 checkpoint
+## 疑難排解
 
-| 驗證 | 判準 | 本課環境的結果 |
-|---|---|---|
-| 服務間 mTLS + 身分 | 流量走加密隧道、兩端帶 SPIFFE 身分 | ztunnel 紀錄:`dst 15008`(HBONE)、`sa/client` ↔ `sa/default` |
-| 斷路 trip | 壓過門檻時多的連線被擋、有明確訊號 | 50 並發 → 28 筆 503,帶 `x-envoy-overloaded: true` |
-| ambient 疊 Cilium | 兩個 CNI 並存、ambient 起得來 | istio-cni 與 cilium DaemonSet 並存,一次裝成 |
+### 叢集顯示 Running，但 kubectl 回 no such host {#mine-1}
 
-## 地雷記錄
+若控制平面狀態正常，kubectl 卻無法解析 API 主機名稱，先比較本機 resolver 與其他可用 DNS resolver 的結果。驗證中曾出現公用 DNS 已能解析、本機仍回 NXDOMAIN 的情況，符合 DNS 負快取的症狀；這不代表每次 AKS 停開機都一定會刪除 DNS 紀錄。
 
-### 地雷 1:`az aks start` 之後叢集連不上,其實是本機 DNS 的負快取 {#mine-1}
-
-**症狀**:`az aks start` 回報成功、`az aks show` 顯示 `Running`,但 `kubectl` 一律 `Unable to connect to the server: … no such host`。
-
-**根因**:`az aks stop` 會把 API server 的 DNS 記錄**刪掉**,`start` 之後要幾分鐘才重建、對外發布。在這段空窗裡,本機(或家用網路)的 DNS resolver 查過一次、把「查無此名」的結果快取了下來(負快取);等記錄真的上線,本機還在回舊的 `NXDOMAIN`。拿公用 DNS 驗一下就露餡——同一個名字在 `8.8.8.8` 解得到 IP,本機 resolver 卻回 `NXDOMAIN`。
-
-**判斷準則**:**`az aks show` 說 `Running`、`kubectl` 卻 `no such host` 時,用 `nslookup <FQDN> 8.8.8.8` 對照。** 公用 DNS 解得到就是本機負快取,不是叢集壞了——別急著重建。
-
-**修法**:等負快取的 TTL 過;或繞過本機 DNS——把 kubeconfig 的該叢集 `server` 指向已解析的 IP、用 FQDN 當 TLS 名稱:
+可以等待快取失效。若已確認正確 IP，也可暫時將 kubeconfig 的連線位址指向它，並保留原 FQDN 作 TLS 名稱。`<cluster>` 是 kubeconfig 中對應的 cluster 項目名稱，`<FQDN>` 是原 `server` URL 的主機名稱：
 
 ```sh
 kubectl config set-cluster <cluster> \
@@ -125,35 +161,27 @@ kubectl config set-cluster <cluster> \
   --tls-server-name=<FQDN>
 ```
 
-收工再 `az aks get-credentials --overwrite` 還原成 FQDN。
+這會修改本機 kubeconfig，且 IP 可能改變。DNS 恢復後，應將 `server` 還原為原本 FQDN；不要把暫時固定 IP 當成長期配置。
 
-## 誠實的差距
+## 想一想
 
-- **斷路是在 waypoint(L7)上做的**——這是 Istio ambient 成熟的一面。Day 3 換 Cilium 做同一組驗收時,Cilium 的斷路等價物是低階的 `CiliumEnvoyConfig`,兩邊在「L7 韌性」這一軸不對等;那個不對等本身就是 Day 4 對比的結論之一,今天先把 Istio 這邊的基準立好。
-- **單節點、單次量測**。整座叢集一個 D4s_v3 節點,斷路的 200/503 比例是這台這一次的結果;要拿它比效能(Day 4),得先擴到兩個節點,免得單節點的排程壓力污染數字。
-- **kube-proxy 仍與 Cilium 併存**(Day 1 記過)。ambient 這天沒受影響,但 Day 3 純用 Cilium 的 L7 時要再確認這件事。
-- **沒量 ambient 的資源開銷**。ztunnel 與 waypoint 佔多少 CPU/記憶體,今天沒量,留到 Day 4 的橫向對比。
+1. client 收到 200，卻找不到兩端身分與 HBONE 紀錄，可以宣布 mTLS 驗證完成嗎？
+2. 只部署 ztunnel、尚未部署 waypoint，就期待本章的 HTTP 連線池限制生效，漏了哪一步？
+3. 壓測出現 503，但沒有 overload 訊號，你還能否直接判定是連線池限制？為什麼？
 
-## 帶得走的東西
+## 小結
 
-- **ambient 把 mTLS 的位置從「每個 pod」搬到「每個節點」**。ztunnel 在節點層把明文連線換成節點間的 HBONE 加密隧道,應用不用改、pod 不用重啟——這是它跟 sidecar 最實際的差別。
-- **「加密」和「身分」是兩件事,mTLS 一次給你兩件**。ztunnel 紀錄裡的 `15008` 是加密(HBONE 隧道),`spiffe://…` 是身分(誰對誰)。看 mesh 的流量,這兩個要分開看。
-- **L4 的事 ztunnel 就夠,L7 的事要 waypoint**。自動 mTLS 是 L4,ztunnel 獨力完成;斷路、依 HTTP 內容路由是 L7,要多佈一個 waypoint。分不分得出來,決定你需不需要 waypoint。
-- **斷路要有明確訊號才算數**。「有些請求 503」不夠——`x-envoy-overloaded: true` 才證明是斷路擋的、不是後端自己掛的。驗收一個機制,要抓到它專屬的訊號。
+加入 ambient 後，先用 ztunnel 紀錄確認通道與雙方身分，再以 waypoint 執行 HTTP 流量政策。成功回應、加密通道與容量拒絕，各需要不同證據。這章沒有量測完整 mesh 成本，也沒有將單次 503 比例當成效能結果。[Day 3](sprint4-day3-cilium-mesh.md) 會改用 Cilium 的加密與 HTTP 政策，並區分哪些能力已驗證、哪些尚未完成。
 
 ## 延伸閱讀
 
-- **[Istio Ambient 總覽](https://istio.io/latest/docs/ambient/overview/)** —— ztunnel(L4)與 waypoint(L7)的分工、HBONE 隧道是什麼,官方的一手說明。
-- **[Istio Ambient 與 Cilium 的共存設定](https://istio.io/latest/docs/ambient/install/platform-prerequisites/)** —— 步驟 1 那組讓 ambient 疊在 Cilium 上的前置(`cni.exclusive`、socket LB、BPF masquerade),踩之前先讀。
-- **[Istio circuit breaking 任務頁](https://istio.io/latest/docs/tasks/traffic-management/circuit-breaking/)** —— 斷路用的 `DestinationRule` 連線池與 outlier detection 欄位;`x-envoy-overloaded` 這個訊號的出處。
+想再深入，可以從這幾份開始：
 
-## 下一步
-
-east-west 這層,Istio 這條路走完了:mTLS 自動、斷路可設,而且不用 sidecar。[Day 3](sprint4-day3-cilium-mesh.md) 換 **Cilium 自己的 mesh** 做**同一組驗收**——服務間加密、身分、一個 L7 介入——看它怎麼用 eBPF 做到、哪裡跟 Istio 不一樣。兩邊都跑完,Day 4 才有得比。
-
-開工前得先把 Istio 乾淨拆掉,不然殘留的 ztunnel/waypoint 會污染 Cilium 的量測——那是 Day 3 開頭第一件事。
+- [Istio ambient 概觀](https://istio.io/latest/docs/ambient/overview/)：ztunnel 與 waypoint 的分工。
+- [ambient 平台前提](https://istio.io/latest/docs/ambient/install/platform-prerequisites/)：Cilium 共存設定。
+- [Istio circuit breaking](https://istio.io/latest/docs/tasks/traffic-management/circuit-breaking/)：連線池與過載觀測。
 
 ---
 
 !!! quote ""
-    Istio 標誌為 CNCF(Linux Foundation)官方資產,此處作社群教學用途。
+    Istio 標誌為 CNCF（Linux Foundation）官方資產，此處作社群教學用途。

@@ -2,58 +2,51 @@
 
 ![Cilium 官方標誌](../assets/logos/cilium-icon-color.svg){ align=right width="95" }
 
-> 前六天都在觀察行程與檔案:誰執行了什麼、誰開了哪個檔。今天換一個角度,把 eBPF 放進網路路徑本身——不是加一層監控,是**把 Kubernetes 的 Service 實作整個換掉**。而今天最值得記住的發現,是動手之前就先問清楚「現在到底是誰在做這件事」得到的:**那個要被換掉的元件,有一大半工作早就不是它在做了。**
+你想試 Cilium 的 L7 網路政策，順便把 kube-proxy 換掉。團隊裡有人提醒：「kube-proxy 現在負責 ClusterIP 的轉送，開了 kube-proxy replacement 才會換成 Cilium 接手，所以先別開，比較保守。」這句話聽起來很合理，要確認它對不對，得先有一座自己裝 Cilium 的叢集，再實際量一次：一個打到 ClusterIP 的請求，現在到底是誰把目的地改成後端 pod 的。
 
-!!! abstract "你在課程的哪裡"
-    - **Day 0–6**:eBPF 的載入路徑與 verifier、bpftrace 的即時追蹤、Falco 的規則引擎、Tetragon 的核心層攔截。四套工具都掛在 syscall 與 LSM 那一層。
-    - **今天**:建一座沒有 CNI 的叢集、自管 Cilium、開啟 kube-proxy replacement。驗收有兩半:連通性測試通過,而且叢集裡不再有 kube-proxy 但 Service 仍然可達。
-    - **Day 8–9**:有了自己的資料平面,才能寫 L3 到 L7 的網路政策,以及用 Hubble 看流量。
+Day 0 到 Day 6 的工具都掛在 syscall 與 LSM 那一層，觀察行程做了什麼。這一章把 eBPF 放進網路路徑：建一座不帶網路外掛的 AKS 叢集，自己裝 Cilium，跑完連通性測試，再把 kube-proxy 換掉，比較換之前和換之後 Service 的位址翻譯走哪條路。
 
-## 為什麼這一天要另外開一座叢集
+讀完之後，看到一座 Cilium 叢集裡的 ClusterIP 請求，你能判斷這次翻譯是 kube-proxy 的 iptables 做的，還是 Cilium 的 eBPF 做的；也會知道在 AKS 上拿掉 kube-proxy 之前要先補哪些設定，拿掉之後要清哪些東西。
 
-自管 Cilium **只能裝在建立時就指定 `--network-plugin none` 的叢集上,既有叢集轉換不了**。受管的「Azure CNI powered by Cilium」可以原地開啟,但它的 L7 政策與 Hubble UI 需要付費附加元件——而那兩項正是 Cilium 最值得學的部分。更關鍵的是,原地升級會**永久改掉**前六天那座叢集的資料平面,而 Falco 與 Tetragon 都還裝在上面。
+## 為什麼要另開一座叢集
 
-所以今天新建一座臨時叢集。這個決定本身就是課程內容的一部分:**BYOCNI 不是一個設定選項,是一條從叢集建立那一刻就分岔的路。**
+pod 一建立，就有自己的 IP，可以跟其他 pod 互通。這件事不是 kubelet 自己做的：kubelet 會呼叫一個 **CNI**（Container Network Interface）外掛，由它替 pod 配 IP、接好網路介面、設定路由。AKS 預設用的是 Azure 自己的 CNI，Cilium 則是另一套 CNI，用 eBPF 程式實作這些網路功能。
 
-今天走六步:
+在 AKS 上用 Cilium 有兩條路：
 
-| 步驟 | 做什麼 | 為什麼排在這 |
-|---|---|---|
-| 1 | 建一座沒有 CNI 的叢集 | **先看清楚 CNI 不在時壞的是什麼** |
-| 2 | 裝 Cilium | 版本要自己釘、網段要自己算,兩件都有坑 |
-| 3 | 連通性測試 | 驗收的第一半,而且要學會怎麼讀那份報表 |
-| 4 | 換掉 kube-proxy | **先問它現在在做什麼** |
-| 5 | 量化差異 | 規則數、查找路徑、延遲,以及哪一個數字不能宣稱 |
-| 6 | 停機重啟的存活驗證 | 縮到零被 API 退件,`stop` 是唯一的收尾方式——而它沒被驗過 |
+- **受管的「Azure CNI powered by Cilium」**：可以在既有叢集上開啟，但 Cilium 的 L7 政策與 Hubble UI（Hubble 是 Cilium 內建的流量觀測元件，Hubble UI 是它的網頁介面）要另外付費的附加元件，而這兩項正是 Day 8、Day 9 要學的部分。
+- **自管的 BYOCNI**（bring your own CNI）：建叢集時指定 `--network-plugin none`，AKS 不裝任何 CNI，由你自己裝。這個選項只能在建立叢集時決定，既有叢集轉換不了。
+
+這一章走 BYOCNI。前六天的叢集上還裝著 Falco 與 Tetragon，換資料平面會影響它們，所以另外建一座叢集，Day 7 到 Day 9 都用這一座。
 
 ## 步驟 1: 建一座沒有網路的叢集
 
-配額不要用推論的。前一天的節點池已經歸零,理論上額度是空的——但理論不算數:
+建叢集前，先確認要用的區域還有足夠的 vCPU 配額。`<region>` 換成你要建叢集的 Azure 區域，挑離你近、而且有 `Standard_D2as_v5` 這個機型的區域即可。下面輸出裡的 `--query` 篩選條件有省略，照打時可以先拿掉 `--query`，在完整列表裡找 `Total Regional` 開頭的兩列和你要用的 VM 家族那一列：
 
 ```console
-$ az vm list-usage -l japaneast --query "[?...].{n:localName,c:currentValue,l:limit}" -o tsv
+$ az vm list-usage -l <region> --query "[?...].{n:localName,c:currentValue,l:limit}" -o tsv
 Total Regional Low-priority vCPUs    0    50      ← spot 配額整條沒人用
 Total Regional vCPUs                16   200
 Standard DASv5 Family vCPUs          0    50      ← 要看的是這一欄
 ```
 
-`Total Regional vCPUs` 是訂閱層級的總帳(含其他資源),`Standard DASv5 Family` 才是這次要動的家族。
+`Total Regional vCPUs` 是整個訂閱在這個區域的總量（含其他資源），`Standard DASv5 Family` 才是這次要用的 VM 家族的額度。
 
-接著建叢集。直覺的做法是「2 台 spot」,而它在第一行指令就撞牆了([地雷 1](#mine-1)):
+接著建叢集。AKS 的第一個節點池一定是 system pool，而 system pool 不能是 spot，所以這裡是一台隨需節點；想直接建「2 台 spot」的叢集會被拒絕，見[疑難排解：`az aks create` 不認得 `--priority`](#mine-1)。
 
 ```bash
 az aks create -g <resource-group> -n <cluster> \
-  --location japaneast --tier free \
+  --location <region> --tier free \
   --network-plugin none \
   --nodepool-name system --node-count 1 --node-vm-size Standard_D2as_v5 \
   --generate-ssh-keys
 ```
 
-**5 分 13 秒。** 回傳的 JSON 裡 `networkProfile.networkPlugin` 是 `none`、`serviceCidr` 是 `10.0.0.0/16`,而 `podCidr` 是 **`null`**——最後那個 null 等一下會變成一顆地雷。
+回傳的 JSON 裡，`networkProfile.networkPlugin` 是 `none`，`serviceCidr` 是 `10.0.0.0/16`，`podCidr` 是 `null`。`podCidr` 是 null，是因為 BYOCNI 之下 pod 的 IP 由你裝的 CNI 決定，AKS 不管。步驟 2 會回頭處理這一點。
 
 ### 沒有 CNI 的叢集長什麼樣子
 
-這是本章最值得慢慢看的一段,因為多數人不會刻意去看它。
+叢集建好、還沒裝 CNI 的這段時間，可以看到少了 CNI 時壞的是哪一部分。第二個指令的 jsonpath 有省略，要看完整的節點條件，可以用 `kubectl describe node <node>` 的 Conditions 段：
 
 ```console
 $ kubectl get nodes
@@ -70,9 +63,9 @@ $ kubectl get node -o jsonpath='{.spec.taints}'
 [{"effect":"NoSchedule","key":"node.kubernetes.io/not-ready"}]
 ```
 
-**節點 `NotReady` 不是 kubelet 壞了。** `MemoryPressure`、`DiskPressure`、`PIDPressure` 三個條件全部正常,kubelet 活著、有在回報、有在跑容器。它唯一說不出口的是「我的 CNI 沒初始化」——而 `Ready=False` 一旦成立,Kubernetes 就替它打上 `node.kubernetes.io/not-ready:NoSchedule`。
+節點 `NotReady`，但 kubelet 沒有壞。`MemoryPressure`、`DiskPressure`、`PIDPressure` 三個條件都正常，kubelet 有在回報、有在跑容器，唯一回報的問題是 `cni plugin not initialized`。`Ready=False` 一成立，Kubernetes 就替節點加上 `node.kubernetes.io/not-ready:NoSchedule` 這個 taint。
 
-於是 pod 分成兩半:
+再看 pod，`HOSTNET` 欄是 pod 有沒有設 `hostNetwork: true`，也就是直接用節點的網路、不需要自己的 IP：
 
 ```console
 $ kubectl get pods -A -o custom-columns=NAME:…,HOSTNET:.spec.hostNetwork,STATUS:.status.phase
@@ -84,23 +77,57 @@ coredns-5d474ff6db-8qrgn              <none>   Pending
 metrics-server-6f4547db5c-c9chh       <none>   Pending
 ```
 
-直覺的說法是「hostNetwork 的活著,其他的排不上」。**這個說法只對了一半**,而錯的那一半見[地雷 2](#mine-2)。
+用 hostNetwork 的系統元件在跑，需要自己 IP 的 CoreDNS、metrics-server 都在 Pending。不過 `konnectivity-agent`（AKS 讓 control plane 連回節點用的連線代理）也是 hostNetwork，卻一樣 Pending，所以決定能不能排上去的不只是 hostNetwork，原因見[疑難排解：hostNetwork 的 pod 一樣 Pending](#mine-2)。
 
-CoreDNS 的排程錯誤訊息也值得抄下來,因為它會誤導人:
+CoreDNS 的排程事件是這樣寫的：
 
 ```console
 Warning  FailedScheduling  default-scheduler  no nodes available to schedule pods
 ```
 
-「沒有節點」——但 `kubectl get nodes` 明明列得出一台。scheduler 說的「沒有」是「沒有可用的」,而它不會告訴你為什麼。**在 BYOCNI 叢集上,這行訊息的正解永遠是「你還沒裝 CNI」。**
+`kubectl get nodes` 明明列得出一台節點，scheduler 卻說沒有節點。它的意思是「沒有可以排的節點」，不會說明原因。在 BYOCNI 叢集上看到這行訊息，先檢查 CNI 裝了沒。
 
-這個中間狀態可以這樣講:**沒有 CNI 的 Kubernetes 是一座只能跑 hostNetwork DaemonSet 的叢集。** control plane 全部正常、API 全部能回、`kubectl` 一切如常——壞掉的是「pod 有自己的 IP」這個前提,而幾乎所有東西都建立在那個前提上。
+總結一下：沒有 CNI 時，control plane 和 API 都正常，`kubectl` 照常可用，壞掉的是「pod 有自己的 IP」這件事，而 CoreDNS 這類需要 pod 網路的元件都排不上去。
 
-## 步驟 2: 裝 Cilium——版本自己釘,網段自己算
+## 步驟 2: 裝 Cilium {#step-2}
 
-裝法選 Helm 而不是 `cilium install`,理由有兩層:版本是明文的而不是某個 CLI 二進位檔內建的常數([地雷 3](#mine-3));以及 Sprint 2 的 Falco 與 Tetragon 都是 Helm 裝的,**要拿三套工具的資源佔用互相比較,安裝方式得是同一把尺**。cilium-cli 仍然留著,但只當診斷工具——`cilium status` 與 `cilium connectivity test` 這兩件事 Helm 做不到。
+### 再加一台 spot 節點
 
-網段必須自己指定,原因見[地雷 4](#mine-4)。正確的 values:
+後面的連通性測試和 Service 實驗需要兩台節點。第二台放在 spot 的 user pool（spot 參數只有 `az aks nodepool add` 有）：
+
+```bash
+az aks nodepool add -g <resource-group> --cluster-name <cluster> -n spotpool \
+  --node-count 1 --node-vm-size Standard_D2as_v5 \
+  --priority Spot --eviction-policy Delete --spot-max-price -1
+```
+
+AKS 會替 spot 節點加上 `kubernetes.azure.com/scalesetpriority=spot:NoSchedule` 這個 taint，要排到這台節點上的 pod 都得帶對應的 toleration。步驟 3 會遇到它造成的問題。
+
+### pod 網段與 Service 網段
+
+寫 Cilium 的設定之前，要先分清楚叢集裡的兩段位址：
+
+- **Service 網段**（service CIDR）：ClusterIP 從這裡配。這座叢集是 `10.0.0.0/16`，CoreDNS 的 Service（kube-dns）固定在 `10.0.0.10`。
+- **pod 網段**（pod CIDR）：pod IP 從這裡配。BYOCNI 之下由 CNI 決定，Cilium 預設的配發方式（cluster-pool IPAM，由 cilium-operator 替每台節點切一小段）從 `10.0.0.0/8` 裡分配。
+
+問題就在這裡：`10.0.0.0/8` 整個包住了 `10.0.0.0/16`。不改設定，pod 可能拿到 `10.0.0.x` 的位址，跟 kube-dns 的 ClusterIP 落在同一段。
+
+![兩種設定的對照：上排是 Cilium 預設，pod 網段 10.0.0.0/8 整個包住 AKS 的 Service 網段 10.0.0.0/16，kube-dns 的 10.0.0.10 也在裡面；下排是本章的設定，pod 網段改成 10.244.0.0/16，與 Service 網段分開](../assets/diagrams/s2d7-cidr-overlap.svg)
+
+兩段重疊時，同一個位址可能同時是一個 Service 和一顆 pod。Cilium 收到往 `10.0.0.10` 的封包時，會把它當成本節點上的 pod，而不是 kube-dns。實際的症狀見[疑難排解：metrics-server 查 DNS 被拒](#mine-4)。
+
+要改成哪一段，叢集自己已經有答案。AKS 預設的 kube-proxy 啟動參數裡寫著 pod 網段：
+
+```console
+$ kubectl -n kube-system get ds kube-proxy -o jsonpath='{…containers[0].command}'
+["kube-proxy", …, "--cluster-cidr=10.244.0.0/16", …]
+```
+
+`az aks show` 回報的 `podCidr` 是 null，但 kube-proxy 一直假設 pod 在 `10.244.0.0/16`。BYOCNI 只是把配發 pod IP 的工作交給你，叢集裡其他元件對 pod 網段仍然有自己的假設，所以 Cilium 也用這一段。
+
+### 用 Helm 安裝，版本寫死
+
+安裝方式選 Helm，不用 `cilium install`：本課用的 cilium-cli v0.19.7，`cilium install` 不帶 `--version` 時預設的版本比它自己回報的 stable 舊一個 minor（見[疑難排解：`cilium install` 裝到舊一版](#mine-3)），Helm 則把版本寫在指令裡。cilium-cli 還是要裝，只用來診斷：`cilium status` 和 `cilium connectivity test` 這兩件事 Helm 做不到。
 
 ```bash
 cat > cilium-values.yaml <<'EOF'
@@ -126,36 +153,28 @@ helm repo add cilium https://helm.cilium.io/ && helm repo update cilium
 helm install cilium cilium/cilium --version 1.20.0 -n kube-system -f cilium-values.yaml
 ```
 
-裝出來的是**三個 DaemonSet 加一個 Deployment**:
+`kubeProxyReplacement: false` 是刻意的：先讓 Cilium 跟 kube-proxy 並存，步驟 4 才比較得出換掉前後的差別。
+
+上面的 values 沒有寫 cilium-operator 的副本數。operator 預設 2 個副本，而且同一台節點只放一個（podAntiAffinity），在兩台節點的實驗叢集上，驗證時第二個副本一直 Pending，所以實際用的 values 另外加了這兩行：`operator:` 底下 `replicas: 1`。你的叢集節點數少時，也照樣加上。
+
+裝出來的是三個 DaemonSet 加一個 Deployment：
 
 | 元件 | 形狀 | 做什麼 |
 |---|---|---|
-| `cilium`(agent) | DaemonSet,每節點 1 | 掛載 eBPF 程式、管 endpoint、寫 CNI conflist |
-| `cilium-envoy` | DaemonSet,每節點 1 | L7 政策的執行體(Day 8 的 HTTP 規則要靠它) |
-| `cilium-node-init` | DaemonSet,每節點 1 | 節點層前置,跑完就 sleep(實測 1m CPU / 0Mi) |
-| `cilium-operator` | Deployment | 叢集層:IPAM 配發 pod CIDR、身分回收 |
+| `cilium`（agent） | DaemonSet，每節點 1 | 掛載 eBPF 程式、管 endpoint、寫 CNI conflist |
+| `cilium-envoy` | DaemonSet，每節點 1 | L7 政策的執行體（Day 8 的 HTTP 規則要靠它） |
+| `cilium-node-init` | DaemonSet，每節點 1 | 節點層前置，跑完就 sleep（實測 1m CPU / 0Mi） |
+| `cilium-operator` | Deployment | 叢集層：IPAM 配發 pod CIDR、回收不再使用的身分（identity，Cilium 依 pod 標籤配給的編號，Day 8 會用到） |
 
-`cilium-envoy` 獨立成一個 DaemonSet 是 1.16 之後的預設(以前塞在 agent 裡)。它現在只吃 13Mi;Day 8 開 L7 政策之後要再量一次(**後續實測是沒有長**——一顆 endpoint、一條 HTTP 規則的規模下仍是 14Mi)。
+`cilium-envoy` 從 1.16 起預設獨立成一個 DaemonSet，以前是塞在 agent 裡。另外還裝了 10 個 CRD，Day 8 要用的 `CiliumNetworkPolicy` 是其中之一。
 
-另外裝了 **10 個 CRD**,Day 8 要用的 `CiliumNetworkPolicy` 是其中之一。
+### 跟 Falco、Tetragon 不同的兩個設定
 
-### 資源足跡:跟 Falco、Tetragon 正面對照
+Cilium agent 的 chart 預設掛 `system-node-critical`，跟 kube-proxy 同級；Falco 與 Tetragon 的 priority 都是 0（見 Day 3 的[「Falco pod 被搶佔，DaemonSet 卻顯示全部就緒」](sprint2-day3-falco-basics.md#mine-1)）。Cilium 是節點的網路本身，被搶占的後果是整台節點斷網，所以這個設定合理。另一個差別是 QoS：agent 容器跟 Tetragon 一樣沒設 `resources`，Cilium 卻是 Burstable，原因見[疑難排解：`cilium` pod 的 request 只有 10Mi](#mine-5)。
 
-Day 3 與 Day 5 對 Falco 與 Tetragon 問過同一組問題——chart 有沒有給 `resources`?有沒有給 `priorityClassName`?Cilium 的答案**一半不一樣,而不一樣的那一半剛好是重要的那一半**:
+## 步驟 3: 連通性測試
 
-| | requests(chart 預設) | 實測用量/節點 | QoS | priority |
-|---|---|---|---|---|
-| **Falco** 0.44.1 | `100m/512Mi` | 14–24m / 84–90Mi | Burstable | **0** |
-| **Tetragon** 1.7.0 | `{}` | 5–11m / 83–120Mi | **BestEffort** | **0** |
-| **Cilium** 1.20.0 agent | `{}` | 23–30m / 85–102Mi | Burstable | **2000001000** |
-
-**[Day 3 地雷 1](sprint2-day3-falco-basics.md#mine-1) 那個問題,Cilium 答對了。** Falco 與 Tetragon 的 chart 都不設 `priorityClassName`,priority 0 比每一個系統元件都低,在滿載節點上是搶佔演算法第一個挑中的;Cilium 直接掛 `system-node-critical`,跟 kube-proxy 同級。
-
-這是合理的——**它不是監控,它是網路本身,被搶佔的後果是節點斷網**。但值得記住的是「chart 有沒有替你想過這件事」在三套 CNCF 專案之間答案不同。
-
-至於那個 Burstable 是怎麼來的,見[地雷 5](#mine-5)——答案不太好看。
-
-## 步驟 3: 連通性測試——驗收的第一半
+先確認四個元件都起來了：
 
 ```console
 $ cilium status --wait
@@ -165,36 +184,150 @@ $ cilium status --wait
  \__/¯¯\__/    Hubble Relay:       disabled          ← Day 9 才開
 ```
 
+`cilium connectivity test` 會建一組測試用的 namespace 與 pod，實際發出各種流量（pod 對 pod、pod 對 Service、跨節點、套政策之後該通的和不該通的），檢查結果是否符合預期。整組大約要跑 23 分鐘。測試 pod 要能排到 spot 節點上，所以帶 `--tolerations`：
+
 ```console
 $ cilium connectivity test --tolerations kubernetes.azure.com/scalesetpriority \
       --test-namespace cilium-test-kp
-（約 23 分鐘）
 
 📋 Test Report
 ❌ 2/82 tests failed (0/672 actions), 50 tests skipped, 1 scenarios skipped
 ```
 
-**這一行很容易被誤讀成「有兩件事壞了」,所以要把數字讀清楚:**
+最後一行看起來像是有兩件事壞了。拆開來讀：
 
-- **672 個實際動作失敗數是 0。** 每一次真正發出去的封包、每一條政策判定,全部符合預期。
-- 132 項裡 **50 項被跳過**,理由分三類:功能沒開(加密、Egress Gateway 等本課刻意沒開)、會改動節點狀態(CLI 預設不跑,這是對的)、版本條件(舊版加密測試已被 v2 取代)。
-- 剩下 82 項真的跑了,**80 項通過**。
+- 每一項測試由好幾個 action 組成，一個 action 是一次實際發出的連線或一次政策判定。**672 個 action 失敗數是 0**。
+- 132 項裡 50 項被跳過，原因有三類：功能沒開（加密、Egress Gateway 等，本章都沒開）、會改動節點狀態（CLI 預設不跑）、版本條件（舊版加密測試已被 v2 取代）。
+- 實際跑的 82 項裡，80 項通過。
 
-那兩項失敗跟資料平面無關,見[地雷 6](#mine-6) 與[地雷 7](#mine-7)。
+失敗的兩項是 `pod-to-pod-encryption-v2` 和 `node-to-node-encryption`。它們沒有任何一個 action 失敗，失敗在測試框架的探針 pod 排不上 spot 節點，見[疑難排解：兩項測試找不到 host namespace pod](#mine-6)。而 spot 的 taint 又拔不掉（見[疑難排解：spot 節點的 taint 拔不掉](#mine-7)），所以在有 spot 節點池的 AKS 叢集上，這兩項跑不起來。它們測的是加密，這座叢集沒開加密。步驟 5 的第二輪測試會明確排除這兩項，排除的原因就是這裡寫的這些。
 
-**本日對第一半的判定:通過,但要附上那兩顆地雷。** 判定根據是「0/672 動作失敗」加上「失敗原因是測試框架的探針排不上一顆被強制打 taint 的節點,而它們測的功能本來就沒開」。**把不能跑的東西記成綠燈,跟把它藏起來一樣糟**——所以步驟 5 的第二輪測試明確排除那兩項,讓報表能夠真的全綠,而排除的理由寫在地雷裡。
+所以這一輪的結果是：資料平面的功能都正常，兩項失敗可以歸因到測試框架與 spot 節點。
 
-## 步驟 4: 換掉 kube-proxy——先問它現在到底在做什麼 {#step-4}
+## 步驟 4: 換掉 kube-proxy {#step-4}
 
-`cilium status` 寫著 `KubeProxyReplacement: False`,而 kube-proxy 兩顆 pod 好端端跑著。看起來很清楚:現在 ClusterIP 是 kube-proxy 在做,等一下換成 Cilium。
+`cilium status` 會顯示 `KubeProxyReplacement: False`，kube-proxy 的兩顆 pod 也都在跑。照開場那句話，現在 ClusterIP 是 kube-proxy 在處理。這一步先實際量一次，再換。
 
-**這個推論是錯的,而且錯得很有教育意義。**
+### kube-proxy 怎麼實作 ClusterIP
+
+ClusterIP 是一個虛擬位址，沒有任何網路介面真的擁有它。封包要送到 ClusterIP，途中得有人把目的地改成某一顆後端 pod 的 IP，這個動作叫 **DNAT**（destination NAT，改寫目的位址）。
+
+**kube-proxy** 是每台節點上跑一份的程式，監看 Service 與它的後端 pod，把對應的 DNAT 規則寫進節點的 iptables nat 表。iptables 是 Linux 核心封包處理框架 netfilter 的規則工具，封包經過時會一條一條比對規則。
+
+### 準備兩個觀察位置
+
+要看節點上的 iptables，需要一顆 `hostNetwork: true` 加 `privileged` 的 pod。少了 `hostNetwork`，`iptables -t nat -S` 會回一份空的規則表：那不是沒有規則，而是你看到的是容器自己的網路命名空間（network namespace，每個容器各自一份的網路設定）。這顆 pod 跟 Day 2–6 的節點 pod 形狀相同，多加了 `hostNetwork`：
+
+```bash
+cat > node-shell.yaml <<'EOF'
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-shell
+  namespace: netlab
+spec:
+  selector:
+    matchLabels: {app: node-shell}
+  template:
+    metadata:
+      labels: {app: node-shell}
+    spec:
+      hostPID: true
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: shell
+          image: ubuntu:24.04
+          command: ["sleep", "infinity"]
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - {name: hostroot, mountPath: /host}
+      volumes:
+        - name: hostroot
+          hostPath: {path: /}
+EOF
+```
+
+被測的服務是一個 ClusterIP Service，後面兩顆後端（只有一顆的話，iptables 裡看不出挑後端的那段規則），再加一顆當呼叫端的裸 Pod `client`：
+
+```bash
+cat > svc-lab.yaml <<'EOF'
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: netlab
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: svc-backend
+  namespace: netlab
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: svc-backend}
+  template:
+    metadata:
+      labels: {app: svc-backend}
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {app: svc-backend}
+      containers:
+        - name: web
+          image: hashicorp/http-echo:1.0
+          args: ["-listen=:8080", "-text=OK"]
+          ports: [{containerPort: 8080}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-backend
+  namespace: netlab
+spec:
+  selector: {app: svc-backend}
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: client
+  namespace: netlab
+  labels: {app: client}
+spec:
+  containers:
+    - name: c
+      image: nicolaka/netshoot:v0.13
+      command: ["sleep", "infinity"]
+EOF
+
+kubectl apply -f svc-lab.yaml
+kubectl apply -f node-shell.yaml
+```
+
+接下來的觀察要用三個值：`client` 在哪台節點、跟它同一台節點的 node-shell pod 名稱、這個 Service 的 ClusterIP（下文的 `<cluster-ip>`）：
+
+```bash
+kubectl -n netlab get pods -o wide
+kubectl -n netlab get svc svc-backend
+kubectl -n netlab exec -it <node-shell-pod> -- bash
+```
+
+第一個指令的 `NODE` 欄會列出每顆 pod 所在的節點，挑跟 `client` 同一台的那顆 node-shell 進去，因為等一下要讀的是 `client` 那台節點上的計數器。
+
+node-shell 用的 `ubuntu:24.04` 映像沒有 `iptables`、`curl`、`bpftool`。驗證時是在 node-shell 裡用 `nsenter -t 1 -m -p -- <指令>` 借用節點本身的工具與檔案系統（`-t 1` 指節點的 PID 1，`-m -p` 進它的掛載與行程命名空間），例如 `nsenter -t 1 -m -p -- iptables -t nat -S`；`/run/cilium/cgroupv2` 這類路徑也要這樣才看得到節點上的那一份，直接在容器裡看要改成 `/host` 底下。下面的輸出沒有寫出這段前綴。節點上如果沒有 `bpftool`，要自己準備，本課沒有記錄安裝方式。另外，輸出裡的 `kubectl exec client` 都省略了 `-n netlab`，照打時要加上。
 
 ### 先看 kube-proxy 寫了什麼
 
-節點視角需要一顆 `hostNetwork: true` 加 `privileged` 的 pod。少了 `hostNetwork`,`iptables -t nat -S` 會給你一份空的規則表——那個空不是「沒有規則」,是**你在看容器自己的網路命名空間**。
-
-被測服務是一個 ClusterIP,兩顆後端。完整的查找路徑:
+在 node-shell 裡，從 nat 表的入口一路追到這個 ClusterIP 的後端：
 
 ```console
 $ iptables -t nat -S PREROUTING
@@ -212,13 +345,18 @@ $ iptables -t nat -S KUBE-SEP-JZF7FF4KHPDVC7PP
 -A KUBE-SEP-… -p tcp -j DNAT --to-destination 10.244.1.202:8080
 ```
 
-這就是 iptables 模式的形狀:**`KUBE-SERVICES` 是一條線性鏈**(每個 Service 一條規則,逐條比對到中),命中後跳進該 Service 的 `KUBE-SVC-*`,用 `statistic --mode random --probability` 逐條擲骰子挑後端,最後在 `KUBE-SEP-*` 做 DNAT。兩顆後端就是第一條 0.5、第二條吃剩下的;三顆會是 0.333 / 0.5 / 1,因為那是條件機率。
+照四段輸出的順序讀，就是 kube-proxy 的 iptables 模式處理一個封包的路徑：
+
+1. 封包進入 nat 表的 `PREROUTING`，跳到 `KUBE-SERVICES`。
+2. `KUBE-SERVICES` 是一條線性的鏈，每個 Service 一條規則，從頭逐條比對，比中這個 ClusterIP 就跳進它的 `KUBE-SVC-*`。
+3. `KUBE-SVC-*` 用 `statistic --mode random --probability` 挑後端：兩顆後端時，第一條 0.5，沒中就落到第二條。三顆會是 0.333、0.5、1，因為每一條算的是「前面都沒中」之後的機率。
+4. 在選中的 `KUBE-SEP-*` 做 DNAT，目的地改成後端 pod 的 `10.244.1.202:8080`。
+
+另外要注意第一段的第一行：`CILIUM_PRE_nat` 排在 `KUBE-SERVICES` 前面，Cilium 也在 nat 表裡。這時候 `cilium service list` 一樣列得出這個 Service，iptables 有規則，Cilium 也有自己的 map，兩邊都「有」這筆資料。有資料不代表真的被用到。
 
 ### 誰真的做了那次翻譯
 
-`cilium service list` 這時候也是滿的——兩邊都「有」這條 Service:iptables 有鏈,Cilium 有 map。**有資料不代表資料被用到。**
-
-唯一不會騙人的是封包計數器:清零、打固定次數、再讀。
+要知道封包實際走哪條路，看 iptables 的封包計數器：先清零，從呼叫端打固定次數，再讀計數。呼叫端分兩種，一般 pod 和節點本身（hostNetwork）：
 
 ```console
 ### A) 呼叫端 = 一般 pod
@@ -241,11 +379,50 @@ $ iptables -t nat -L KUBE-SVC-XS3ZU56555AQFGIC -n -v
       ↑ 20 次全部走 iptables,而且骰子擲出漂亮的 10/10
 ```
 
-**同一個 ClusterIP、同一顆節點、同一秒,兩個呼叫端的答案完全相反。** 這是[地雷 8](#mine-8),也是今天的頭條。
+同一個 ClusterIP、同一台節點，兩個呼叫端都拿到 20 次 200，計數器卻一個是 0、一個是 20。一般 pod 發出的請求完全沒經過 kube-proxy 的規則。
+
+<span id="mine-8"></span>原因在 Cilium agent 的詳細狀態裡。`cilium-dbg` 是 agent 容器裡的診斷工具，要在 agent pod 裡執行：
+
+```bash
+kubectl -n kube-system exec ds/cilium -c cilium-agent -- cilium-dbg status --verbose
+```
+
+`ds/cilium` 會挑其中一顆 agent pod；想看特定節點，就把它換成那台節點上的 cilium pod 名稱。輸出裡跟 kube-proxy replacement 有關的段落：
+
+```console
+KubeProxyReplacement:   False
+KubeProxyReplacement Details:
+  Status:               False
+  Socket LB:            Disabled
+  Services:
+  - ClusterIP:      Enabled          ← 就是這一行
+  - NodePort:       Disabled
+  - LoadBalancer:   Disabled
+  - externalIPs:    Disabled
+  - HostPort:       Disabled
+```
+
+`kubeProxyReplacement: false` 關掉的是 NodePort、LoadBalancer、externalIPs、HostPort 和 socket LB（在行程建立連線時就改寫目的地的做法，步驟 5 細看），ClusterIP 一直是開著的。
+
+ClusterIP 由誰處理，要看封包經過哪裡。每顆 pod 都靠一對 veth 連到節點：veth 是成對的虛擬網路介面，一端在 pod 的網路命名空間裡，另一端在節點上，pod 送出的每個封包都會經過它。
+
+Cilium 在每對 veth 的節點端掛了 tc 程式，也就是 Day 0 講過的 tc 掛載點。封包一離開 pod，這支程式就去查 Cilium 存放 Service 與後端對應的 map，把目的地改成後端 pod IP。封包到達節點的 iptables 時，目的地已經不是 ClusterIP，`KUBE-SERVICES` 比對不到。
+
+![兩個呼叫端打同一個 ClusterIP：左邊的 client pod 發出的封包，在 veth 上就被 Cilium 的 tc 程式改寫目的地，KUBE-SERVICES 計數 0；右邊 node-shell 裡的行程直接用節點的網路，封包經過 iptables 的 KUBE-SERVICES、KUBE-SVC、KUBE-SEP 三段才改寫，計數 20；兩條路最後都到同一組後端 pod](../assets/diagrams/s2d7-two-callers.svg)
+
+照著圖看兩條路：左邊的封包從 pod 出來就先碰到 veth 上的 tc 程式，右邊的行程本來就在節點的網路命名空間裡，沒有 veth 可經過，只能交給 iptables。所以在一座還沒開 replacement 的 Cilium 叢集上，kube-proxy 實際負責的只有節點自己發起的流量（hostNetwork pod、節點上的服務、kubelet），以及 NodePort 這幾類入口。
+
+回到開場那句話：「先不開 replacement 比較保守」，保守的範圍其實只有上面這些流量。另外，拿 iptables 規則數當作 kube-proxy 的負載指標也會誤判，一般 pod 的 Service 流量不會經過那些規則。
 
 ### 換掉它
 
-順序很重要:**先讓 Cilium 接手,再拆 kube-proxy**。反過來做的話,中間那段時間 hostNetwork 的流量沒有人服務,而 cilium-agent 重啟時要用的就是 hostNetwork。
+kube-proxy 一拿掉，`kubernetes` 這個 Service（`10.0.0.1:443`，pod 用來連 API server 的位址）就沒人翻譯了；而 cilium-agent 自己也要連 API server，才知道叢集裡有哪些 Service 要翻譯。為了避開這個循環，要在 values 裡直接告訴 agent API server 的真實位址。AKS 的 API server 位址可以這樣查：
+
+```bash
+az aks show -g <resource-group> -n <cluster> --query fqdn -o tsv
+```
+
+順序也要注意：先讓 Cilium 接手，再拆 kube-proxy。反過來做，中間那段時間 hostNetwork 的流量沒有人翻譯，而 cilium-agent 重啟時用的正是 hostNetwork。
 
 ```bash
 # The two k8sService* lines are NOT optional. Once kube-proxy is gone, nobody
@@ -262,14 +439,14 @@ helm upgrade cilium cilium/cilium --version 1.20.0 -n kube-system -f cilium-valu
 kubectl -n kube-system rollout restart ds/cilium
 ```
 
-漏掉那兩行不會報錯,會是 agent CrashLoopBackOff 而**整座叢集的 Service 一起停擺**。
+漏掉 `k8sServiceHost`、`k8sServicePort` 那兩行，helm 不會報錯，結果是 agent 進 CrashLoopBackOff，整座叢集的 Service 一起停擺。
 
-換完之後 agent 的自我描述變了:
+agent 重啟後，再看一次詳細狀態：
 
 ```console
 KubeProxyReplacement Details:
   Status:               True
-  Socket LB:            Enabled          ← 從 Disabled 變成 Enabled,這才是重點
+  Socket LB:            Enabled          ← 從 Disabled 變成 Enabled
   Services:
   - ClusterIP:      Enabled
   - NodePort:       Enabled (Range: 30000-32767)   ← 這四項才是 replacement 真正帶來的
@@ -278,24 +455,41 @@ KubeProxyReplacement Details:
   - HostPort:       Enabled
 ```
 
-拆掉 kube-proxy 本身有兩顆地雷:[地雷 9](#mine-9)(刪了會自己回來)與[地雷 10](#mine-10)(走了規則不會走)。
+跟前一份對照，ClusterIP 本來就是 Enabled，多出來的是 NodePort、LoadBalancer、externalIPs、HostPort，以及 `Socket LB`。開了 socket LB，翻譯不再等封包經過 veth，而是在行程呼叫 `connect()` 建立連線時就把目的地改成後端 pod，步驟 5 會看它掛在哪裡。
 
-## 步驟 5: 量化——規則數、查找路徑,以及不能宣稱的那一項
+### 拿掉 kube-proxy，再清掉它留下的規則
+
+AKS 的 kube-proxy 是受管附加元件，`kubectl delete ds kube-proxy` 會成功，但一分多鐘後控制面會把它裝回來（見[疑難排解：刪掉的 kube-proxy 又回來了](#mine-9)）。Cilium 官方給受管叢集的做法，是把 DaemonSet 的 nodeSelector 改成一個沒有任何節點帶著的標籤，讓它排不到任何節點。標籤名稱可以自己取：
+
+```console
+$ kubectl -n kube-system patch daemonset kube-proxy \
+    -p '{"spec":{"template":{"spec":{"nodeSelector":{"lab.local/no-kube-proxy":"true"}}}}}'
+```
+
+驗證時觀察了 125 秒，控制面沒有把這個 patch 改回去，經過步驟 6 的一次停機重啟後也還在；更長時間會不會被改回，沒有觀察到。DaemonSet 物件本身還在、而且刪不掉，但叢集裡沒有 kube-proxy pod。AKS 另外有一個原生的關法（`az aks update --kube-proxy-config`），要先在訂閱層級註冊預覽功能 `KubeProxyConfigurationPreview`，這一章用的是上面的 nodeSelector patch。
+
+kube-proxy 的 pod 不在了，它寫進 iptables 的規則還留在節點上，要在每一台節點的 node-shell 裡自己清（見[疑難排解：nat 表還有 120 條 `KUBE-*`](#mine-10)）：
+
+```console
+$ iptables-save | grep -v KUBE- | iptables-restore
+```
+
+## 步驟 5: 量化——規則數、查找路徑與延遲 {#step-5}
 
 ### 規則數
 
-叢集裡 10 個 Service:
+叢集裡有 10 個 Service，換掉 kube-proxy 並清完規則後，比較 nat 表：
 
 | | nat 表總行數 | 其中 `KUBE-*` | 其中 `CILIUM_*` | Service 相關規則 |
 |---|---|---|---|---|
 | kube-proxy 在 | **135** | 120 | 11 | 120 |
-| replacement 之後 | **16** | 1(`KUBE-KUBELET-CANARY`,kubelet 的空鏈) | 11 | **0** |
+| replacement 之後 | **16** | 1（`KUBE-KUBELET-CANARY`，kubelet 的空鏈） | 11 | **0** |
 
-**10 個 Service 等於 120 條 nat 規則,而且是線性成長**:每多一個 Service,`KUBE-SERVICES` 多一條要逐條比對的規則;每多一顆後端,那個 Service 的鏈多一條。剩下的 11 條 `CILIUM_*` 全部是 masquerade,**跟 Service 查找無關,而且不隨 Service 數量成長**。
+10 個 Service 對應 120 條 nat 規則，而且會線性成長：每多一個 Service，`KUBE-SERVICES` 多一條要逐條比對的規則；每多一顆後端，那個 Service 的鏈多一條。剩下的 11 條 `CILIUM_*` 裡，3 條是 Cilium 自己的鏈的宣告，3 條是從 nat 表入口跳進這些鏈，其餘 5 條在 `CILIUM_POST_nat` 裡改寫來源位址：pod 往 pod 網段以外連線時換成節點位址（MASQUERADE），以及往 `cilium_host` 介面的流量改用 `cilium_host` 的位址（SNAT）。這 11 條都跟 Service 查找無關，也不隨 Service 數量增加。
 
 ### 查找路徑
 
-這比規則數更根本。
+規則數變少只是結果，翻譯發生的位置也變了。在 node-shell 裡列出 Cilium 掛在 cgroup 上的程式：
 
 ```console
 $ bpftool cgroup show /run/cilium/cgroupv2
@@ -303,43 +497,55 @@ ID     AttachType                Name
 4706   cgroup_inet4_connect      cil_sock4_connect        ← 就是這一支
 ```
 
-`cil_sock4_connect` 掛在 `cgroup_inet4_connect`——也就是**行程呼叫 `connect(2)` 的那一刻,在任何封包被組出來之前**。應用程式以為自己連到 ClusterIP,核心在 socket 層就把目的地改寫成後端 pod 的位址,之後這條連線的每一個封包從頭到尾都是「一般的 pod 對 pod 流量」。
+`cil_sock4_connect` 掛在 `cgroup_inet4_connect`，也就是 Day 0 講過的 cgroup 掛載點裡的一種：行程呼叫 `connect(2)` 的那一刻就會觸發，這時候還沒有任何封包被組出來。程式查 Service map，直接把這個 socket 的目的地改成後端 pod 的位址。這就是步驟 4 輸出裡的 **socket LB**。應用程式以為自己連的是 ClusterIP，之後這條連線的每個封包都是一般的 pod 對 pod 流量。
 
-| | kube-proxy(iptables 模式) | Cilium kube-proxy replacement |
+![兩種查找方式的對照：上排 kube-proxy 的 iptables 模式，每個封包都進 netfilter，在 KUBE-SERVICES 逐條比對，再到 KUBE-SEP 做 DNAT；下排 Cilium 的 socket LB，在 connect() 當下由 cil_sock4_connect 查一次 map 改寫目的地，之後的封包直接送往後端 pod](../assets/diagrams/s2d7-lookup-compare.svg)
+
+把兩條路整理成表：
+
+| | kube-proxy（iptables 模式） | Cilium kube-proxy replacement |
 |---|---|---|
-| 發生時機 | 每個封包,在 netfilter hook | **每條連線一次**,在 `connect()` |
-| 資料結構 | 線性規則鏈,O(Service 數) 比對 | eBPF hash map,O(1) 查找 |
+| 發生時機 | 每個封包，在 netfilter hook | **每條連線一次**，在 `connect()` |
+| 資料結構 | 線性規則鏈，`O(Service 數)` 比對 | eBPF hash map，`O(1)` 查找 |
 | 後端選擇 | 逐條擲骰子 | map 的 slot 索引 |
-| 之後每個封包 | 走 conntrack 查 NAT 狀態 | **不需要**,位址已經是真的 |
+| 之後每個封包 | 走 conntrack 查 NAT 狀態 | **不需要**，位址已經是真的 |
 
-### 延遲:這一項沒有辦法誠實地宣稱改善
+表裡的 conntrack 是核心的連線追蹤表：iptables 對一條連線的第一個封包做完 DNAT 後，把結果記在這裡，同一條連線後續的封包查這張表套用同樣的改寫。
 
-`time_connect`(只含 TCP 三次握手),各 300 次:
+### 延遲：量了，但不能宣稱改善
+
+在 node-shell 裡對同一個 ClusterIP 量 `curl` 的 `time_connect`（只含 TCP 三次握手），每組 300 次：
 
 | 量測 | mean | p50 | p90 | p99 |
 |---|---|---|---|---|
-| kube-proxy(iptables) | 0.370 ms | 0.305 | 0.515 | 1.600 |
+| kube-proxy（iptables） | 0.370 ms | 0.305 | 0.515 | 1.600 |
 | replacement 之後 run1 | 0.311 ms | 0.257 | 0.378 | 0.937 |
 | replacement 之後 run2 | 0.250 ms | 0.221 | 0.332 | 0.617 |
-| **對照組:直接打後端 pod IP** | **0.249 ms** | **0.220** | 0.334 | 0.727 |
+| **對照組：直接打後端 pod IP** | **0.249 ms** | **0.220** | 0.334 | 0.727 |
 
-兩個問題讓「快了 27%」站不住:**BEFORE 那一組是在連通性測試同時跑的時候量的**(負載不同),而 **run1 與 run2 的差距(p50 36 µs)比任何想宣稱的效果都大**——這台機器的 run-to-run 雜訊已經吃掉整個訊號。
+只看第一列和第三列，會想說快了 27%（p50 差 84 µs），但這個結論有兩個問題。第一，kube-proxy 那一組是在連通性測試同時執行時量的，負載跟後兩組不同。第二，replacement 之後的兩輪彼此就差了 36 µs（p50 0.257 對 0.221），兩次量測之間的波動跟想宣稱的差距在同一個量級。兩者加起來，這張表不能拿來說誰比較快；要回答這個問題，需要固定負載、交錯取樣的比較。
 
-但同一張表裡有一個**乾淨**的結論,而且比延遲比較更有意思:**走 ClusterIP(p50 0.221)與直接打後端 pod IP(p50 0.220)在量測精度內完全一樣。** 對照組沒有經過任何 Service 翻譯,而 socket LB 那一組多做了一次 map 查找——**多出來的成本量不到**。
-
-所以誠實的說法是:**「Cilium 的 ClusterIP 翻譯在這台機器上量不到成本」有證據;「比 kube-proxy 快多少」沒有。** 而在 10 個 Service 的實驗叢集上,線性鏈的代價本來就還沒開始顯現——**那個差距要在幾百上千個 Service 的叢集才會變成數字**,那也正是它真正的適用場景。
+同一張表倒是能支持另一個結論：走 ClusterIP（run2 的 p50 0.221）和直接打後端 pod IP（p50 0.220）在量測精度內一樣。對照組完全沒有 Service 翻譯，socket LB 那一組多查了一次 map，多出來的成本量不到。至於 iptables 線性鏈的代價，在只有 10 個 Service 的叢集上還不明顯，要到幾百、上千個 Service 才會變成看得出來的數字。這一章的延遲量測沒有做到固定負載，也沒有到那個規模，所以只拿來支持上面這個結論。
 
 ### 第二輪連通性測試
 
-排除地雷 6 那兩項之後重跑:
+replacement 之後重跑一次，用 `--test '!名稱'` 排除步驟 3 那兩項跑不起來的加密測試：
+
+```bash
+cilium connectivity test --tolerations kubernetes.azure.com/scalesetpriority \
+    --test '!pod-to-pod-encryption-v2' --test '!node-to-node-encryption' \
+    --test-namespace cilium-test-kpr
+```
 
 ```console
 ✅ All 80 tests (678 actions) successful, 52 tests skipped, 0 scenarios skipped.
 ```
 
-動作總數反而從 672 變成 **678**——多出來的 6 個是 NodePort 相關的:replacement 開啟之後 `NodePort: Enabled`,測試框架多測了幾條先前被跳過的路徑。
+action 總數從 672 變成 678，多出來的 6 個跟 NodePort 有關：replacement 開啟後 `NodePort: Enabled`，測試框架多跑了幾條先前被跳過的路徑。
 
-### 驗收第二半的完整證據
+### 確認 kube-proxy 不在、Service 還通
+
+最後逐項確認：kube-proxy 沒有 pod、節點上沒有行程、agent 自己回報 replacement 已開啟，從 pod、從節點、到 `kubernetes` Service 都還連得到。跟前面一樣，`nsenter` 在 node-shell 裡執行，`kubectl exec client` 要加 `-n netlab`，`cilium-dbg` 在 agent pod 裡執行：
 
 ```console
 $ kubectl -n kube-system get ds kube-proxy
@@ -354,72 +560,57 @@ $ (node-shell, hostNetwork) curl http://<cluster-ip>/            → 200
 $ kubectl exec client -- curl -k https://10.0.0.1:443/healthz    → 401
 ```
 
-最後那個 `401` 是好消息:它代表 TLS 握手完成、HTTP 請求送達 API server,只是沒帶憑證。**`kubernetes` Service 這條「換掉 kube-proxy 最可能弄壞」的路徑是活的。**
+最後那個 `401` 是正常結果：TLS 握手完成、HTTP 請求送到了 API server，只是沒帶憑證。`kubernetes` Service 是換掉 kube-proxy 時最容易壞的路徑，它是通的。
 
-## 步驟 6: 停機重啟的存活驗證——BYOCNI 只剩一條收尾路
+## 步驟 6: 停機後再開機，確認一切還在 {#step-6}
 
-直覺的收尾方式是「兩個節點池都縮到 0」,而它被 API 退件([地雷 11](#mine-11))。**BYOCNI 叢集要讓節點全部停下,只剩 `az aks stop` 一條路——而那正好是一件沒人驗證過的事**:停機再開機之後,CNI 會不會自己回來?
+不用的時候要把節點停下來。直覺的做法是兩個節點池都縮到 0，但 AKS 的 system pool 不管哪種叢集都最少要一台，縮到 0 會被 API 拒絕（見[疑難排解：system 節點池縮不到 0](#mine-11)）。BYOCNI 叢集要讓所有節點停下，只能用 `az aks stop` 停掉整座叢集。
 
-既然它是唯一的路,就當場驗證:
+這帶出一個問題：Cilium 是自己裝的，停機再開機之後，CNI 會不會自己回來？spot 節點池先縮到 0，再停機、開機，看結果：
 
 ```console
-$ az aks stop  …      （2 分 04 秒）
-$ az aks start …      （4 分 04 秒）
+$ az aks stop  …
+$ az aks start …
 $ kubectl get nodes
 <node>-vmss000001   Ready   <none>   90s   v1.35.6
               ↑ 注意編號變了:這是一台全新的 VM,不是原來那台
 ```
 
-驗收全部一次過,沒有任何人工修補:Cilium 四個元件全部 Running、**kube-proxy 的 patch 存活**、`KubeProxyReplacement: True`、Service 可達。
+節點名稱的編號從 `000000` 變成 `000001`：`az aks start` 給的是一台新的 VM，不是把原來那台叫醒。所以問題其實是「新節點上的 Cilium 會不會自己裝好」，答案是會：
 
-**節點是全新的 VM**——停機再開機不是把原來那台叫醒,是重建。所以「CNI 會不會回來」這個問題實際上是「新節點上 CNI 會不會自己裝好」,而答案是會。
+- Cilium 的四個元件都是 DaemonSet 或 Deployment，新節點一加入就自己排上去、寫好 CNI 設定，不用重裝。
+- kube-proxy 的 nodeSelector patch 還在，叢集裡仍然沒有 kube-proxy pod，`KubeProxyReplacement` 仍是 `True`，Service 照樣可達。
+- 新節點從來沒跑過 kube-proxy，nat 表一開始就只有 16 行，不需要再清一次。
+- 裸 Pod 不會回來。`client` 沒有任何控制器管它，跟著舊 VM 一起消失；要再用它，重新 `kubectl apply -f svc-lab.yaml`。
 
-## 誠實的差距
+這個停機、開機循環驗證時只跑過一次，kube-proxy 的 patch 撐過了那一次，一次觀察不足以當成保證。之後每次開機，先看 `kubectl -n kube-system get ds kube-proxy` 的 `DESIRED` 是不是 0。
 
-- **延遲改善沒有證據。** 上面已經寫清楚為什麼:負載不對等、雜訊大於訊號。要回答「比 kube-proxy 快多少」需要固定負載、交錯取樣的 A/B,本課的條件不具備。
-- **兩項連通性測試沒有跑過。** 它們測的是加密功能,而這座叢集沒開加密;失敗原因是測試框架的探針排不上 spot 節點。**這兩項在本課從未被驗證過,只是被排除。**
-- **只有 10 個 Service。** 規則數與查找路徑的差別在這個規模下是結構性的而不是效能性的。線性鏈真正變成問題的規模,本課沒有重現。
-- **kube-proxy 沒有真正被移除。** DaemonSet 物件還在(而且刪不掉),只是被釘在一個不存在的節點選擇器上。原生的關法綁在訂閱層級的預覽旗標,為了一座臨時叢集不做那個異動。
-- **`az aks stop`/`start` 只驗過一次。** kube-proxy 的 patch 撐過那一次,但單一次觀察不足以當成保證。
+## 疑難排解
 
-## 驗收 checkpoint
+### `az aks create` 不認得 `--priority` {#mine-1}
 
-| 驗證 | 判準 | 本課環境的結果 |
-|---|---|---|
-| BYOCNI 叢集建立 | `networkProfile.networkPlugin` 是 `none`,且節點在裝 CNI 前是 `NotReady` | 兩項都成立,建立耗時 5 分 13 秒 |
-| Cilium 就緒 | `cilium status` 四個元件皆 OK,pod 網段不與 service CIDR 重疊 | agent / envoy / node-init / operator 全 OK;pod CIDR `10.244.0.0/16` |
-| **連通性測試** | 實際執行的測試全數通過,且**失敗項的原因可歸因** | 第一輪 80/82(2 項為框架排程問題);排除後第二輪 **80/80、678 動作全過** |
-| **kube-proxy 不在** | 零個 pod **且**兩顆節點上零個行程 | 兩項都成立 |
-| Service 仍可達 | pod、hostNetwork、跨節點、以及 `kubernetes` Service 四條路徑 | 四條全通(`kubernetes` 回 401 = 握手完成) |
-| 規則數下降可量化 | nat 表行數與 `KUBE-*` 規則數 | **135 → 16 行**,120 條 Service 規則 → **0** |
-| 停機重啟後仍成立 | 重開之後 kube-proxy 仍為 0、Service 仍可達 | 成立(新 VM,無人工修補) |
-
-## 地雷記錄
-
-### 地雷 1:`az aks create` 根本沒有 `--priority` 這個參數 {#mine-1}
-
-**症狀**:照著「2 台 spot 節點」的計畫下指令,被拒絕。
+**症狀**：想建一座只有 spot 節點的叢集，指令被拒絕。
 
 ```console
 $ az aks create … --priority Spot --eviction-policy Delete --spot-max-price -1 …
 ERROR: unrecognized arguments: --priority Spot --eviction-policy Delete --spot-max-price -1
 ```
 
-**根因**:不是「參數值不合法」,是**這個子命令沒有這組參數**。AKS 的第一個節點池一定是 system pool,而 system pool 不能是 spot——這條限制不是在執行期擋你,是直接不出現在 CLI 介面上(`az aks nodepool add` 才有 `--priority`)。
+**原因**：不是參數值不對，而是 `az aks create` 根本沒有這組參數。AKS 的第一個節點池一定是 system pool，而 system pool 不能是 spot，所以 CLI 直接不提供這些選項；`az aks nodepool add` 才有 `--priority`。
 
-**後果**:「一座 2 台 spot 的叢集」在 AKS 上不存在。可行的形狀是 **1 台隨需 system 加 N 台 spot user pool**,規劃節點數時別漏掉那台隨需節點。
+**修法**：照步驟 1 與[步驟 2](#step-2) 的形狀，先建一台隨需的 system 節點，再用 `az aks nodepool add` 加 spot 的 user pool。估節點數與成本時，要把那台隨需節點算進去。
 
-### 地雷 2:決定能不能排到 `NotReady` 節點的是 taint 容忍,不是 hostNetwork {#mine-2}
+### 沒裝 CNI 時，hostNetwork 的 pod 一樣 Pending {#mine-2}
 
-**症狀**:在還沒裝 CNI 的叢集上,`konnectivity-agent` 明明是 `hostNetwork: true`,卻一樣 Pending。
+**症狀**：還沒裝 CNI 的叢集上，`konnectivity-agent` 明明是 `hostNetwork: true`，卻跟 CoreDNS 一樣 Pending。
 
-**根因**:決定一顆 pod 能不能排到 `NotReady` 節點上的,是它容不容忍 `node.kubernetes.io/not-ready:NoSchedule`。**DaemonSet controller 會自動替它管的 pod 加上這個容忍**(所以 `kube-proxy`、`csi-*`、`cloud-node-manager` 都在跑),**而 Deployment 不會**。
+**原因**：決定 pod 能不能排到 `NotReady` 節點的，是它有沒有容忍 `node.kubernetes.io/not-ready:NoSchedule` 這個 taint。DaemonSet controller 會自動替它管的 pod 加上這個容忍，所以 `kube-proxy`、`csi-*`、`cloud-node-manager` 都在跑；Deployment 不會。`konnectivity-agent` 是 Deployment，當時正在換版：舊 ReplicaSet 的 pod 在節點被加上 taint 之前就排上去了，所以 Running；新 ReplicaSet 建出來的 pod 碰上 taint 就卡在 Pending。
 
-`konnectivity-agent` 是 Deployment:它的第一顆副本在節點被打上 taint **之前**就排上去了(所以 Running),第二顆碰上 taint 就卡住。
+**修法**：不用處理，裝好 CNI、節點 Ready 之後 taint 會移除，pod 就排得上去。判斷時記得：同樣是 hostNetwork 的 pod，能不能排上 `NotReady` 節點，看的是有沒有這個 toleration，以及 pod 是在 taint 出現之前還是之後建立的。
 
-**教訓**:「hostNetwork 的活著」這個直覺會在這裡騙你。兩顆同樣是 hostNetwork 的 pod 一顆 Running 一顆 Pending,差別在它們的控制器類型。
+### `cilium install` 裝到的版本比 stable 舊一版 {#mine-3}
 
-### 地雷 3:cilium-cli 會告訴你 stable 是哪一版,然後裝另一版 {#mine-3}
+**症狀**：照官方快速上手執行 `cilium install`，裝出來的 Cilium 比 cilium-cli 自己回報的 stable 舊一個 minor，過程中沒有任何提示。
 
 ```console
 $ cilium version --client
@@ -428,37 +619,22 @@ cilium image (default): v1.19.5
 cilium image (stable):  v1.20.0
 ```
 
-**同一段輸出裡,default 和 stable 差了一個 minor。** `cilium install` 不帶 `--version` 用的是 default。
+**原因**：`cilium install` 不帶 `--version` 時用的是 `default` 那一行，它跟著 cilium-cli 自己的發佈節奏，不一定等於當時的 stable。
 
-這不是 bug——CLI 的預設值有自己的發佈節奏——但它讓「照官方快速上手打一行指令」的結果是一個**比當下 stable 舊一版的叢集,而且沒有任何一行輸出提醒你**。
+**修法**：照[步驟 2](#step-2) 用 Helm 並寫死版本，或者執行 `cilium install --version` 明確指定。
 
-**修法**:用 Helm 並寫死版本,或者 `cilium install --version` 明確指定。
+### metrics-server CrashLoopBackOff，查 DNS 被拒 {#mine-4}
 
-### 地雷 4:Cilium 預設的 pod 網段把 AKS 的 Service 網段整個吃掉 {#mine-4}
-
-**症狀**:照官方 AKS BYOCNI 快速上手裝完,節點 Ready,然後 metrics-server 進 `CrashLoopBackOff`:
+**症狀**：照官方 AKS BYOCNI 快速上手裝完，節點都 Ready，metrics-server 卻進 `CrashLoopBackOff`，pod IP 是 `10.0.0.x`：
 
 ```console
 E0807 06:19:07 … dial tcp: lookup <api-fqdn> on 10.0.0.10:53:
   read udp 10.0.0.140:34964->10.0.0.10:53: read: connection refused
 ```
 
-**根因**:pod 拿到的 IP 是 `10.0.0.x`,而這座叢集的 service CIDR 是 `10.0.0.0/16`、kube-dns 的 ClusterIP 是 `10.0.0.10`。**pod 正在從 Service 的網段裡拿位址。** 封包送到 `10.0.0.10` 時,Cilium 認為那是本節點的一顆 pod 而不是一個 Service,於是 `connection refused`。
+**原因**：Cilium 預設的 pod 網段 `10.0.0.0/8` 包住了 AKS 的 Service 網段 `10.0.0.0/16`，`aksbyocni` 這個預設組合不會幫你改，說明見[步驟 2 的網段一節](#step-2)。
 
-來源是 Cilium `cluster-pool` IPAM 的預設 `clusterPoolIPv4PodCIDRList` 為 **`10.0.0.0/8`**,而 AKS 的預設 service CIDR `10.0.0.0/16` 完全包含在裡面。`aksbyocni` 這個 preset **不會**幫你處理。
-
-**最諷刺的是正確答案就寫在叢集自己身上**:
-
-```console
-$ kubectl -n kube-system get ds kube-proxy -o jsonpath='{…containers[0].command}'
-["kube-proxy", …, "--cluster-cidr=10.244.0.0/16", …]
-```
-
-AKS 預設的 kube-proxy 一直在說「pod 在 `10.244.0.0/16`」。`az aks show` 的 `networkProfile.podCidr` 是 `null`(因為 BYOCNI 不由 AKS 配發),**但 kube-proxy 的參數不是 null**。
-
-**教訓**:BYOCNI 的意思是「pod 網段由你負責」,**不是「叢集其他元件對 pod 網段沒有假設」**。
-
-**修法**是重裝而不是升級——`CiliumNode` 上的網段是已分配狀態,要先刪掉:
+**修法**：在 values 裡加上 `clusterPoolIPv4PodCIDRList: ["10.244.0.0/16"]`，然後重裝，不能用 `helm upgrade`：每台節點分到的網段已經記在 `CiliumNode` 物件上，要先刪掉。
 
 ```console
 $ helm uninstall cilium -n kube-system
@@ -466,13 +642,13 @@ $ kubectl delete ciliumnode --all
 $ helm install cilium … -f cilium-values.yaml      # 含正確的 clusterPoolIPv4PodCIDRList
 ```
 
-而且**已經拿到舊網段 IP 的 pod 不會自己修好**,要手動重建。在正式環境這一點是重點:**改 pod 網段不是改設定,是整個資料平面重建。**
+已經拿到舊網段 IP 的 pod（coredns、metrics-server 等）不會自己修好，要手動刪掉讓它們重建。在正式環境，改 pod 網段等於整個資料平面重建，要在建叢集時就決定好。
 
-### 地雷 5:`cilium` pod 的 Burstable 是一顆 init container 借來的 {#mine-5}
+### `cilium` pod 是 Burstable，記憶體 request 卻只有 10Mi {#mine-5}
 
-**症狀**:Cilium 是 Burstable、Tetragon 是 BestEffort,兩者的長駐容器卻同樣是 `resources: {}`。
+**症狀**：Cilium 與 Tetragon 的長駐容器同樣是 `resources: {}`，Tetragon 是 BestEffort，Cilium 卻是 Burstable。
 
-**根因**:
+**原因**：
 
 ```console
 $ kubectl -n kube-system get ds cilium -o jsonpath='{range .spec.template.spec.initContainers[*]}…'
@@ -482,24 +658,22 @@ mount-cgroup             -> {}
 install-cni-binaries     -> {"limits":{"cpu":"1","memory":"1Gi"},"requests":{"cpu":"100m","memory":"10Mi"}}
 ```
 
-七個 init container 裡只有最後一個有 requests。Kubernetes 算一顆 pod 的有效 request 時取 **max(所有長駐容器的總和, 各 init container 的最大值)**,於是這顆 pod 的 request 變成 `100m/10Mi`——**來自一個複製完二進位檔就結束的 init container**,而不是那個要跑到節點壽命結束的 agent。
+七個 init container 裡，只有最後一個有 requests。Kubernetes 計算一顆 pod 的有效 request 時，取「所有長駐容器的總和」與「各 init container 的最大值」兩者中較大的那個。agent 容器沒設，於是這顆 pod 的 request 變成 `100m/10Mi`，來自一個複製完二進位檔就結束的 init container。
 
-**後果有兩層**:QoS 被拉成 Burstable,看起來比 Tetragon「有保障」,但保障的量是錯的;而**記憶體 request 10Mi、實測 102Mi,差 10 倍**——排程器對這顆節點的記憶體帳本少算了約 92Mi。
+**後果**：QoS 被拉成 Burstable，看起來比 Tetragon 有保障，但保障的量是錯的。記憶體 request 10Mi、實測 102Mi，相差約 10 倍，排程器對這台節點的記憶體帳少算了約 92Mi。Day 3 的[「節點的 CPU 實際用量不高，Falco 卻排不進去」](sprint2-day3-falco-basics.md#mine-7)是反方向的問題：Falco 的 request 比實際用量高 4–7 倍，pod 排不進去，看得出來。低估比較難發現，pod 照樣排得上，節點卻可能在排程器以為還有餘裕時開始記憶體吃緊。`priorityClassName` 能避免被搶占，但改不了排程器以為它只要 10Mi。
 
-[Day 3 地雷 7](sprint2-day3-falco-basics.md#mine-7) 記的是相反方向的問題(Falco 超額 4–7 倍,於是排不進去)。**兩種方向都是錯的,而低估的這種更難發現**:它不會讓 pod 排不上,它會讓節點在你以為還有餘裕的時候開始換頁。
+**修法**：上正式環境前，在 values 裡替 agent 容器自己設 `resources`，數字依實測用量決定。
 
-`priorityClassName` 救得了「被搶佔」,救不了「排程器以為你只要 10Mi」。
+### 兩項測試失敗：`Fail to acquire host namespace pod` {#mine-6}
 
-### 地雷 6:`--tolerations` 沒有套到測試框架的 DaemonSet {#mine-6}
-
-**症狀**:連通性測試兩項失敗,而訊息不是「封包不通」:
+**症狀**：連通性測試兩項失敗，訊息不是封包不通：
 
 ```console
 🟥 Fail to acquire host namespace pod on <spot-node> (client's node)
 🟥 Could not find host network namespace pod on client node <spot-node>
 ```
 
-**根因**:測試框架需要每顆節點各一顆 `hostNetwork` 探針 pod,而它只排上了一顆。
+**原因**：測試框架需要每台節點各一顆 `hostNetwork` 探針 pod，而它只排上了一顆。
 
 ```console
 $ kubectl -n cilium-test-kp-1 get ds host-netns
@@ -512,11 +686,13 @@ $ kubectl … get ds host-netns -o jsonpath='{…tolerations}'
                                                                         ← 空的
 ```
 
-**`--tolerations` 只套到了測試的 Deployment,沒有套到 `host-netns` DaemonSet。**
+`--tolerations` 只套到測試的 Deployment，沒有套到 `host-netns` 這個 DaemonSet，探針排不上 spot 節點。同一組裡另一項加密測試被正確地以「功能沒開」跳過，這兩項沒有，是測試框架的跳過條件沒涵蓋到。
 
-而 spot 節點的 taint 拔不掉([地雷 7](#mine-7)),所以在有 spot 節點池的 AKS 叢集上,**這兩項測試無法執行**。同一組裡的另一項被正確地以「功能沒開」跳過了,這兩項沒有——那是跳過條件沒有覆蓋完整。
+**修法**：spot 的 taint 拔不掉（見下一項），所以在有 spot 節點池的 AKS 叢集上，這兩項只能排除，做法見[步驟 5 的第二輪測試](#step-5)。如果你需要驗證加密，要在沒有 spot 節點的叢集上跑。
 
-### 地雷 7:AKS spot 節點池的 taint 拔不掉,而兩種拔法的失敗方式不一樣 {#mine-7}
+### spot 節點的 taint 拔不掉 {#mine-7}
+
+**症狀**：想拿掉 spot 節點的 taint，兩種方法都沒用，而且失敗的方式不同。
 
 ```console
 $ az aks nodepool update … -n spotpool --node-taints ""
@@ -531,36 +707,13 @@ Error from server: admission webhook "aks-node-validating-webhook.azmk8s.io" den
   Taint delete request … refused. User is attempting to delete a taint configured on aks node pool "spotpool".
 ```
 
-**ARM 那一條是靜默無效(回 `Succeeded` 而什麼都沒改),kubectl 那一條是明確拒絕。** 兩者對照很有價值:**如果只試了第一種,你會以為指令生效了,然後去找別的原因。**
+**原因**：這個 taint 由 AKS 管理。透過 ARM（Azure Resource Manager，`az` 指令背後的 Azure 管理 API）改節點池，回 `Succeeded` 卻什麼都沒改；直接用 kubectl 改節點，會被 AKS 的 admission webhook 明確拒絕。只試第一種的話，很容易以為已經生效，轉而去找別的原因。
 
-**實務結論**:在 AKS 上用 spot,代價是每一個要跑在那顆節點上的東西都必須自己帶容忍——**你自己的工作負載可以加,但第三方 chart 與工具不一定給得了**。這是一項隱藏的相容性成本。
+**修法**：拔不掉，只能讓要跑在 spot 節點上的東西自己帶 toleration。自己的工作負載可以加，第三方 chart 與工具不一定給得了，像上一項的測試框架就是。在 AKS 上用 spot 之前，要先確認會用到的工具都能設定 toleration。
 
-### 地雷 8:`kubeProxyReplacement: false` 不代表 kube-proxy 在做事 {#mine-8}
+### 刪掉的 kube-proxy 一分多鐘後又回來了 {#mine-9}
 
-**症狀**:沒有症狀——這正是問題所在。在 `kubeProxyReplacement: false`、kube-proxy 好端端跑著的狀態下,**一般 pod 對 ClusterIP 的流量根本沒有經過它**([步驟 4](#step-4) 的封包計數器實測)。
-
-**根因**:
-
-```console
-KubeProxyReplacement:   False
-KubeProxyReplacement Details:
-  Status:               False
-  Socket LB:            Disabled
-  Services:
-  - ClusterIP:      Enabled          ← 就是這一行
-  - NodePort:       Disabled
-  - LoadBalancer:   Disabled
-  - externalIPs:    Disabled
-  - HostPort:       Disabled
-```
-
-`kubeProxyReplacement: false` 關掉的是 **NodePort、LoadBalancer、externalIPs、HostPort 加 socket LB**,**ClusterIP 一直是開的**。Cilium 掛在每個 pod veth 上的 tc BPF 程式在封包離開 pod 的網路命名空間那一刻就做完 DNAT,封包到達節點時目的地已經是後端 pod IP——`KUBE-SERVICES` 鏈當然一個字都比對不到。
-
-所以在一座還沒開 replacement 的 Cilium 叢集上,kube-proxy 實際負責的是**節點自己發起的流量**(hostNetwork pod、節點上的服務、kubelet)以及 NodePort 那幾類入口。
-
-**這會誤導兩種人**:以為「先不開 replacement 比較保守」的(保守的範圍比想像中小得多),和拿 iptables 規則數量當「kube-proxy 負載」指標的(**那些規則絕大多數是死的**)。
-
-### 地雷 9:刪掉 kube-proxy DaemonSet,受管控制面 80 秒後把它裝回來 {#mine-9}
+**症狀**：
 
 ```console
 $ kubectl -n kube-system delete ds kube-proxy
@@ -571,20 +724,13 @@ t+80s    kube-proxy   2   2   0   2   0   <none>   0s     ← 回來了
 t+100s   kube-proxy   2   2   2   2   2   <none>   21s    ← 而且已經跑起來
 ```
 
-**根因**:在受管 Kubernetes 上 kube-proxy 是受管附加元件,控制面的 reconciler 會把它補回來。刪除指令會成功、`kubectl get` 會說不存在,**一分多鐘之後它自己回來**——如果你在這中間下結論「移除成功」,就會得到相反的答案。
+**原因**：在受管 Kubernetes 上，kube-proxy 是受管附加元件，控制面會把它補回來。刪除後立刻檢查會看到 not found，在這段時間下結論「已經移除」就錯了。
 
-**修法**:官方給受管叢集的做法是把 DaemonSet 釘在一個**不存在的節點選擇器**上。那個標籤鍵取什麼名字都可以,唯一的要求是叢集裡沒有任何節點帶著它。
+**修法**：改用 nodeSelector patch，見[步驟 4](#step-4)。
 
-```console
-$ kubectl -n kube-system patch daemonset kube-proxy \
-    -p '{"spec":{"template":{"spec":{"nodeSelector":{"lab.local/no-kube-proxy":"true"}}}}}'
-```
+### kube-proxy 不在了，nat 表還有 120 條 `KUBE-*` {#mine-10}
 
-這個 patch **沒有**被 reconciler 改回去(觀察 125 秒,並且撐過一次停機重啟)。
-
-誠實記錄驗收的實際形狀:**DaemonSet 物件還在(而且刪不掉),但零個 pod、兩顆節點上零個行程**。這是受管叢集上「沒有 kube-proxy」能達到的最強狀態。
-
-### 地雷 10:kube-proxy 走了,它寫的規則不會跟著走 {#mine-10}
+**症狀**：kube-proxy 的 pod 都已經不在，節點的 nat 表行數卻沒變：
 
 ```console
 $ (kube-proxy 的 pod 早就不在了) iptables -t nat -S | wc -l
@@ -593,19 +739,13 @@ $ iptables -t nat -S | grep -c KUBE-
 120
 ```
 
-**根因**:kube-proxy 是使用者空間的行程,規則是它寫進 netfilter 的**持久狀態**。行程結束,規則留著。
+**原因**：規則是 kube-proxy 寫進核心 netfilter 的狀態，行程結束規則不會跟著消失。這些規則已經沒人維護，Service 增減不會再更新，但節點發出的封包仍然要走過那條線性鏈；如果哪天比對中一條指向已不存在 pod IP 的 DNAT，連線就會送到不存在的位址。
 
-這些規則現在是純粹的死重量:沒有人維護它們(Service 增減不會更新),但**每個從節點發出的封包仍然要走過那條線性鏈**。更糟的是它們現在是**過期的**——哪天有封包真的比對中一條指向已經不存在的 pod IP 的 DNAT,結果是連到黑洞。
+**修法**：每台節點各清一次，指令見[步驟 4](#step-4)。驗證時清完，system 節點剩 16 行、spot 節點剩 15 行，其中唯一的 `KUBE-KUBELET-CANARY` 是 kubelet 建的空鏈，不是 kube-proxy 留下的。停機重開後的新節點沒跑過 kube-proxy，不需要清。
 
-**修法**:
+### system 節點池縮不到 0 {#mine-11}
 
-```console
-$ iptables-save | grep -v KUBE- | iptables-restore
-```
-
-清完剩 16 行,其中只有一條 `KUBE-KUBELET-CANARY`(那是 kubelet 的空鏈,不是 kube-proxy 的)。
-
-### 地雷 11:AKS 的 system pool 不能縮到 0 {#mine-11}
+**症狀**：
 
 ```console
 $ az aks nodepool scale … -n spotpool --node-count 0
@@ -616,35 +756,35 @@ ERROR: (InvalidParameter) agentPoolProfile.count was 0. It must be greater or eq
        minCount:1 … 3) The node is a system pool.
 ```
 
-**system pool 最少一台。** 而那一台是隨需的([地雷 1](#mine-1)),收工時它是唯一停不掉的節點,要整座停下只能 `az aks stop`。
+**原因**：所有 AKS 叢集的 system pool 都最少一台，而這台一定是隨需節點（見[`--priority` 那一項](#mine-1)）。
 
-**後果**:「縮容到零」這個收尾方式在這座叢集上不存在,只剩 `az aks stop`。而那正好是一件沒驗證過的事(BYOCNI 叢集停機再開,CNI 會不會自己回來),於是**這個未驗證項目成了必經之路**。
+**修法**：要讓整座叢集的節點都停下，只能 `az aks stop`。BYOCNI 叢集停機再開機後 Cilium 會自己回來，見[步驟 6](#step-6)。
 
-**處理方式**:既然必經,就當場驗證完整的停機、開機、驗收循環,不把風險留到下一次。
+## 想一想
 
-## 帶得走的東西
+- 一座 Cilium 叢集的 `kubeProxyReplacement` 是 `false`。有人提議用節點上 `KUBE-SERVICES` 鏈的封包計數，來觀察各個 Service 的流量。pod 對 pod 的 Service 流量會出現在這些計數裡嗎？哪些流量會？
+- 你在 AKS 上把 `kubeProxyReplacement` 改成 `true`、把 kube-proxy 拿掉之後，cilium-agent 一直 CrashLoopBackOff，整座叢集的 Service 都不通。你會先檢查 values 的哪兩行，為什麼少了它們 agent 就起不來？
+- 一座新建的 BYOCNI 叢集裝完 Cilium，節點都 Ready，但 CoreDNS 解析失敗，pod IP 是 `10.0.x.x`。你會先比對哪兩段網段？改好設定後，已經在跑的 pod 還要做什麼？
 
-- **動手換掉一個元件之前,先量清楚它現在到底在做什麼。** 今天最大的發現不是「換掉 kube-proxy 之後如何」,是「換掉之前它就已經沒在做那件事了」——而看出這件事只需要 `iptables -t nat -Z` 加兩輪 20 次請求。**有規則不代表規則被用到,唯一不會騙人的是封包計數器。**
-- **設定的預設值是為別人的環境寫的。** Cilium 的預設 pod 網段吃掉 AKS 的 Service 網段、cilium-cli 的預設版本落後它自己回報的 stable 一版、測試框架的 `--tolerations` 沒套到自己的 DaemonSet。三件都不是 bug,都是「兩邊各自合理的預設值撞在一起」。
-- **受管 Kubernetes 加自管資料平面,成本在交界處。** 第一個節點池不能是 spot、kube-proxy 刪了會自己回來、system pool 不能縮到 0、spot 的 taint 拔不掉——四件都跟 Cilium 無關,但四件都要處理。**BYOCNI 的真實成本不在 CNI,在這些邊界。**
-- **量不出來就說量不出來。** 延遲那一項有數字、有表格,但負載不對等而且雜訊大於訊號,所以不能宣稱。同一組數據裡倒是有一個乾淨的結論(socket LB 的翻譯成本量不到),**而那個結論比原本想證明的更有意思。**
-- **請求量與實際用量兩個方向都會錯,而低估更難發現。** 高估讓 pod 排不進去(看得見),低估讓排程器以為節點還有餘裕(看不見,直到開始換頁)。
+## 小結
+
+BYOCNI 叢集在建立時就決定由你自己裝 CNI，沒裝之前節點 `NotReady`，需要 pod 網路的元件都排不上去。裝 Cilium 時，pod 網段要自己指定，避開 AKS 的 Service 網段；kube-proxy 參數裡的 `--cluster-cidr` 就是叢集原本假設的那一段。即使 `kubeProxyReplacement` 是 `false`，一般 pod 打 ClusterIP 也已經由 Cilium 在 veth 上的 tc 程式翻譯，kube-proxy 只處理節點自己發起的流量和 NodePort 這類入口；要知道某次翻譯是誰做的，看 iptables 的封包計數器，不要看規則或 map 裡有沒有資料。開啟 replacement 後，翻譯移到 `connect()` 當下的 socket LB，每條連線只查一次 map。在 AKS 上拿掉 kube-proxy，要先補 `k8sServiceHost`、`k8sServicePort`，再用 nodeSelector patch 讓它排不到節點，最後清掉每台節點上殘留的 iptables 規則。
 
 ## 延伸閱讀
 
-想往下深挖,從這幾份開始:
+想再深入，可以從這幾份開始：
 
-- **[Cilium 的 kube-proxy replacement](https://docs.cilium.io/en/stable/network/kubernetes/kubeproxy-free/)** —— 官方說明 `kubeProxyReplacement` 實際開關了哪些 Service 類型、socket LB 是整套機制的基礎,以及移除 kube-proxy 之後為什麼必須給 `k8sServiceHost`/`k8sServicePort`,對得上步驟 4。
-- **[AKS 的 BYOCNI 說明](https://learn.microsoft.com/en-us/azure/aks/use-byo-cni)** —— `--network-plugin none` 的建立方式,以及「裝 CNI 之前節點會是 `NotReady`」那段輸出跟本課逐字相同;它也明講 BYOCNI 之下 pod 的 IP 配發完全由你選的 CNI 負責。
-- **[Cilium 的 cluster-pool IPAM](https://docs.cilium.io/en/stable/network/concepts/ipam/cluster-pool/)** —— 地雷 4 的一手來源:官方文件自己在疑難排解段把 `10.0.0.0/8` 這個預設 pod CIDR 當成網段衝突的警語。
+- **[Cilium 的 kube-proxy replacement](https://docs.cilium.io/en/stable/network/kubernetes/kubeproxy-free/)** —— 官方說明 `kubeProxyReplacement` 實際開關了哪些 Service 類型、socket LB 是整套機制的基礎，以及移除 kube-proxy 之後為什麼必須給 `k8sServiceHost`/`k8sServicePort`，對得上步驟 4。
+- **[AKS 的 BYOCNI 說明](https://learn.microsoft.com/en-us/azure/aks/use-byo-cni)** —— `--network-plugin none` 的建立方式，以及「裝 CNI 之前節點會是 `NotReady`」那段輸出跟本課相同；它也明講 BYOCNI 之下 pod 的 IP 配發完全由你選的 CNI 負責。
+- **[Cilium 的 cluster-pool IPAM](https://docs.cilium.io/en/stable/network/concepts/ipam/cluster-pool/)** —— 網段衝突那一項的一手來源：官方文件自己在疑難排解段把 `10.0.0.0/8` 這個預設 pod CIDR 當成網段衝突的警語。
 
 ## 下一步
 
-資料平面換完了,但今天只證明了它「能通」——所有東西都還是彼此暢通無阻。Cilium 真正的價值在於它能**決定誰不能通**,而且判斷可以做到 HTTP 方法這一層。
+資料平面換好了，但到目前為止只證明了它能通，叢集裡所有東西彼此都連得到。Cilium 更重要的用途是決定誰不能通，而且可以判斷到 HTTP 方法這一層。
 
-Day 8 寫網路政策:從命名空間隔離、埠限制,一路到「同一顆 pod 對同一個服務,GET 通過而 POST 被擋」。而那一天有一個對照特別值得等——**同樣是「工作負載連到不該連的地方」這件事,[Day 4](sprint2-day4-falco-custom-rules.md) 用 Falco 偵測、[Day 6](sprint2-day6-tetragon-enforcement.md) 用 Tetragon 殺行程,Day 8 則是直接丟封包。三種做法的代價完全不同。**
+Day 8 寫網路政策：從命名空間隔離、埠限制，一路做到「同一顆 pod 對同一個服務，GET 通過、POST 被擋」。同樣是「工作負載連到不該連的地方」，[Day 4](sprint2-day4-falco-custom-rules.md) 用 Falco 偵測，[Day 6](sprint2-day6-tetragon-enforcement.md) 用 Tetragon 終止行程，Day 8 則在網路層丟棄不允許的連線，或由 Envoy 在 HTTP 層回覆拒絕，三種做法的代價可以放在一起比較。
 
 ---
 
 !!! quote ""
-    Cilium 標誌為 Cilium 專案之官方資產(CNCF artwork),此處作社群教學用途。
+    Cilium 標誌為 Cilium 專案之官方資產（CNCF artwork），此處作社群教學用途。
