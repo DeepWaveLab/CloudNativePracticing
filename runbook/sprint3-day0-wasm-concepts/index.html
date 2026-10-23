@@ -1,0 +1,3357 @@
+
+<!doctype html>
+<html lang="zh-TW" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="雲原生實作課程：GPU 排程、eBPF 與執行期安全、WebAssembly、服務網格與機密運算、遊戲伺服器平台">
+      
+      
+      
+        <link rel="canonical" href="https://deepwavelab.github.io/CloudNativePracticing/runbook/sprint3-day0-wasm-concepts/">
+      
+      
+        <link rel="prev" href="../sprint2-day10-decision-matrix/">
+      
+      
+        <link rel="next" href="../sprint3-day1-three-generations/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Day 0 · wasm 是什麼 - Cloud Native Lab Course</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/terminal.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#day-0-wasm-kubernetes" class="md-skip">
+          跳轉到
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="頁首">
+    <a href="../.." title="Cloud Native Lab Course" class="md-header__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Cloud Native Lab Course
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Day 0 · wasm 是什麼
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換深色模式"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="切換深色模式" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換淺色模式"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="切換淺色模式" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜尋" placeholder="搜尋" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="搜尋">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="分享" aria-label="分享" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="清除" aria-label="清除" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜尋引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="標籤" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  首頁
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint1-day0-azure-aks-foundation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 1 · GPU 排程三部曲
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint2-day0-ebpf-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 2 · eBPF 與執行期安全
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 3 · WebAssembly
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint4-day0-mesh-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 4 · 服務網格與機密運算
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint5-day0-game-server-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 5 · 遊戲伺服器平台
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="導覽列" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Cloud Native Lab Course" class="md-nav__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Cloud Native Lab Course
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首頁
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    首頁
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 3 · WebAssembly 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 4 · 服務網格與機密運算 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint5/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 5 · 遊戲伺服器平台 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day0-azure-aks-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 環境建置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day1-kai-queue-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · KAI 安裝與 Queue 基礎
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day2-gang-scheduling-preemption/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Gang Scheduling 與搶占
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day3-hami-memory-isolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · HAMi 安裝與 VRAM 用量限制
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day4-hami-kai-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · HAMi 與 KAI 整合
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day5-hami-webui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · HAMi-WebUI 觀測介面
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day6-dra-simulated-devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · DRA 概念與模擬裝置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day7-dra-aks-real-gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · DRA 配置實體 GPU
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day8-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · Sprint 1 總結
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day0-ebpf-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · eBPF 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day1-bpftrace-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · bpftrace 三支經典工具
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day2-bpftrace-kubernetes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · 把核心事件接回 Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day3-falco-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Falco 安裝與預設規則
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day4-falco-custom-rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · 自訂規則、誤報調校與告警路由
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day5-tetragon-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Tetragon 與 TracingPolicy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day6-tetragon-enforcement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · 從偵測到攔截
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day7-cilium-kubeproxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Cilium 與 kube-proxy replacement
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day8-cilium-network-policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · CiliumNetworkPolicy（L3/L4 → L7）
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day9-hubble/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Hubble 可觀測性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 綜合：四套工具的分工
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 3 · WebAssembly
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 3 · WebAssembly
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · wasm 是什麼
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · wasm 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        兩個直覺做法各卡在哪裡
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wasm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        wasm 是什麼
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="wasm 是什麼">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一種編譯出來的格式
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        預設什麼都不能做
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wasi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WASI：讓不同宿主提供一致的系統介面
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kubernetes 怎麼執行 wasm
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Kubernetes 怎麼執行 wasm">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一顆 pod 實際是誰啟動的
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#runtimeclass-pod-shim" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RuntimeClass：讓 pod 指定要用哪個 shim
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gvisor-kata-runtimeclass" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gVisor 與 Kata 用的也是 RuntimeClass
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        兩條已經停止的路
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wasm_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        wasm 適合什麼、不適合什麼
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#three-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶著三個問題走完這個 sprint
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="帶著三個問題走完這個 sprint">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#health-method" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        怎麼判斷一個開源專案還有人維護
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        想一想
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        小結
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day1-three-generations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · RuntimeClass 與節點執行路徑
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day2-wasmcloud/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · wasmCloud 與元件模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day3-wasmcloud-distributed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · wasmCloud 分散式模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day4-wasmedge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · WasmEdge 執行期
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day5-cost-measurement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · 執行時間、記憶體與量測範圍
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day6-spinkube-shim/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · SpinKube（上）：shim 佈建
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day7-spinkube-operator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · SpinKube（下）：operator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day8-reversibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · SpinKube 移除與節點殘留
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day9-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · 依工作負載選擇 Wasm 路線
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 4 · 服務網格與機密運算
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 4 · 服務網格與機密運算
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1" id="__nav_5_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part 1 · 服務網格（Day 0–4）
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part 1 · 服務網格（Day 0–4）
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day0-mesh-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 服務網格與入口閘道的三層地圖
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day1-envoy-gateway/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · Envoy Gateway 與 HTTP/3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day2-istio-ambient/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Istio ambient：服務間 mTLS 與連線限制
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day3-cilium-mesh/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Cilium mesh：WireGuard 加密與 L7
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day4-istio-vs-cilium/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · Istio 與 Cilium 比較
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part 2 · 機密運算（Day 5–9）
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part 2 · 機密運算（Day 5–9）
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day5-confidential-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · 機密運算的威脅模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day6-kata-sandboxing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · Kata Pod Sandboxing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day7-katacc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · kata-cc：SEV-SNP 機密硬體
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day8-attestation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 遠端證明：MAA、SKR 與金鑰釋放
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day9-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · 機密容器的需求與驗證範圍
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 5 · 遊戲伺服器平台
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 5 · 遊戲伺服器平台
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day0-game-server-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 遊戲伺服器平台概念
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day1-agones-first-gameserver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · Agones 第一顆 GameServer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day2-fleet-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Fleet 生命週期
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day3-allocation-autoscaler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Allocation 與 autoscaler
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day4-quilkin-udp-proxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · Quilkin UDP proxy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day5-nakama-postgres/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Nakama 與 PostgreSQL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day6-matchmaking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · Matchmaking 串接
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day7-python-client-e2e/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Python client 端到端
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day8-observability-resilience/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 觀測與韌性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day9-unity-client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Unity client 與 relay server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 遊戲伺服器平台總結
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        兩個直覺做法各卡在哪裡
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wasm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        wasm 是什麼
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="wasm 是什麼">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一種編譯出來的格式
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        預設什麼都不能做
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wasi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WASI：讓不同宿主提供一致的系統介面
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kubernetes 怎麼執行 wasm
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Kubernetes 怎麼執行 wasm">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一顆 pod 實際是誰啟動的
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#runtimeclass-pod-shim" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RuntimeClass：讓 pod 指定要用哪個 shim
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gvisor-kata-runtimeclass" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gVisor 與 Kata 用的也是 RuntimeClass
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        兩條已經停止的路
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wasm_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        wasm 適合什麼、不適合什麼
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#three-questions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        帶著三個問題走完這個 sprint
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="帶著三個問題走完這個 sprint">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#health-method" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        怎麼判斷一個開源專案還有人維護
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        想一想
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        小結
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="day-0-wasm-kubernetes">Day 0: wasm 是什麼——編譯目標、能力沙箱與在 Kubernetes 的執行路徑<a class="headerlink" href="#day-0-wasm-kubernetes" title="Permanent link">&para;</a></h1>
+<p><img align="right" alt="WebAssembly 官方標誌" src="../../assets/logos/webassembly-icon-color.svg" width="95" /></p>
+<p>假設你在做一套電商 SaaS，一個大客戶提出要求：「訂單成立前，要先跑我們自己的風控規則。規則是商業機密，不方便交給你們實作。」換句話說，你要在自己的下單流程裡，執行一段不是你們寫的程式。</p>
+<p>前一章比較程式執行中的偵測與攔截，這一章改看執行外部程式時，如何限制它能使用的權限。從這個需求出發，先介紹 WebAssembly（簡稱 wasm）是什麼、為什麼它適合執行別人寫的程式，再看 Kubernetes 怎麼把一顆 pod 交給 wasm 執行。這一章不碰叢集，Day 1 才會在真的節點上把這條路建出來。讀完之後，遇到「要在自己的平台上執行別人寫的程式」這類需求，你能判斷 wasm 該不該列入候選，也知道要讓 Kubernetes 用 wasm 執行一顆 pod，叢集裡和節點上各要宣告什麼。</p>
+<h2 id="_1">兩個直覺做法各卡在哪裡<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<p>第一個直覺是請客戶自己架一個服務，你在下單流程裡呼叫它。這樣做得到，但規則是在客戶那邊跑的：每張訂單多一次跨網路的往返，客戶也得自己部署服務、維持它不中斷。接的客戶一多，你下單流程的延遲和故障率，就取決於一排你管不到的服務。</p>
+<p>第二個直覺是把客戶的程式碼收進來，包成容器自己跑。這省掉了網路往返，但帶來兩個問題。第一，要替不受信任的程式設計檔案、網路與資源限制。第二，如果沿用每個客戶一個常駐服務的設計，幾百個客戶就需要管理幾百個服務，實際規則卻可能只執行幾秒鐘。容器可以限制權限，也可以按需啟動，但你仍要設計這套管理方式。</p>
+<p>另一種做法是把規則載入自己的服務，由服務只提供必要的呼叫介面。wasm 適合拿來評估這種外掛需求：客戶的程式在你控制的執行環境裡運作，存取外部資源時必須經過你提供的介面。</p>
+<h2 id="wasm">wasm 是什麼<a class="headerlink" href="#wasm" title="Permanent link">&para;</a></h2>
+<h3 id="_2">一種編譯出來的格式<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h3>
+<p>wasm 一開始是為瀏覽器設計的。網頁想跑運算量大的程式，JavaScript 不夠快。早期的嘗試叫 asm.js：把 JavaScript 限縮成一個嚴格的子集，讓瀏覽器的引擎可以像處理編譯語言那樣最佳化它。這個做法能用，但它終究是文字格式的 JavaScript。WebAssembly 把同一個想法做成正式的二進位格式。</p>
+<p>實際開發通常用 Rust、Go、C 等語言，再編譯成 wasm 格式的檔案，這個檔案叫 <strong>wasm 模組</strong>。它也是一種編譯目標：編譯器產生的不是只適用某一款 CPU 的執行檔，而是交給 wasm 執行環境處理的指令。所以回到開場的需求，要問的是客戶的規則能不能編譯成 wasm，而不是客戶要不要學一種新語言。</p>
+<p>wasm 的標準在 W3C 的社群群組與工作群組裡制定，參與者包含各主要瀏覽器的代表，不屬於單一廠商。</p>
+<h3 id="_3">預設什麼都不能做<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h3>
+<p>瀏覽器不能讓一個網頁隨意讀寫你電腦上的檔案。所以 wasm 從一開始就跑在記憶體安全的沙箱裡，而且預設沒有任何能力：不能開檔、不能連網路，連環境變數都讀不到。載入並執行 wasm 模組的那個程式叫<strong>宿主</strong>（host），模組要做什麼，都得由宿主明確交給它。在瀏覽器裡，宿主是瀏覽器；在開場的例子裡，宿主就是你的下單服務。</p>
+<p>下面這張圖畫的是開場那個需求改用 wasm 之後的樣子：三個客戶的規則載入同一個服務行程，各自在一個沙箱裡。</p>
+<p><img alt="你的下單服務是一個行程，裡面載入客戶 A、B、C 三個 wasm 模組，各自在一個沙箱裡，和下單流程之間只有訂單資料進、判定結果出這兩件事；行程外的檔案系統和網路沒有授權給模組，模組碰不到" src="../../assets/diagrams/s3d0-sandbox.svg" /></p>
+<p>我們可以從圖上看到兩件事：</p>
+<ol>
+<li>每個模組只拿到下單流程交給它的兩件事：訂單資料進、判定結果出。模組要開檔或連網路，宿主沒有授權就做不到。</li>
+<li>三個客戶的模組在同一個行程裡，不需要每個客戶各開一顆 pod。呼叫模組跟呼叫自己程式裡的函式一樣，不用經過網路。</li>
+</ol>
+<p>這種設計讓宿主按介面限制規則能存取的資料。不過沙箱本身不替你決定 CPU、記憶體與執行時間上限；客戶規則如果一直不結束，宿主仍需要限制與中斷機制。</p>
+<h3 id="wasi">WASI：讓不同宿主提供一致的系統介面<a class="headerlink" href="#wasi" title="Permanent link">&para;</a></h3>
+<p>沙箱和授權的規則屬於 wasm 本身，不管宿主是誰都一樣。純運算的 wasm 模組可以由伺服器上的宿主直接執行。若還需要檔案或網路等外部能力，可以使用一組標準的系統介面，讓不同宿主以一致的方式提供它們，這組介面叫 <strong>WASI</strong>（WebAssembly System Interface）。官方的描述是：</p>
+<blockquote>
+<p>WASI 應用執行在一個<strong>能力式的沙箱</strong>裡：一個 wasm 模組或元件<strong>啟動時不具備任何環境權限，只能做宿主明確授予的事</strong>。</p>
+</blockquote>
+<p>所以 WASI 定義的是宿主可以交出哪些能力、怎麼交出去。官方的目標是讓同一套介面從瀏覽器、雲端到嵌入式裝置都能用。</p>
+<p>作業系統並沒有因此變成宿主。載入模組的仍是下單服務或 wasm 執行期；由它實作 WASI 介面，再按授權使用作業系統的功能。</p>
+<p>這個 sprint 不展開編譯器與記憶體實作。平台這一側需要知道的是：它是一種編譯出來的格式，預設沒有任何能力，能做什麼由宿主決定。</p>
+<h2 id="step-2">Kubernetes 怎麼執行 wasm<a class="headerlink" href="#step-2" title="Permanent link">&para;</a></h2>
+<p>開場的例子是把 wasm 模組載進自己的服務。這個 sprint 主要看另一種用法：把 wasm 模組當成工作負載交給 Kubernetes，跟一般的 pod 一樣部署、排程。</p>
+<h3 id="pod">一顆 pod 實際是誰啟動的<a class="headerlink" href="#pod" title="Permanent link">&para;</a></h3>
+<p>多數人對 Kubernetes 工作負載的印象是這樣：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>工作負載 = 容器 = OCI 映像 + Linux 的命名空間與 cgroup
+</span></code></pre></div>
+<p>這裡的 OCI 是容器映像等格式使用的標準；Linux 命名空間把行程看到的系統資源分開，cgroup 則用來限制與統計資源。這些是一般容器常用的機制。但 Kubernetes 並沒有規定 pod 一定要是 Linux 容器。啟動一顆 pod 時，各個程式的分工如下：</p>
+<ol>
+<li><strong>kubelet</strong> 是每個節點上負責啟動 pod 的程式。它不自己建立容器，而是透過 <strong>CRI</strong>（Container Runtime Interface，kubelet 跟容器執行期之間的標準介面）請 containerd 去做。</li>
+<li><strong>containerd</strong> 是節點上管理容器的程式。它也不直接把工作負載跑起來，而是啟動一支叫 <strong>shim</strong> 的程式，由 shim 負責執行。</li>
+<li>一般的 Linux 容器，shim 是 <code>containerd-shim-runc-v2</code>，它再呼叫 <strong>runc</strong> 建立命名空間與 cgroup。wasm 的 shim 不呼叫 runc，整個 wasm 執行期就包在 shim 裡面，直接執行 wasm 模組。wasm 這條路一樣會替 pod 建立 cgroup，資源限制的做法跟一般容器相同。</li>
+</ol>
+<p>本課使用 kubelet 與 containerd 既有的介面，再加入相容的 shim 與對應設定。能否使用仍取決於版本與工作負載格式。</p>
+<h3 id="runtimeclass-pod-shim">RuntimeClass：讓 pod 指定要用哪個 shim<a class="headerlink" href="#runtimeclass-pod-shim" title="Permanent link">&para;</a></h3>
+<p>containerd 如何選擇 shim？Kubernetes 用一種叫 <strong>RuntimeClass</strong> 的資源來指定。這個 API 在 v1.20 就已經是 stable，現在的叢集都有。一個 RuntimeClass 長這樣：</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">node.k8s.io/v1</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RuntimeClass</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nt">metadata</span><span class="p">:</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">myclass</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="nt">handler</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">myconfiguration</span><span class="w">   </span><span class="c1"># 對應到 CRI 那一側的設定名稱</span>
+</span></code></pre></div>
+<p><code>handler</code> 是一個名字，對應到節點上 containerd 設定檔裡的一段。</p>
+<p>下面這張圖把一顆 pod 在節點上被啟動的完整路徑畫出來：</p>
+<p><img alt="一個節點上，kubelet 透過 CRI 請 containerd 啟動 pod；containerd 依 RuntimeClass 的 handler 挑一個 shim：containerd-shim-runc-v2 交給 runc 跑一般 Linux 容器，gVisor 或 Kata 的 shim 跑沙箱化的容器，wasm shim 內含 wasm 執行期，直接執行 wasm 模組，一樣會建立 cgroup" src="../../assets/diagrams/s3d0-pod-path.svg" /></p>
+<p>圖中從 kubelet 到 containerd 的路徑相同，差別在 containerd 選擇哪個 shim：一般容器經由 runc 啟動，wasm 則由 shim 裡的執行期執行。</p>
+<p>Kubernetes 官方文件寫的 handler 設定路徑是這個：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>[plugins.&quot;io.containerd.grpc.v1.cri&quot;.containerd.runtimes.${HANDLER_NAME}]
+</span></code></pre></div>
+<p>上面這一行是 containerd 1.x 的寫法。handler 必須對應到節點實際載入的設定，不能只複製路徑；設定格式與解析結果的核對方式，見 Day 1 的<a href="../sprint3-day1-three-generations/#step-3">「看節點上的 containerd 設定」</a>。</p>
+<p>把整條對應關係畫成圖，上半是叢集裡的物件，下半是節點上的設定：</p>
+<p><img alt="上半是叢集：Pod 的 runtimeClassName 寫 wasmedge，指向名為 wasmedge 的 RuntimeClass，它的 handler 是 wasmedge。下半是節點：containerd 設定檔裡要有同名的 runtimes.wasmedge 一段，指向 shim 執行檔 containerd-shim-wasmedge-v1。節點那一半每一顆節點都要做" src="../../assets/diagrams/s3d0-runtimeclass.svg" /></p>
+<p>圖上用的名字取自 Day 4 的 WasmEdge（一個 wasm 執行期）。我們可以看到，宣告分在兩個地方：</p>
+<ul>
+<li><strong>叢集裡</strong>：建一個 RuntimeClass，pod 用 <code>runtimeClassName</code> 指定它。這只要做一次。</li>
+<li><strong>節點上</strong>：containerd 設定檔裡要有一段和 <code>handler</code> 同名的設定，指向一支已經放到節點上的 shim 執行檔。改完設定要重啟 containerd 才會生效。每一顆要跑這類 pod 的節點都要做。</li>
+</ul>
+<p>兩邊的名字對不上，pod 就起不來。Day 1 會分別看「handler 對得上」和「handler 不存在」兩種情況各長什麼樣子。</p>
+<h3 id="gvisor-kata-runtimeclass">gVisor 與 Kata 用的也是 RuntimeClass<a class="headerlink" href="#gvisor-kata-runtimeclass" title="Permanent link">&para;</a></h3>
+<p>RuntimeClass 不是為 wasm 新加的。Kubernetes 官方文件舉的用途，是讓需要更強隔離的 pod 改用 gVisor、Kata Containers 這類執行期；例如設定了 <code>gvisor</code> RuntimeClass 的 pod，會以 gVisor 的 <code>runsc</code> 執行。</p>
+<p>wasm 用的是同一套機制：RuntimeClass、shim 介面、節點設定檔的位置都一樣，換掉的只有 shim。要在 Kubernetes 上跑 wasm，平台這一側要學的是怎麼裝 shim、怎麼改節點設定，Kubernetes 這邊沒有新的概念。</p>
+<h3 id="_4">兩條已經停止的路<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
+<p>搜尋 wasm 和 Kubernetes 的資料時，會找到兩種已經停止的做法的教學，它們的官網和文章都還在線上。下表把它們跟現行做法放在一起：</p>
+<table>
+<thead>
+<tr>
+<th>做法</th>
+<th>是什麼</th>
+<th>現況</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Krustlet</strong></td>
+<td>用 Rust 實作、用來執行 wasm 的 kubelet，繞過 CRI，直接向 API server 註冊成節點</td>
+<td>最後發版於 2021 年，2022 年仍有提交，2023 年 README 標示不再積極維護；從未發過正式版</td>
+</tr>
+<tr>
+<td><strong>AKS 的 WASI node pool</strong>（2021–2025）</td>
+<td>雲廠商替你把 shim 裝好，包成受管的預覽功能</td>
+<td>2025-05-05 起無法再建立，微軟改推薦 SpinKube（在 Kubernetes 上執行 wasm 的開源專案）</td>
+</tr>
+<tr>
+<td><strong>RuntimeClass + containerd shim</strong></td>
+<td>節點裝 shim、叢集宣告 RuntimeClass，跟 gVisor／Kata 同一條路</td>
+<td>現行做法</td>
+</tr>
+</tbody>
+</table>
+<p>Krustlet 以 Rust 實作 kubelet 來執行 wasm，WASI node pool 依賴雲廠商的受管功能，兩者都已經停止；現行做法只用 Kubernetes 已經有的 RuntimeClass。Day 1 會實際確認前兩條今天的狀態。</p>
+<p>這個 sprint 會操作三條路線：wasmCloud（一個自帶執行環境的 wasm 應用平台）、手動安裝 WasmEdge 的 shim、由 SpinKube 的 runtime-class-manager 替節點安裝 shim。其中 wasmCloud 不走 RuntimeClass：它在一般的容器裡跑自己的 host，再把多個 wasm 程式（wasmCloud 稱為「元件」）載進同一顆 host pod，比較接近開場那張圖的做法。WasmEdge 和 SpinKube 走的則是 RuntimeClass 加 shim。</p>
+<h2 id="wasm_1">wasm 適合什麼、不適合什麼<a class="headerlink" href="#wasm_1" title="Permanent link">&para;</a></h2>
+<p>常聽到的考慮 wasm 的理由有四個：</p>
+<ul>
+<li><strong>冷啟動</strong>：常見的說法是 wasm 啟動比容器快。但用 containerd 執行時，wasm 一樣要經過 shim 與 cgroup 的建立，Day 5 會用同一支程式比較 <code>ctr run --rm</code> 的耗時；這個量測還包含執行與清理，不能直接視為純啟動時間。</li>
+<li><strong>產物大小</strong>：應用可編成 wasm 模組，不必附完整 Linux 使用者空間；部署時仍可能包成 OCI 映像，Day 4 會比較不同打包方式。</li>
+<li><strong>單節點密度</strong>：同樣的記憶體能放下幾個租戶。Day 5 會量同一支程式在兩邊的記憶體用量。</li>
+<li><strong>跨架構</strong>：同一個模組在 amd64 與 arm64 上都能跑，不用分別編譯。</li>
+</ul>
+<p>產物大小與跨架構，本課沒有實測。</p>
+<p>截至 2026-08，下列情況不適合用 wasm：</p>
+<ul>
+<li><strong>依賴完整 POSIX 介面的工作負載。</strong> POSIX 是一組常見的作業系統介面規範；WASI 不保證提供現有 Linux 程式依賴的全部介面。</li>
+<li><strong>要跑現成的二進位檔。</strong> 沒有原始碼，就編譯不成 wasm。</li>
+<li><strong>依賴成熟生態系的工作負載。</strong> 函式庫、除錯工具、可觀測性整合都還不完整，跟容器差距很大。</li>
+<li><strong>需要長期穩定的技術基礎。</strong> 這個生態系汰換得很快：Krustlet 與 AKS 的 WASI node pool 在五年內先後停止，現行做法裡也有一個關鍵元件出現停滯的跡象，Day 6–8 會實測。</li>
+</ul>
+<p>整理起來，最典型的使用時機是：系統要執行不是你們自己寫的程式，例如開放客戶自訂規則、讓第三方開發外掛，又不能給它完整的權限。開場那個風控規則就是這種情況。遇到「這段邏輯我們自己寫，你們負責執行」這類要求時，除了另架服務和包成容器，wasm 也是一個選項。這門課介紹它能做什麼、邊界在哪裡，不建議把既有的工作負載搬過去。</p>
+<h2 id="three-questions">帶著三個問題走完這個 sprint<a class="headerlink" href="#three-questions" title="Permanent link">&para;</a></h2>
+<p>這個 sprint 最後要替你自己的環境回答要不要用 wasm。判斷用的三個問題先列在這裡，後面每一章的實測都在替它們收集資料：</p>
+<ol>
+<li><strong>wasm 工作負載要不要看起來跟一般的 Kubernetes 工作負載一樣？</strong> 也就是 Deployment、Service、<code>kubectl</code> 那一套能不能照用。三條路線的答案不同，Day 2–8 逐條驗證。</li>
+<li><strong>你的動機是不是冷啟動或部署密度？</strong> 「wasm 比容器快、比容器省」這個說法，Day 5 用同一支程式、同一顆節點量。</li>
+<li><strong>你選的工具明年還有人維護嗎？</strong> 方法在下一節，每條路線最後一天各查一次。</li>
+</ol>
+<h3 id="health-method">怎麼判斷一個開源專案還有人維護<a class="headerlink" href="#health-method" title="Permanent link">&para;</a></h3>
+<p>下面五項可以拿來查任何工具，其中第 2 項要配著第 4 項一起看：</p>
+<ol>
+<li><strong>治理狀態</strong>：在哪個基金會的哪個階段，有沒有封存或遷移的跡象。GitHub repo 的 <code>archived</code> 欄位比官網可靠：官網要有人動手才會關掉，封存只要按一個按鈕。</li>
+<li><strong>release 節奏，配著第 4 項讀</strong>：只看最後發版日期，會把順序排錯。只依賴穩定介面的元件，三年沒發版也不一定有問題；跟著快速變動的介面走的元件（例如 containerd 的設定結構），每個月發版也可能跟不上。</li>
+<li><strong>default branch 上最後一筆不是機器人送的 commit，加上近 13 週的逐週分布</strong>：不要看 GitHub 的 <code>pushed_at</code>，dependabot 這類自動升級工具推到自己分支的 commit 也會更新它。也不要只看總和，要看有沒有連續好幾週是零。</li>
+<li><strong>它依賴哪些介面，那些介面變動多快</strong>：這一項決定第 2 項怎麼解讀。</li>
+<li><strong>下游採用的第一手證據</strong>：雲廠商的文件、實際的使用量，而不是專案官網自己列的採用名單。另一個少有人用的訊號：一個每次都會重現的 bug 在上游放了多久沒人處理，可以看出那條路徑實際有多少人在用，比 GitHub 的星星數更能說明問題。</li>
+</ol>
+<p>連續幾週是零的判讀要保守：七、八週沒有 commit 可能只是暑假，要判定成趨勢，至少隔一季再查一次。</p>
+<h2 id="_5">想一想<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<ul>
+<li>一家 CI 平台想讓使用者上傳自訂的建置步驟，這些步驟要用 <code>apt-get</code> 安裝套件、呼叫現成的編譯器。wasm 適合拿來執行這些步驟嗎？為什麼？</li>
+<li>同事在叢集裡建了一個 <code>handler</code> 為 <code>spin</code> 的 RuntimeClass，pod 也指定了它，卻一直起不來。他確認過 shim 執行檔已經放在節點上。你會先請他檢查哪兩件事？</li>
+<li>你在評估一個 wasm 相關的 operator：GitHub 顯示 <code>pushed_at</code> 是上週，近一年有三百多個 commit，官網列了十家採用的公司。這些資料夠不夠判斷它還有人維護？還要查什麼？</li>
+</ul>
+<h2 id="_6">小結<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
+<p>wasm 是一種可供不同宿主載入的編譯目標；它不會因為能執行程式，就自動取得讀檔、連線等系統權限。WASI 為這些能力提供標準介面，宿主仍要決定授予什麼，並設定資源限制。在 Kubernetes 上，RuntimeClass 選擇 handler，節點的設定再把 handler 接到對應的 shim；執行檔、設定與必要的隔離環境都要準備好。評估工具時，除了看程式是否能跑，也要看節點怎麼管理、故障如何追查，以及所依賴版本的維護狀況。</p>
+<h2 id="_7">延伸閱讀<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h2>
+<p>想再深入，可以從這幾份開始：</p>
+<ul>
+<li><strong><a href="https://webassembly.org/">WebAssembly 官方站台</a></strong> —— 「可攜的編譯目標」「記憶體安全的沙箱執行環境」的出處，也說明了標準是在 W3C 的社群群組與工作群組裡制定的。</li>
+<li><strong><a href="https://wasi.dev/">WASI 官方站台</a></strong> —— 能力式沙箱那段描述的一手來源：模組啟動時不具備任何環境權限，只能做宿主明確授予的事。</li>
+<li><strong><a href="https://kubernetes.io/docs/concepts/containers/runtime-class/">Kubernetes RuntimeClass 文件</a></strong> —— 「Kubernetes 怎麼執行 wasm」那一節的依據：v1.20 起 stable、<code>handler</code> 如何對應到 containerd 設定檔的 runtimes 區段，以及官方對「在效能與安全之間取捨」這個用途的說明。</li>
+<li><strong><a href="https://gvisor.dev/docs/user_guide/quick_start/kubernetes/">gVisor 的 Kubernetes 快速上手</a></strong> —— 設定了 <code>gvisor</code> RuntimeClass 的 pod 會以 <code>runsc</code> 執行，可以對照 wasm 用的是同一套機制。</li>
+<li><strong><a href="https://component-model.bytecodealliance.org/">Component Model 指南</a></strong> —— 讓不同語言編譯出來的 wasm 互相呼叫、組合的元件模型；Day 2 的 wasmCloud 用到「元件」這個詞時，可以回來查。</li>
+</ul>
+<h2 id="_8">下一步<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h2>
+<p>這一章講的機制都還沒碰到叢集。<a href="../sprint3-day1-three-generations/">Day 1</a> 把 RuntimeClass 真的建到叢集裡，並逐一確認 Krustlet、AKS 的 WASI node pool 與現行的 RuntimeClass 加 shim 這三條路今天的狀態，包括對已經停止的受管功能下指令，看它回什麼。</p>
+<p>Day 1 之後的順序，依照對節點的改動程度由低到高排：先做完全不用改節點的 wasmCloud，最後才動 containerd 設定。這樣前面的量測不會受到後面改動的影響，最後一天也才有一個乾淨的基準，可以檢查拆掉之後節點有沒有恢復原狀。</p>
+<hr />
+<div class="admonition quote">
+<p>WebAssembly 標誌為 WebAssembly 專案之官方資產（CC0 1.0），此處作社群教學用途。</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到頂端
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="頁腳" >
+        
+          
+          <a href="../sprint2-day10-decision-matrix/" class="md-footer__link md-footer__link--prev" aria-label="上一頁: Day 10 · 綜合：四套工具的分工">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                上一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 10 · 綜合：四套工具的分工
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../sprint3-day1-three-generations/" class="md-footer__link md-footer__link--next" aria-label="下一頁: Day 1 · RuntimeClass 與節點執行路徑">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                下一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 1 · RuntimeClass 與節點執行路徑
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      KAI Scheduler、HAMi、Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,作社群教學用途
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.code.annotate", "content.code.select", "content.tabs.link", "search.suggest", "search.highlight", "search.share"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u8907\u88fd", "clipboard.copy": "\u8907\u88fd", "search.result.more.one": "\u6b64\u9801\u5c1a\u6709 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.more.other": "\u6b64\u9801\u5c1a\u6709 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.none": "\u6c92\u6709\u7b26\u5408\u7684\u9805\u76ee", "search.result.one": "\u627e\u5230 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.other": "\u627e\u5230 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.placeholder": "\u6253\u5b57\u9032\u884c\u641c\u5c0b", "search.result.term.missing": "\u7f3a\u5c11\u5b57\u8a5e", "select.version": "\u9078\u64c7\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

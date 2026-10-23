@@ -1,0 +1,3419 @@
+
+<!doctype html>
+<html lang="zh-TW" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="雲原生實作課程：GPU 排程、eBPF 與執行期安全、WebAssembly、服務網格與機密運算、遊戲伺服器平台">
+      
+      
+      
+        <link rel="canonical" href="https://deepwavelab.github.io/CloudNativePracticing/runbook/sprint1-day8-decision-matrix/">
+      
+      
+        <link rel="prev" href="../sprint1-day7-dra-aks-real-gpu/">
+      
+      
+        <link rel="next" href="../sprint2-day0-ebpf-concepts/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Day 8 · Sprint 1 總結 - Cloud Native Lab Course</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/terminal.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#day-8-sprint-1-kaihamidra" class="md-skip">
+          跳轉到
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="頁首">
+    <a href="../.." title="Cloud Native Lab Course" class="md-header__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Cloud Native Lab Course
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Day 8 · Sprint 1 總結
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換深色模式"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="切換深色模式" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換淺色模式"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="切換淺色模式" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜尋" placeholder="搜尋" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="搜尋">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="分享" aria-label="分享" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="清除" aria-label="清除" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜尋引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="標籤" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  首頁
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../sprint1-day0-azure-aks-foundation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 1 · GPU 排程三部曲
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint2-day0-ebpf-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 2 · eBPF 與執行期安全
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint3-day0-wasm-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 3 · WebAssembly
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint4-day0-mesh-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 4 · 服務網格與機密運算
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint5-day0-game-server-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 5 · 遊戲伺服器平台
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="導覽列" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Cloud Native Lab Course" class="md-nav__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Cloud Native Lab Course
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首頁
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    首頁
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 3 · WebAssembly 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 4 · 服務網格與機密運算 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint5/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 5 · 遊戲伺服器平台 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day0-azure-aks-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 環境建置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day1-kai-queue-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · KAI 安裝與 Queue 基礎
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day2-gang-scheduling-preemption/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Gang Scheduling 與搶占
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day3-hami-memory-isolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · HAMi 安裝與 VRAM 用量限制
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day4-hami-kai-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · HAMi 與 KAI 整合
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day5-hami-webui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · HAMi-WebUI 觀測介面
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day6-dra-simulated-devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · DRA 概念與模擬裝置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day7-dra-aks-real-gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · DRA 配置實體 GPU
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · Sprint 1 總結
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · Sprint 1 總結
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        走完之後：三套工具管的是不同層
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        真的要做的時候：三個問題
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="真的要做的時候：三個問題">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#kai" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        推論和批次搶同一批卡：交給 KAI 的佇列與配額
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kai-gang" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        分散式訓練：同樣交給 KAI，用 gang
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hami" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        三個小模型共用一張卡：交給 HAMi
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dra" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        新進不同型號的卡：新叢集可以從 DRA 開始
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        三套放在一起看
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gpu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        同一批 GPU 不要交給互不協調的配置機制
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        導入既有叢集前，先查什麼
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        疑難排解
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="疑難排解">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#daemonset-desired-0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        自行修改設定後，DaemonSet 的 DESIRED 變成 0
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        畫面上的數字是 0，或跟實際用量對不上
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        這門課沒教的
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        想一想
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        小結
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day0-ebpf-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · eBPF 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day1-bpftrace-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · bpftrace 三支經典工具
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day2-bpftrace-kubernetes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · 把核心事件接回 Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day3-falco-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Falco 安裝與預設規則
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day4-falco-custom-rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · 自訂規則、誤報調校與告警路由
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day5-tetragon-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Tetragon 與 TracingPolicy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day6-tetragon-enforcement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · 從偵測到攔截
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day7-cilium-kubeproxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Cilium 與 kube-proxy replacement
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day8-cilium-network-policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · CiliumNetworkPolicy（L3/L4 → L7）
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day9-hubble/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Hubble 可觀測性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 綜合：四套工具的分工
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 3 · WebAssembly
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 3 · WebAssembly
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day0-wasm-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · wasm 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day1-three-generations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · RuntimeClass 與節點執行路徑
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day2-wasmcloud/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · wasmCloud 與元件模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day3-wasmcloud-distributed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · wasmCloud 分散式模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day4-wasmedge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · WasmEdge 執行期
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day5-cost-measurement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · 執行時間、記憶體與量測範圍
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day6-spinkube-shim/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · SpinKube（上）：shim 佈建
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day7-spinkube-operator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · SpinKube（下）：operator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day8-reversibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · SpinKube 移除與節點殘留
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day9-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · 依工作負載選擇 Wasm 路線
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 4 · 服務網格與機密運算
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 4 · 服務網格與機密運算
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1" id="__nav_5_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part 1 · 服務網格（Day 0–4）
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part 1 · 服務網格（Day 0–4）
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day0-mesh-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 服務網格與入口閘道的三層地圖
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day1-envoy-gateway/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · Envoy Gateway 與 HTTP/3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day2-istio-ambient/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Istio ambient：服務間 mTLS 與連線限制
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day3-cilium-mesh/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Cilium mesh：WireGuard 加密與 L7
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day4-istio-vs-cilium/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · Istio 與 Cilium 比較
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part 2 · 機密運算（Day 5–9）
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part 2 · 機密運算（Day 5–9）
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day5-confidential-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · 機密運算的威脅模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day6-kata-sandboxing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · Kata Pod Sandboxing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day7-katacc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · kata-cc：SEV-SNP 機密硬體
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day8-attestation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 遠端證明：MAA、SKR 與金鑰釋放
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day9-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · 機密容器的需求與驗證範圍
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 5 · 遊戲伺服器平台
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 5 · 遊戲伺服器平台
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day0-game-server-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 遊戲伺服器平台概念
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day1-agones-first-gameserver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · Agones 第一顆 GameServer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day2-fleet-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Fleet 生命週期
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day3-allocation-autoscaler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Allocation 與 autoscaler
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day4-quilkin-udp-proxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · Quilkin UDP proxy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day5-nakama-postgres/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Nakama 與 PostgreSQL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day6-matchmaking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · Matchmaking 串接
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day7-python-client-e2e/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Python client 端到端
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day8-observability-resilience/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 觀測與韌性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day9-unity-client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Unity client 與 relay server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 遊戲伺服器平台總結
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        走完之後：三套工具管的是不同層
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        真的要做的時候：三個問題
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="真的要做的時候：三個問題">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#kai" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        推論和批次搶同一批卡：交給 KAI 的佇列與配額
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kai-gang" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        分散式訓練：同樣交給 KAI，用 gang
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hami" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        三個小模型共用一張卡：交給 HAMi
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dra" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        新進不同型號的卡：新叢集可以從 DRA 開始
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        三套放在一起看
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gpu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        同一批 GPU 不要交給互不協調的配置機制
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        導入既有叢集前，先查什麼
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        疑難排解
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="疑難排解">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#daemonset-desired-0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        自行修改設定後，DaemonSet 的 DESIRED 變成 0
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        畫面上的數字是 0，或跟實際用量對不上
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        這門課沒教的
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        想一想
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        小結
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="day-8-sprint-1-kaihamidra">Day 8: Sprint 1 總結——KAI、HAMi、DRA 各管哪一層、怎麼選<a class="headerlink" href="#day-8-sprint-1-kaihamidra" title="Permanent link">&para;</a></h1>
+<p><img align="right" alt="Kubernetes 官方標誌" src="../../assets/logos/kubernetes-icon-color.svg" width="95" /></p>
+<p>假設同一週裡，同一座叢集收到三個需求。線上推論組抱怨，兩張 T4 常被離線批次工作佔滿，推論的 pod 進不來；另一組人有三個小模型，每個只要幾 GB 的 VRAM，想塞進同一張卡；採購那邊又說，下一批會進不同型號的卡，希望工作能指定「至少要多新的卡」。</p>
+<p>這三個需求，前七天各有一套工具處理過：Day 1–2 的 KAI Scheduler、Day 3–5 的 HAMi、Day 6–7 的 DRA。這一章不開新的 lab，只把三套工具放在同一個問題前面比較。讀完之後，拿到一個 GPU 需求，你能說出該交給哪一套，也知道組合使用時怎麼避免重複配置同一批 GPU。</p>
+<h2 id="_1">走完之後：三套工具管的是不同層<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<p>Day 1 開場的問題是「兩張 T4 被批次工作吃光，推論進不來，卡該怎麼分」。剛開始很容易把 KAI、HAMi、DRA 當成三個互相競爭的答案，好像只要挑出最好的一套就行。走完七天再回頭看，它們其實在處理一顆 GPU pod 的不同階段。</p>
+<p>下面這張圖由上往下，是一顆要 GPU 的 pod 從送出到跑起來會經過的三層：</p>
+<ul>
+<li><strong>排程層</strong>：決定 pod 放到哪個節點、哪一組工作先拿到卡。</li>
+<li><strong>裝置宣告層</strong>：節點怎麼告訴 Kubernetes「我這裡有什麼卡、有幾張」。</li>
+<li><strong>執行期</strong>：容器跑起來之後，實際能用掉多少 VRAM。</li>
+</ul>
+<p>三個欄位是三套工具，虛線框表示那一層它沒有處理。</p>
+<p><img alt="三層由上往下：排程層、裝置宣告層、執行期。KAI 只在排程層（佇列、配額、gang），裝置宣告沿用 device plugin 的整數張數，執行期不管；HAMi 三層都有：extender 挑卡、device plugin 把一張卡報成 10 份、HAMi-core 在執行期攔 CUDA 記憶體配置（以橘框強調）；DRA 在排程層由 scheduler 內建外掛配置裝置、在裝置宣告層用 ResourceSlice 描述每個裝置，執行期沒有內建隔離" src="../../assets/diagrams/s1d8-layers.svg" /></p>
+<p>我們可以從圖上看到兩件事：</p>
+<ol>
+<li><strong>KAI 只管排程。</strong> 它決定誰先拿到卡、拿幾張，以及 <strong>gang scheduling</strong>：一組 pod 湊齊才一起排上，湊不齊就都不上。它也能按比例把一張卡分給好幾顆 pod（Day 4 的 <code>gpu-memory</code> 寫法），但不做執行期隔離：容器實際吃掉多少 VRAM，它不管。</li>
+<li><strong>真正在容器裡擋住超額用量的，只有 HAMi 的執行期那一格。</strong> DRA 雖然同時改寫了上面兩層：裝置用 <code>resource.k8s.io</code> 這組 API 描述，配置由 kube-scheduler 內建的 <code>dynamicresources</code> 外掛完成，但它不碰執行期。兩顆 pod 共用一張卡時，各自能吃掉多少，DRA 不管。</li>
+</ol>
+<p>組合使用時，要避免不同機制各自宣告、配置同一批 GPU，造成重複分配。這不代表所有裝置的 driver 都不能在同一個節點上共存；本課採用的配置方式留到後面說明。</p>
+<p>回頭對照 Sprint 開始的時候：Day 0 能問的只有「叢集裡有沒有 GPU、pod 拿不拿得到卡」，卡是節點上的一個整數，拿到就是整張。現在同樣面對「卡不夠分」，你可以先分清楚問題出在哪一層：是誰先拿的排程問題、一張卡要不要切開的隔離問題，還是要描述哪一種卡的宣告問題，再決定交給哪一套。</p>
+<h2 id="_2">真的要做的時候：三個問題<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<p>拿到一個 GPU 需求時，下面三個問題各問一次，大多數情況就能決定要用哪幾套。</p>
+<p><img alt="三個問題各自回答：痛點是哪一組工作先拿到卡？是就用 KAI 的佇列、配額、gang。一張卡要不要分給好幾個容器？是就用 HAMi 的 VRAM 硬隔離（卡沒有 MIG 時）。要不要依型號、屬性挑卡，而且叢集在 1.34.2 以上？是就用 DRA 的 claim 加 CEL 條件。回答「是」的那幾套可以一起用，例如前兩題都是「是」時，用 KAI 排程加 HAMi-core 隔離（Day 4）；三題都是「不是」，就維持 device plugin 的整卡配置" src="../../assets/diagrams/s1d8-questions.svg" /></p>
+<p>我們可以從圖上看到，三個問題彼此獨立，每一題回答「是」，就對應一套工具，結果可以組合。最常見的情況是前兩題都回答「是」：既要分配誰先拿到卡，又要讓多個容器共用一張卡，於是 KAI 和 HAMi-core 一起用，Day 4 整天處理的就是這個組合。三題都回答「不是」，維持原本的整卡配置就好。接下來看各種需求的取捨。</p>
+<h3 id="kai">推論和批次搶同一批卡：交給 KAI 的佇列與配額<a class="headerlink" href="#kai" title="Permanent link">&para;</a></h3>
+<p>這是開場的第一個需求，也是 Day 1 處理的問題。KAI 讓每個佇列有一份 <strong>quota</strong>（保底額度）：quota 內的卡誰都拿不走；別的佇列閒置時，可以借用超過 quota 的卡，但借來的隨時會被收回。</p>
+<p>設計佇列時要注意：</p>
+<ul>
+<li><strong>想讓某個佇列拿到更多卡，要改 quota，不是改 priority。</strong> 佇列優先權只決定超額的卡先分給誰，對 quota 內的卡沒有作用。見 Day 1 的<a href="../sprint1-day1-kai-queue-basics/#mine-4">「queue priority 200 打不贏 quota 內的 100」</a>。</li>
+<li>
+<p><strong>把工作標成不可被搶占的等級，代價是只能用 quota 內的卡。</strong> 叢集裡明明還有一張卡在跑低優先權的工作，它也拿不到。見 Day 1 的<a href="../sprint1-day1-kai-queue-basics/#mine-5">「<code>priorityClassName: inference</code> 反而讓 pod 卡住」</a>。</p>
+</li>
+<li>
+<p><strong><code>limit</code> 要明寫 <code>-1</code>。</strong> <code>-1</code> 表示可以在別人閒置時借用超過 quota 的卡；不寫等於 0，佇列就完全不能借用，對方閒著也一樣。</p>
+</li>
+</ul>
+<p>所以要保證服務不中斷，就用不可被搶占的等級，並把 quota 開到尖峰用量；要吞吐量，就用可被搶占的等級去借超額的卡，接受隨時被收回。</p>
+<h3 id="kai-gang">分散式訓練：同樣交給 KAI，用 gang<a class="headerlink" href="#kai-gang" title="Permanent link">&para;</a></h3>
+<p>分散式訓練一次要好幾張卡，例如八個 worker 各一張。只拿到七張時，那七張卡什麼事都做不了，卻佔著別人的位置。開頭提過的 gang scheduling 就是處理這件事。</p>
+<p>gang 的代價是整組一起上，被搶占時也整組一起下。即使搶占者只要一張卡，也可能驅逐整組工作，見 Day 2 的<a href="../sprint1-day2-gang-scheduling-preemption/#mine-3">「搶 1 張卡，整個 gang 都被驅逐」</a>。所以 gang 型的工作最好放進自己的佇列，並給足 quota。</p>
+<p>gang 也不是裝了 KAI 就自動有。PodGroup 是 KAI 用來代表「一組 pod」的物件；一般的 <code>batch/v1</code> Job 即使寫了 <code>parallelism: 3</code>，KAI 替它產生的 PodGroup 預設還是 <code>minMember: 1</code>，也就是一顆湊到就上。要 gang 就在 Job 上明寫 <code>kai.scheduler/batch-min-member</code>，設定方式見 Day 2 的<a href="../sprint1-day2-gang-scheduling-preemption/#mine-1">「裝了 KAI、Job 寫了 <code>parallelism: 3</code>，卻沒有 gang」</a>。</p>
+<p>查詢前先從 Job manifest 的 <code>metadata.namespace</code> 確認 namespace，Day 2 使用的是 <code>kai-lab</code>。沿用該練習時先設定 <code>NS=kai-lab</code>；若用了其他名稱，就把 <code>NS</code> 設成該名稱。下方保留原指令，但 <code>&lt;ns&gt;</code> 不能直接貼入 shell，會被當成重新導向。正確寫法是 <code>kubectl -n "$NS" get podgroups -o json | jq '.items[].spec.minMember'</code>，修正後的寫法本課沒有實跑。</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kubectl<span class="w"> </span>-n<span class="w"> </span>&lt;ns&gt;<span class="w"> </span>get<span class="w"> </span>podgroups<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.items[].spec.minMember&#39;</span>
+</span></code></pre></div>
+<p>印出來是 1，就代表沒有 gang，不管 Job 寫了多少 parallelism。</p>
+<p>如果訓練跑在 <strong>spot 節點</strong>（雲端廠商隨時可以收回的便宜 VM）上，還要再加三件事：</p>
+<ul>
+<li><strong>開 cluster autoscaler</strong>（依需求自動增減節點的元件）。spot 節點被收回之後，node pool 不會自己補回來，見 Day 2 的<a href="../sprint1-day2-gang-scheduling-preemption/#mine-4">「spot 節點被收走後，pool 不會補回來」</a>。</li>
+<li><strong>在回收預告期內寫完 checkpoint。</strong> Azure 收回 spot VM 之前會先發一則通知，Day 2 量到從通知到 VM 被收走是 39 秒，訓練程式要在這段時間內把進度存下來。</li>
+<li><strong>gang 大小留餘裕。</strong> 別讓 <code>minMember</code> 剛好等於全部節點數，否則少了一台之後，重跑時連湊齊都湊不齊。</li>
+</ul>
+<h3 id="hami">三個小模型共用一張卡：交給 HAMi<a class="headerlink" href="#hami" title="Permanent link">&para;</a></h3>
+<p>這是開場的第二個需求。先問一句：這批卡有沒有 MIG（Multi-Instance GPU）。MIG 是 A100、H100 這類資料中心卡內建的硬體分卡功能，可以把一張卡切成幾個互相隔離的執行個體，每個有自己專用的運算單元和記憶體，一個執行個體吃滿也影響不到別的。卡有 MIG，就先考慮用它。T4 和消費級顯示卡都沒有 MIG；沒有 MIG 時，要讓多個容器共用一張卡又不互相吃掉 VRAM，課程裡驗成的做法只有 HAMi。</p>
+<p>HAMi 做兩件事：device plugin 把一張實體卡對外報成十份，讓多顆 pod 可以排上同一張卡；容器裡再放一個叫 <code>libvgpu.so</code> 的函式庫，在 CUDA 要記憶體時檢查有沒有超過這個容器的配額。即使實體卡還有空間，超過容器配額的配置仍會被拒絕，實測過程見 <a href="../sprint1-day3-hami-memory-isolation/">Day 3 的記憶體隔離實驗</a>。</p>
+<p>這個函式庫在 HAMi 專案裡叫 <strong>HAMi-core</strong>。Day 3 裝的是 <strong>HAMi 平台</strong>，也就是整套元件：改寫 pod 的 webhook、挑卡的排程器、device plugin，加上 HAMi-core。HAMi 的排程器是標準的 kube-scheduler 加一個 <strong>extender</strong>（一支外掛程式，內建排程器遇到 GPU 資源時，把選哪張卡的決定交給它）。Day 4 的 KAI 官方整合則只借用 HAMi-core，排程仍由 KAI 自己做。</p>
+<p>選哪一條路，看叢集現況：</p>
+<ul>
+<li><strong>沒有排程器要沿用、只想塞得密</strong>，用 HAMi 平台。Day 4 的對照組，四顆各 4096 MiB 的 pod 剛好填滿一張 T4 的 16384 MiB。</li>
+<li><strong>已經在用 KAI 的佇列、想把分卡接進去</strong>，走官方整合。同樣四顆 pod 只塞得下三顆，因為 KAI 把 VRAM 換算成兩位小數的 GPU 比例，4096 MiB 進位成 0.26，容器實得 4259 MiB，一張卡只夠三份。見 Day 4 的<a href="../sprint1-day4-hami-kai-integration/#mine-6">「<code>gpu-memory</code> 換算成 GPU 比例後進位，每張卡少放一個 pod」</a>。</li>
+</ul>
+<p>少塞一個換來的是查帳方便：HAMi 平台把已經分出去多少 VRAM 記在 extender 的記憶體和 pod annotation 裡，KAI 路徑的數字則在一個 <code>kubectl get cm</code> 就查得到的 ConfigMap 裡。</p>
+<p>同一批 GPU 要選定一條配置路徑，本課同時使用兩條路徑的結果在下一節。另外，不論哪一條，導入前都要先確認三件事：</p>
+<ul>
+<li><strong>容器的基底映像要用 glibc。</strong> HAMi 會在它管的每個容器寫入 <code>/etc/ld.so.preload</code>，而 <code>libvgpu.so</code> 需要 glibc。用 musl 的 busybox 或 alpine，程式還沒開始就以 exit 127 結束，看起來像映像壞了。見 Day 3 的<a href="../sprint1-day3-hami-memory-isolation/#mine-3">「busybox、alpine 映像一啟動就 exit 127」</a>。</li>
+<li><strong>監控要看 annotation，不能只看 Running。</strong> HAMi 的 webhook 設定是 <code>failurePolicy: Ignore</code>：webhook 掛掉時，pod 照樣建得起來，只是沒有配額限制，也沒有任何告警。要監控的是 pod 有沒有拿到 <code>hami.io/vgpu-devices-allocated</code> annotation。</li>
+<li><strong>配額要把 CUDA context 算進去。</strong> 程式第一次使用 GPU 時，CUDA 會替這個 process 在卡上建立一份執行環境，叫 CUDA context，它本身就要佔 VRAM，而 HAMi 算用量時會把它算進去。Day 3 從被拒絕時的數字推算，context 大約 100 MiB。那顆 4096 MiB 的容器只拿到 3584 MiB，主要原因是每次要 512 MiB 這個單位太大，下一塊放不進剩下的空間，不是 context 吃掉了 512 MiB。規劃配額時，在模型需要的量之外多留約 100–200 MiB 給 context。</li>
+</ul>
+<p>如果叢集裡的卡 VRAM 大小不一，配額就不能用同一個數字套全部，要按卡型分別設計。HAMi 把每張卡的規格寫在節點 annotation 裡。先用 <code>kubectl get nodes</code> 查節點名稱，依 Day 3 設定的 <code>gpu=on</code> 標籤確認目標 GPU 節點，再用 <code>GPU_NODE='查得的節點名稱'</code> 儲存名稱；單引號內換成實際名稱。</p>
+<p>下方保留原指令，但 <code>&lt;gpu-node&gt;</code> 不能直接貼入 shell。正確寫法是 <code>kubectl get node "$GPU_NODE" -o json | jq -r '.metadata.annotations["hami.io/node-nvidia-register"]'</code>，修正後的寫法本課沒有實跑。節點規格與 annotation 的對照見 <a href="../sprint1-day3-hami-memory-isolation/#mine-2">Day 3</a>。</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>node<span class="w"> </span>&lt;gpu-node&gt;<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">&#39;.metadata.annotations[&quot;hami.io/node-nvidia-register&quot;]&#39;</span>
+</span></code></pre></div>
+<p>輸出裡的 <code>devmem</code> 欄位就是那張卡的 VRAM。</p>
+<h3 id="dra">新進不同型號的卡：新叢集可以從 DRA 開始<a class="headerlink" href="#dra" title="Permanent link">&para;</a></h3>
+<p>這是開場的第三個需求。用 device plugin 時，一張卡在 Kubernetes 眼裡只是節點上的一個整數，<code>nvidia.com/gpu: 1</code>。工作想要「至少 Turing 世代」的卡，只能先替節點貼標籤，再用 nodeSelector 繞過去。</p>
+<p>DRA（Dynamic Resource Allocation）換掉了這個前提：節點用 <strong>ResourceSlice</strong> 逐一描述每個裝置的屬性；pod 透過 <strong>ResourceClaim</strong> 向 Kubernetes 請求符合條件的裝置，並可以用 <strong>CEL</strong>（Common Expression Language，一種寫判斷條件的小語言）寫篩選條件。</p>
+<p>要依型號、架構、CUDA 計算能力或記憶體容量挑卡，可以從 <a href="../sprint1-day7-dra-aks-real-gpu/">Day 7 的 ResourceSlice 與選擇器</a> 開始。條件要依 driver 實際報出的屬性與型別撰寫；例如 <code>driverVersion</code> 會正規化成 semver，不能直接拿 <code>nvidia-smi</code> 的版本字串比對，見 Day 7 的<a href="../sprint1-day7-dra-aks-real-gpu/#mine-6">版本號說明</a>。</p>
+<p>DRA 也能讓多顆 pod 共用一個具名的 claim；各自用 template 請求裝置則會分開配置，寫法見 <a href="../sprint1-day6-dra-simulated-devices/">Day 6</a>。不過共用裝置沒有各容器用量上限，DRA 不做執行期隔離。需求若包含 VRAM 隔離，光是共用 claim 還不夠。</p>
+<p>DRA 的缺口也要一起考慮：</p>
+<ul>
+<li><strong>節點上看不到裝置。</strong> 持卡的 pod 在 <code>kubectl describe node</code> 上每一欄都是 <code>0 (0%)</code>，所有讀節點 allocatable 的儀表板與容量工具都看不到 DRA 的裝置（Day 6 的<a href="../sprint1-day6-dra-simulated-devices/#mine-3">「節點上看不到 DRA 的裝置，<code>describe node</code> 顯示 <code>0 (0%)</code>」</a>）。用 template 產生的 claim 在 pod 結束時就被刪掉，事後查不到它拿過哪一個裝置（Day 7 的<a href="../sprint1-day7-dra-aks-real-gpu/#mine-5">「Job 跑完之後查不到它用過哪張卡」</a>）。要留紀錄，得在 pod 還活著時抓，或把裝置 UUID 印進容器 log。</li>
+<li><strong>排不上時的訊息很少。</strong> 事件只寫 <code>cannot allocate all claims</code>，不說是哪個 claim、哪條條件、篩掉幾個裝置。CEL 打錯字和裝置真的不夠，訊息一模一樣（Day 6 的<a href="../sprint1-day6-dra-simulated-devices/#mine-2">「<code>cannot allocate all claims</code> 不說是哪個 claim、哪條條件」</a>）。</li>
+<li><strong>廠商的 driver 還早。</strong> DRA 的核心 API 已經是 Kubernetes 的穩定功能，但 NVIDIA 的 DRA driver 還在 v0.4.x，而它的 chart 預設叢集裡已經有 GPU Operator 或 NFD（Node Feature Discovery，自動替節點貼硬體標籤的元件）。</li>
+</ul>
+<p>所以 DRA 適合版本已經在 1.34.2 以上、還沒有既有 GPU 工作負載的新叢集。DRA 的核心 API 在 Kubernetes 1.34 成為正式功能，NVIDIA 的 DRA driver 則要求 1.34.2 以上，要用真卡就以後者為準。已經用 device plugin 跑得好好的叢集，維持整卡配置就好。</p>
+<h3 id="_3">三套放在一起看<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h3>
+<p>把上面幾節的結論併成一張表，表上的版本是這門課用的版本：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>KAI Scheduler v0.16.8</th>
+<th>HAMi v2.9.0</th>
+<th>DRA（K8s 1.35.6）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>解決的問題</td>
+<td>哪一組工作先拿到卡、被收回時收誰</td>
+<td>一張卡分給多個容器</td>
+<td>描述裝置的差異，讓工作挑裝置</td>
+</tr>
+<tr>
+<td>要卡的寫法</td>
+<td>整數張數，或用 <code>gpu-memory</code> 要一部分</td>
+<td>MiB</td>
+<td>claim 加 CEL 條件</td>
+</tr>
+<tr>
+<td>分卡</td>
+<td>按比例分配</td>
+<td>有</td>
+<td>本課只驗到整張卡</td>
+</tr>
+<tr>
+<td>執行期隔離</td>
+<td>沒有（可借用 HAMi-core）</td>
+<td>有</td>
+<td>沒有</td>
+</tr>
+<tr>
+<td>已分配的量記在哪裡</td>
+<td>ConfigMap 與 metrics</td>
+<td>extender 記憶體與 pod annotation</td>
+<td>ResourceSlice 與 ResourceClaim</td>
+</tr>
+<tr>
+<td><code>kubectl describe node</code> 看到什麼</td>
+<td>張數</td>
+<td>切了幾份，看不到 VRAM 餘額</td>
+<td>什麼都看不到</td>
+</tr>
+<tr>
+<td>專案狀態（截至 2026-08）</td>
+<td>CNCF sandbox</td>
+<td>CNCF incubating</td>
+<td>Kubernetes 內建的穩定功能</td>
+</tr>
+</tbody>
+</table>
+<h2 id="gpu">同一批 GPU 不要交給互不協調的配置機制<a class="headerlink" href="#gpu" title="Permanent link">&para;</a></h2>
+<p>三套工具裝在同一座叢集時，會不會互相干擾？答案要分成節點和叢集兩個範圍來看。</p>
+<p>device plugin 與 DRA driver 都能把 GPU 提供給工作負載，但它們各自記錄已分配的裝置，不會自動同步。同一張卡若同時被兩套機制宣告為可用，就可能重複分配。這裡要避免的是兩套機制爭用同一批 GPU，不是禁止一台節點安裝多種裝置的 driver。下圖左邊限定同一張 T4，右邊是本課分節點池的做法：</p>
+<p><img alt="左半邊限定同一張 T4：本課在原廠 device plugin、HAMi device plugin、DRA kubelet plugin 三條配置路徑中擇一，避免同一張卡被重複分配。右半邊把兩批 GPU 分到不同節點池，節點池 A 使用原廠或 HAMi device plugin，節點池 B 使用 DRA kubelet plugin" src="../../assets/diagrams/s1d8-one-provider.svg" /></p>
+<p>我們可以從圖上看到兩件事：</p>
+<ol>
+<li><strong>同一批 GPU，本課選擇一條配置路徑。</strong> Day 4 在同一個節點上同時留著 HAMi 平台和 KAI 整合，HAMi 的 pod 正常 Running，KAI 的 pod 則停在 Pending，佔位 pod 出現 <code>UnexpectedAdmissionError</code>，見 Day 4 的<a href="../sprint1-day4-hami-kai-integration/#mine-3">「兩套方案同時裝著，KAI 的 pod 無限重排」</a>。NVIDIA DRA driver 的 chart 預設會在 <code>helm template</code> 階段回報錯誤，提醒 DRA 與原廠 device plugin 可能重複配置 GPU；本課先確定 DRA 節點上沒有原廠 device plugin，才設 <code>gpuResourcesEnabledOverride=true</code> 打開 GPU 功能。本課沒有把這兩者放在同一個節點上跑過。</li>
+<li><strong>分節點池，讓兩套機制管理不同的卡。</strong> 本課用不同標籤把 DRA 與 device plugin 隔開，三套工具可以在同一座叢集裡並存。這是本課採用的隔離方式，不是 Kubernetes 對所有 driver 的同節點限制。</li>
+</ol>
+<p>下面是課程裡實際跑過的組合（DRA driver 和原廠 device plugin 同節點的情況沒有跑過，不列在表上）：</p>
+<table>
+<thead>
+<tr>
+<th>組合</th>
+<th>在同一個節點上</th>
+<th>結果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>KAI + HAMi 平台</td>
+<td>是</td>
+<td>HAMi 正常執行，KAI Pending，佔位 pod 配置失敗</td>
+</tr>
+<tr>
+<td>KAI + HAMi-core（搭原廠 device plugin）</td>
+<td>是</td>
+<td>正常運作</td>
+</tr>
+<tr>
+<td>DRA 在獨立節點池，KAI 與 HAMi 留在原本的池</td>
+<td>否</td>
+<td>互不干擾</td>
+</tr>
+</tbody>
+</table>
+<p>不要求 GPU 的 pod 也可以交給 KAI。是否由 KAI 排程，要看 pod 是否指定 <code>schedulerName: kai-scheduler</code>，並用 <code>kai.scheduler/queue</code> 標籤指向佇列；<a href="https://github.com/kai-scheduler/KAI-Scheduler/blob/main/docs/quickstart/README.md#cpu-only-pods">KAI 官方 quickstart</a> 有 CPU-only 範例。這是文件說明，本課沒有另做 CPU-only 實驗。</p>
+<p>所以想在一座正在用的叢集裡試新的機制，開一個貼不同標籤的節點池來試，比在既有節點上疊裝安全得多。</p>
+<h2 id="_4">導入既有叢集前，先查什麼<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<p>前面的結論都來自 AKS 上的兩張 T4，用的是上表那幾個版本。要把它們用到一座已經在運作、版本可能比較舊的叢集，先查下面幾件事。</p>
+<p><strong>DRA 需要的版本。</strong> 舊版叢集可能連 <code>resource.k8s.io</code> 這組 API 都沒有。DRA 的核心 API 在 Kubernetes 1.34 成為正式功能，NVIDIA DRA driver 的官方前置條件則是 v1.34.2 以上。叢集還沒升到 1.34.2 之前，DRA 只能先規劃，要練習可以另外開一座版本夠新的測試叢集。</p>
+<p><strong>已經裝著的 KAI 是哪一版。</strong> 本課程的行為都是 KAI v0.16.8 的行為。連 chart 版本字串帶不帶 <code>v</code> 這種小地方，都會讓安裝指令抓不到 chart（Day 1 的<a href="../sprint1-day1-kai-queue-basics/#mine-1">「<code>--version 0.16.8</code> 抓不到 chart」</a>）。先用兩道唯讀查詢，查出叢集上那套 KAI 的實際版本與設定，再決定要不要對齊：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>helm<span class="w"> </span>list<span class="w"> </span>-A<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">&#39;.[] | select(.chart | test(&quot;kai&quot;)) | &quot;\(.name) \(.chart) \(.app_version)&quot;&#39;</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>configs.kai.scheduler<span class="w"> </span>-A<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w">     </span><span class="c1"># operator 實際套用的設定,不是 values 檔</span>
+</span></code></pre></div>
+<p>第二行查的是 KAI operator 實際在用的設定。KAI 是 operator 架構，真正的元件由 operator 依這份設定產生，所以要看這裡，不是看當初安裝用的 values 檔。</p>
+<p><strong>平台有哪些功能、少了哪些物件。</strong> 下面兩行應該在安裝前跑，不要等裝壞了才查：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>kubectl<span class="w"> </span>get<span class="w"> </span>--raw<span class="w"> </span>/metrics<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>kubernetes_feature_enabled<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-i<span class="w"> </span>DRA<span class="w">   </span><span class="c1"># DRA 能做到哪裡</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>runtimeclass<span class="w">                                                     </span><span class="c1"># chart 預設要的那個存不存在</span>
+</span></code></pre></div>
+<p>第一行列出 API server 上 DRA 相關的功能開關。AKS 不開放改控制面的功能開關，DRA 的 alpha 功能全部關著，第一行就能看出哪些用不到。其中影響最大的是 <code>DRAExtendedResource</code>：NVIDIA DRA driver 的 chart 會在 DeviceClass 上寫 <code>extendedResourceName: nvidia.com/gpu</code>，讓 <code>resources.limits: nvidia.com/gpu: 1</code> 這種舊寫法也能由 DRA 配卡。這個開關在 AKS 上是關的，API server 會把這個欄位直接剝掉，不報錯也不警告，結果是舊寫法和 DRA 的新寫法沒辦法在同一批卡上並行（Day 7 的<a href="../sprint1-day7-dra-aks-real-gpu/#mine-3">「舊寫法 <code>nvidia.com/gpu: 1</code> 的 pod 一直 Pending」</a>）。第二行查 RuntimeClass（指定容器用哪一種 runtime 執行的物件）。AKS 的 GPU 節點沒有 <code>nvidia</code> 這個 RuntimeClass，KAI 的共卡設定卻預設要它，pod 會在 API server 就被擋下（Day 4 的<a href="../sprint1-day4-hami-kai-integration/#mine-1">「KAI 替共卡 pod 指定 RuntimeClass "nvidia"，AKS 沒有，pod 建不出來」</a>）。</p>
+<p><strong>chart 對平台的假設。</strong> Day 7 卡住的事情幾乎都不是硬體問題，而是 chart 預設叢集裡已經有 GPU Operator 或 NFD 幫忙認出 GPU 節點；AKS 兩者都沒有，標籤得自己補（Day 7 的<a href="../sprint1-day7-dra-aks-real-gpu/#mine-2">「helm 說 deployed，kubelet plugin 的 DaemonSet 卻是 <code>DESIRED 0</code>」</a>）。DRA driver 的 driver root 路徑也依平台而不同：AKS 是預設的 <code>/</code>，GKE 要改成 <code>/home/kubernetes/bin/nvidia</code>，由 GPU Operator 管理的環境則是 <code>/run/nvidia/driver</code>。同一份 values 檔換一個平台，可能完全裝不起來。</p>
+<p><strong>節點標籤下在節點池層級。</strong> 在 AKS 上，spot 節點被收回、或節點池縮到 0 再重新擴增，拿到的都是全新的 VM，用 <code>kubectl label nodes</code> 貼在單一節點上的標籤會跟著消失。HAMi、KAI 和 DRA driver 要的節點標籤，都要設在節點池上（Day 3 補 HAMi 節點標籤那一步）。</p>
+<p><strong>HAMi 的排程器映像從哪裡拉。</strong> HAMi chart 的 kube-scheduler 映像預設指向阿里雲的 registry，tag 由叢集的 Kubernetes 版本推導出來，這個 registry 不保證跟得上最新的版本。安裝前先確認那個 tag 存在；網路受限或有映像來源政策的環境，要改成自己的 registry（Day 3 安裝 HAMi 那一步）。</p>
+<h2 id="_5">疑難排解<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<p>這一節收的是好幾章都出現過的兩種狀況。</p>
+<h3 id="daemonset-desired-0">自行修改設定後，DaemonSet 的 <code>DESIRED</code> 變成 0<a class="headerlink" href="#daemonset-desired-0" title="Permanent link">&para;</a></h3>
+<p><a href="https://helm.sh/docs/v3/helm/helm_install/"><code>helm install --wait</code></a> 會等待資源達到就緒條件。要另外確認的是部署範圍：DaemonSet 的 <code>DESIRED</code> 是 0 時，沒有預期要啟動的 pod，仍可能通過等待檢查。</p>
+<p>Day 7 提供的 values 已用 <code>kubeletPlugin.affinity: null</code> 移除 chart 預設 affinity，再用節點標籤選擇部署位置。自行調整時若改成 <code>affinity: {}</code>，Helm 合併設定後會保留預設 affinity；節點缺少對應標籤，就可能出現 <code>DESIRED 0</code>。Day 7 紀錄中的修正讓 <code>DESIRED</code> 從 0 變成 1，之後 pod 成為 Running，設定方式見 <a href="../sprint1-day7-dra-aks-real-gpu/#mine-1">Day 7 的安裝與狀態確認</a>。</p>
+<p>修改 affinity 或 nodeSelector 後，對照節點標籤，確認 <code>DESIRED</code> 等於預期符合條件的節點數，再檢查 <code>READY</code>。這是在核對部署範圍，不能把就緒檢查概括成只表示指令執行完畢。</p>
+<h3 id="0">畫面上的數字是 0，或跟實際用量對不上<a class="headerlink" href="#0" title="Permanent link">&para;</a></h3>
+<p>決定「還能不能再排一顆」的那份紀錄，通常不在 <code>kubectl describe node</code> 上：HAMi 的 VRAM 餘額在 extender 的記憶體和 pod annotation 裡，DRA 的裝置則完全不在節點的資源裡。連「一張卡」的意思，各系統都不一樣：原廠 device plugin 說 1，HAMi 說 10，Day 4 的 KAI 透過 HAMi 的 device plugin 看兩張實體卡，算出來是 20 張。</p>
+<p>看到一個數字時，先問它是從哪一份紀錄算出來的。看到 0 時，先分清楚是真的沒人在用，還是資料沒有送到；這兩種情況在畫面上看起來一樣，Day 5 的<a href="../sprint1-day5-hami-webui/#mine-3">「每顆 pod 的用量永遠是 0,標籤被加上了 <code>exported_</code> 前綴」</a>就是後者。</p>
+<h2 id="_6">這門課沒教的<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
+<p><strong>MIG 和單機多卡。</strong> T4 沒有 MIG，課程裡每台機器也只有一張卡，所以 MIG 分卡、同一台機器上多張卡的拓樸，以及 NUMA（多 CPU 插槽的機器上，記憶體和裝置靠近哪一顆 CPU 的差別）都驗不到。HAMi 的 <code>numa-first</code> 放置政策在 v2.9.0 也還沒實作。想往下學，MIG 從 NVIDIA 的 <a href="https://docs.nvidia.com/datacenter/tesla/mig-user-guide/">MIG User Guide</a> 開始；Kubernetes 怎麼讓 CPU 與裝置對齊同一個 NUMA 節點，看官方文件的 <a href="https://kubernetes.io/docs/tasks/administer-cluster/topology-manager/">Topology Manager</a>。</p>
+<p><strong>DRA 還在 alpha 的功能。</strong> partitionable devices（把一張卡切成多個裝置）、consumable capacity（多個 claim 依容量分用同一個裝置），以及直接用 <code>resources.limits</code> 要 DRA 裝置，都需要打開 alpha 功能開關，AKS 不開放，所以課程沒有做。各功能在哪個版本、什麼階段，看 Kubernetes 官方部落格的 <a href="https://kubernetes.io/blog/2025/09/01/kubernetes-v1-34-dra-updates/">Kubernetes v1.34: DRA has graduated to GA</a>；要實際試，需要能自己設定功能開關的叢集，例如 kubeadm 架的叢集。</p>
+<p><strong>MPS。</strong> Day 7 只送過 time-slicing 的設定，從容器裡看不出差別；NVIDIA MPS 需要在節點上另外跑一個背景程式，課程沒有做。運作方式和限制見 NVIDIA 的 <a href="https://docs.nvidia.com/deploy/mps/index.html">Multi-Process Service</a> 文件。</p>
+<p><strong>KAI 和 HAMi 的其他分卡功能。</strong> KAI 沒測 <code>gpu-fraction</code> 寫法，也沒測 HAMi-core 整合下的搶占與 gang，起點是 KAI 的 <a href="https://github.com/NVIDIA/KAI-Scheduler/blob/v0.16.8/docs/gpu-sharing/README.md">GPU sharing 文件（v0.16.8）</a>。HAMi 沒驗算力切分 <code>nvidia.com/gpucores</code> 的實際精度、VRAM 超賣，以及不同 VRAM 的卡混在一起時的配額行為，這些設定寫在 HAMi 的 <a href="https://project-hami.io/docs/core-concepts/gpu-virtualization">GPU virtualization</a> 文件裡。</p>
+<h2 id="_7">想一想<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h2>
+<ul>
+<li>一個團隊說：「我們有四張 A100，想讓十幾個做實驗的人各分一小塊來跑 notebook。」你會先問他們哪一個問題？答案會怎麼影響你選 HAMi 還是別的做法？</li>
+<li>一座叢集已經用 HAMi 平台分卡一年，現在想導入 KAI 的佇列，讓推論和訓練各有保底額度。你會直接在現有節點上裝 KAI 的 HAMi-core 整合嗎？如果不會，你會怎麼安排？</li>
+<li>監控畫面顯示某個 namespace 還佔著 8 GB 的 VRAM，但那個 namespace 裡已經沒有任何 pod。你會先去哪裡查，才能確定這個數字是真的？</li>
+</ul>
+<h2 id="_8">小結<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h2>
+<p>KAI、HAMi、DRA 不是三選一的競品，而是管一顆 GPU pod 的不同層：KAI 決定哪一組工作先拿到卡、湊不齊要不要一起等；HAMi 讓多個容器共用一張卡，並在執行期擋住超額的 VRAM；DRA 讓卡從一個整數變成可以描述、篩選、共用的裝置。組合時要確認誰負責配置同一批 GPU，避免各自記帳造成重複分配；本課用分節點池的方式讓 DRA 與 device plugin 管理不同的卡。之後遇到 GPU 需求時，先問痛點是誰先拿到卡、一張卡要不要分、叢集版本夠不夠新。裝好之後，用 <code>kubectl</code> 自己確認元件真的在跑，查用量時也先弄清楚那個數字來自哪一份紀錄。</p>
+<h2 id="_9">延伸閱讀<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h2>
+<p>想再深入，可以從這幾份開始：</p>
+<ul>
+<li><strong><a href="https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/">Dynamic Resource Allocation | Kubernetes</a></strong> —— DeviceClass、ResourceClaim、ResourceSlice 的官方定義，以及 CEL 篩選與裝置共享的說明；還在 alpha 的功能也列在這裡。</li>
+<li><strong><a href="https://project-hami.io/docs/next/userguide/kai-scheduler/how-to-use-kai-scheduler">HAMi 官方的 KAI Scheduler 整合指南</a></strong> ——（HAMi 文件站僅 next 版本收錄此頁，對應版本路徑不存在，截至 2026-08）官方說明這個整合用的是 HAMi-core 而不是整套 HAMi 平台，以及 <code>gpu-memory</code> annotation 的寫法和比例換算的警告。</li>
+<li><strong><a href="https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu/blob/v0.4.1/docs/prerequisites.md">DRA Driver for NVIDIA GPUs 的前置條件</a></strong> —— Kubernetes 版本下限、driver 版本、CDI、NFD，以及各平台的 driver root 路徑。</li>
+<li><strong><a href="https://www.cncf.io/projects/kai-scheduler/">KAI Scheduler 的 CNCF 專案頁</a></strong> —— 進入 sandbox 的日期與社群活躍度資料。</li>
+<li><strong><a href="https://www.cncf.io/blog/2026/07/15/hami-becomes-a-cncf-incubating-project/">HAMi 成為 CNCF incubating 專案</a></strong> —— TOC 通過的公告與專案定位說明，和上一條一起看，可以比較兩個專案的成熟度。</li>
+</ul>
+<h2 id="_10">下一步<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h2>
+<p>Sprint 1 到這裡結束。導入前，先確認 Kubernetes、KAI、HAMi 與 DRA driver 的版本是否符合所選功能的條件，節點標籤是否對得上 chart 的部署設定，RuntimeClass 是否存在，以及 driver root 是否符合平台的安裝路徑。需要 VRAM 隔離時，再依 Day 3 的方法測試超額配置是否被拒絕、同卡其他容器是否受影響，確認目標環境的行為。</p>
+<p>下一個 sprint 往更底層走：卡分好了、工作也跑起來之後，要怎麼知道它們在節點上實際做了什麼？Sprint 2 從 eBPF 和執行期安全開始。</p>
+<hr />
+<div class="admonition quote">
+<p>Kubernetes 標誌為 CNCF 之官方資產,此處作社群教學用途。</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到頂端
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="頁腳" >
+        
+          
+          <a href="../sprint1-day7-dra-aks-real-gpu/" class="md-footer__link md-footer__link--prev" aria-label="上一頁: Day 7 · DRA 配置實體 GPU">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                上一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 7 · DRA 配置實體 GPU
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../sprint2-day0-ebpf-concepts/" class="md-footer__link md-footer__link--next" aria-label="下一頁: Day 0 · eBPF 是什麼">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                下一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 0 · eBPF 是什麼
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      KAI Scheduler、HAMi、Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,作社群教學用途
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.code.annotate", "content.code.select", "content.tabs.link", "search.suggest", "search.highlight", "search.share"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u8907\u88fd", "clipboard.copy": "\u8907\u88fd", "search.result.more.one": "\u6b64\u9801\u5c1a\u6709 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.more.other": "\u6b64\u9801\u5c1a\u6709 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.none": "\u6c92\u6709\u7b26\u5408\u7684\u9805\u76ee", "search.result.one": "\u627e\u5230 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.other": "\u627e\u5230 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.placeholder": "\u6253\u5b57\u9032\u884c\u641c\u5c0b", "search.result.term.missing": "\u7f3a\u5c11\u5b57\u8a5e", "select.version": "\u9078\u64c7\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

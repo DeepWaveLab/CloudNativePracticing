@@ -1,0 +1,3604 @@
+
+<!doctype html>
+<html lang="zh-TW" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="雲原生實作課程：GPU 排程、eBPF 與執行期安全、WebAssembly、服務網格與機密運算、遊戲伺服器平台">
+      
+      
+      
+        <link rel="canonical" href="https://deepwavelab.github.io/CloudNativePracticing/runbook/sprint3-day6-spinkube-shim/">
+      
+      
+        <link rel="prev" href="../sprint3-day5-cost-measurement/">
+      
+      
+        <link rel="next" href="../sprint3-day7-spinkube-operator/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Day 6 · SpinKube（上）：shim 佈建 - Cloud Native Lab Course</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/terminal.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#day-6-spinkuberuntime-class-manager-shim" class="md-skip">
+          跳轉到
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="頁首">
+    <a href="../.." title="Cloud Native Lab Course" class="md-header__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Cloud Native Lab Course
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Day 6 · SpinKube（上）：shim 佈建
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換深色模式"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="切換深色模式" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換淺色模式"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="切換淺色模式" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜尋" placeholder="搜尋" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="搜尋">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="分享" aria-label="分享" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="清除" aria-label="清除" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜尋引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="標籤" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  首頁
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint1-day0-azure-aks-foundation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 1 · GPU 排程三部曲
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint2-day0-ebpf-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 2 · eBPF 與執行期安全
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../sprint3-day0-wasm-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 3 · WebAssembly
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint4-day0-mesh-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 4 · 服務網格與機密運算
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint5-day0-game-server-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 5 · 遊戲伺服器平台
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="導覽列" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Cloud Native Lab Course" class="md-nav__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Cloud Native Lab Course
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首頁
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    首頁
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 3 · WebAssembly 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 4 · 服務網格與機密運算 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint5/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 5 · 遊戲伺服器平台 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day0-azure-aks-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 環境建置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day1-kai-queue-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · KAI 安裝與 Queue 基礎
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day2-gang-scheduling-preemption/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Gang Scheduling 與搶占
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day3-hami-memory-isolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · HAMi 安裝與 VRAM 用量限制
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day4-hami-kai-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · HAMi 與 KAI 整合
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day5-hami-webui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · HAMi-WebUI 觀測介面
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day6-dra-simulated-devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · DRA 概念與模擬裝置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day7-dra-aks-real-gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · DRA 配置實體 GPU
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day8-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · Sprint 1 總結
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day0-ebpf-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · eBPF 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day1-bpftrace-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · bpftrace 三支經典工具
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day2-bpftrace-kubernetes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · 把核心事件接回 Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day3-falco-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Falco 安裝與預設規則
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day4-falco-custom-rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · 自訂規則、誤報調校與告警路由
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day5-tetragon-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Tetragon 與 TracingPolicy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day6-tetragon-enforcement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · 從偵測到攔截
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day7-cilium-kubeproxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Cilium 與 kube-proxy replacement
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day8-cilium-network-policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · CiliumNetworkPolicy（L3/L4 → L7）
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day9-hubble/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Hubble 可觀測性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 綜合：四套工具的分工
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 3 · WebAssembly
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 3 · WebAssembly
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day0-wasm-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · wasm 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day1-three-generations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · RuntimeClass 與節點執行路徑
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day2-wasmcloud/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · wasmCloud 與元件模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day3-wasmcloud-distributed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · wasmCloud 分散式模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day4-wasmedge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · WasmEdge 執行期
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day5-cost-measurement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · 執行時間、記憶體與量測範圍
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · SpinKube（上）：shim 佈建
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · SpinKube（上）：shim 佈建
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#controller" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        從手動安裝到交給 controller
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        開始之前
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1:打包一個 Spin 應用
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-cert-manager-runtime-class-manager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2:安裝 cert-manager 與 runtime-class-manager
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-rcm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3:告訴 rcm 要裝什麼、裝到哪些節點
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4:先處理同名的 RuntimeClass
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5:送一顆 pod 進去
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6:改一個字串，讓 pod 跑起來
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rcm-day-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rcm 自動化了 Day 4 的哪些事
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        疑難排解
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="疑難排解">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rcm 回報已佈建，pod 卻是 no runtime for "spin-v2" is configured
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        同名的 RuntimeClass 沒有被更新
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        刪掉的 RuntimeClass 沒有自動重建
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pod 停在 no command specified
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        在 /usr/bin 找不到 shim
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        想一想
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        小結
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day7-spinkube-operator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · SpinKube（下）：operator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day8-reversibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · SpinKube 移除與節點殘留
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day9-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · 依工作負載選擇 Wasm 路線
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 4 · 服務網格與機密運算
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 4 · 服務網格與機密運算
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1" id="__nav_5_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part 1 · 服務網格（Day 0–4）
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part 1 · 服務網格（Day 0–4）
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day0-mesh-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 服務網格與入口閘道的三層地圖
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day1-envoy-gateway/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · Envoy Gateway 與 HTTP/3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day2-istio-ambient/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Istio ambient：服務間 mTLS 與連線限制
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day3-cilium-mesh/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Cilium mesh：WireGuard 加密與 L7
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day4-istio-vs-cilium/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · Istio 與 Cilium 比較
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part 2 · 機密運算（Day 5–9）
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part 2 · 機密運算（Day 5–9）
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day5-confidential-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · 機密運算的威脅模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day6-kata-sandboxing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · Kata Pod Sandboxing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day7-katacc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · kata-cc：SEV-SNP 機密硬體
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day8-attestation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 遠端證明：MAA、SKR 與金鑰釋放
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day9-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · 機密容器的需求與驗證範圍
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 5 · 遊戲伺服器平台
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 5 · 遊戲伺服器平台
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day0-game-server-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 遊戲伺服器平台概念
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day1-agones-first-gameserver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · Agones 第一顆 GameServer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day2-fleet-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Fleet 生命週期
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day3-allocation-autoscaler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Allocation 與 autoscaler
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day4-quilkin-udp-proxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · Quilkin UDP proxy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day5-nakama-postgres/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Nakama 與 PostgreSQL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day6-matchmaking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · Matchmaking 串接
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day7-python-client-e2e/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Python client 端到端
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day8-observability-resilience/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 觀測與韌性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day9-unity-client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Unity client 與 relay server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 遊戲伺服器平台總結
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#controller" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        從手動安裝到交給 controller
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        開始之前
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1:打包一個 Spin 應用
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-cert-manager-runtime-class-manager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2:安裝 cert-manager 與 runtime-class-manager
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-rcm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3:告訴 rcm 要裝什麼、裝到哪些節點
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4:先處理同名的 RuntimeClass
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5:送一顆 pod 進去
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6:改一個字串，讓 pod 跑起來
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rcm-day-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rcm 自動化了 Day 4 的哪些事
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        疑難排解
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="疑難排解">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rcm 回報已佈建，pod 卻是 no runtime for "spin-v2" is configured
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        同名的 RuntimeClass 沒有被更新
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        刪掉的 RuntimeClass 沒有自動重建
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pod 停在 no command specified
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        在 /usr/bin 找不到 shim
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        想一想
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        小結
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="day-6-spinkuberuntime-class-manager-shim">Day 6: SpinKube(上)——runtime-class-manager 佈建 shim 與節點側設定<a class="headerlink" href="#day-6-spinkuberuntime-class-manager-shim" title="Permanent link">&para;</a></h1>
+<p><img align="right" alt="SpinKube 官方標誌" src="../../assets/logos/spinkube-icon-color.svg" width="88" /></p>
+<p><a href="../sprint3-day4-wasmedge/">Day 4</a> 在一台節點上手動裝好 WasmEdge 的 shim：下載執行檔、在 <code>config.toml</code> 加一段 runtime 設定、重啟 containerd。一台節點這樣做還可以。叢集有十幾台節點、spot 節點隨時被回收、節點映像升級時整批換新，<a href="../sprint3-day5-cost-measurement/#mine-1">Day 5</a> 也看過節點層的改動撐不過一次 VM 汰換，每台新節點都得重做一次。這件事適合交給 controller 自動做。</p>
+<p>這一章用 SpinKube 的 runtime-class-manager 自動佈建 shim。裝完之後，<code>kubectl get shim</code> 顯示 READY、節點標著 <code>provisioned</code>、安裝用的 Job 是 Complete，送一顆 pod 進去，卻得到 <code>no runtime for "spin-v2" is configured</code>。我們會一步一步找出原因，修好它，最後讓一個 Spin 應用回應 HTTP 200。</p>
+<p>讀完之後，一個自動化工具回報「節點已佈建」時，你能判斷 containerd 是否真的載入了那段設定；pod 起不來時，能分辨是 plugin 路徑寫錯、RuntimeClass 被同名物件佔住，還是映像缺少進入點。</p>
+<h2 id="controller">從手動安裝到交給 controller<a class="headerlink" href="#controller" title="Permanent link">&para;</a></h2>
+<p>先回想 Day 4 在節點上做的三件事：把 shim 執行檔放上節點、在 <code>config.toml</code> 寫一段 runtime 設定、重啟 containerd 讓設定生效。再加上一個 API server 端的動作：建一個 RuntimeClass 指向那個 handler。</p>
+<p><strong>SpinKube</strong> 是一組讓 Spin 應用跑在 Kubernetes 上的專案。Spin 是一個用 WebAssembly 寫 HTTP 服務的框架，它的應用由 shim <code>containerd-shim-spin</code> 執行。SpinKube 把工作分成兩半：節點側由 <strong>runtime-class-manager</strong>（以下簡稱 rcm）負責，它是一個 controller，替符合條件的節點裝 shim、改設定、建 RuntimeClass；應用側由 spin-operator 負責，把 Spin 應用變成 Deployment，那是 Day 7 的內容。</p>
+<p>rcm 從 <strong>Shim 資源</strong>得知要做什麼。Shim 是 rcm 定義的自訂資源，一份 Shim 描述一支 shim：從哪裡下載、雜湊值是多少、要裝到哪些節點、裝完要建什麼名字的 RuntimeClass。節點上的 <code>rcm-lock.json</code> 則記錄裝了哪支 shim、雜湊值與檔案路徑。</p>
+<p>下圖把今天會碰到的元件按位置分開，上半部是 API server 裡的物件，下半部是節點上的檔案。圖中的 cert-manager 是管理 TLS 憑證的元件，Day 7 的 spin-operator 需要它，rcm 本身不需要：</p>
+<p><img alt="SpinKube 的元件分布：叢集側有 runtime-class-manager controller、描述要裝哪支 shim 的 Shim 資源，以及它建立的 RuntimeClass；節點側由每台節點一個的 install Job 寫入 /opt/rcm/bin 下的 shim、config.toml 檔尾的一段設定和 rcm-lock.json；spin-operator 與 cert-manager 是 Day 7 才用到的元件" src="../../assets/diagrams/s3d6-spinkube-parts.svg" /></p>
+<p>照著圖看：rcm 讀 Shim 資源，決定要裝哪支 shim、裝到哪些節點；真正動手改節點的是它替每台節點建立的 install Job。節點側那三樣東西，前兩樣就是 Day 4 手動做過的事，第三樣是手動路線沒有的安裝紀錄。接下來的步驟會一個一個看到它們。</p>
+<h2 id="_1">開始之前<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<p>本章指令使用 <code>spin</code> CLI v4.0.2、<code>containerd-shim-spin</code> v0.25.1 與 rcm v0.2.0；節點側的結果來自 containerd 2.3.3。安裝時請使用各步驟指定的版本。</p>
+<p>節點上的指令透過 Day 1 的 <code>node-shell</code> DaemonSet 執行。先確認目前節點的 Pod 已就緒，重新取得名稱：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>kubectl<span class="w"> </span>-n<span class="w"> </span>wasmlab<span class="w"> </span>rollout<span class="w"> </span>status<span class="w"> </span>ds/node-shell<span class="w"> </span>--timeout<span class="o">=</span>5m
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nv">NODE_SHELL_POD</span><span class="o">=</span><span class="k">$(</span>kubectl<span class="w"> </span>-n<span class="w"> </span>wasmlab<span class="w"> </span>get<span class="w"> </span>pod<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>node-shell<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.items[0].metadata.name}&#39;</span><span class="k">)</span>
+</span></code></pre></div>
+<p>以下 <code>kubectl</code>、Helm 與 Spin 命令在本機執行；需要進節點時，命令會明列 <code>exec</code> 與 <code>nsenter</code>。</p>
+<p>下載<a href="../../assets/labs/s3d6/node-snapshot.sh">節點取樣腳本</a>，存為 <code>node-snapshot.sh</code>。腳本會記錄 containerd 設定檔與解析結果、handler、shim 執行檔、RuntimeClass、設定目錄和節點標籤。先用 <code>kubectl config get-contexts</code> 找出本課 context，設定 <code>CTX</code>；<code>KUBECONFIG</code> 沿用 Day 2 的專用檔案。在本機執行：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">CTX</span><span class="o">=</span>&lt;lab-context&gt;
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>bash<span class="w"> </span>node-snapshot.sh<span class="w"> </span>day6-s0
+</span></code></pre></div>
+<p>開始安裝前，先將 <code>day6-s0</code> 與 Day 1 保存的基準比對。以下假設基準檔放在 <code>sprint3-day1-manifests/</code>：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="gp">$ </span>diff<span class="w"> </span>sprint3-day1-manifests/baseline-containerd-config.toml<span class="w"> </span>day6-s0-containerd-config.toml
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="gp">$ </span>diff<span class="w"> </span>sprint3-day1-manifests/baseline-containerd-config-dump.toml<span class="w"> </span>day6-s0-containerd-config-dump.toml
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="gp">$ </span>diff<span class="w"> </span>sprint3-day1-manifests/baseline-node-runtimehandlers.json<span class="w"> </span>day6-s0-node-runtimehandlers.json
+</span></code></pre></div>
+<p>三次比對都沒有輸出且結束碼為 0，表示這三項與 Day 1 基準相同。本章後面的映像拉取結果以沒有 Day 5 的 WasmEdge handler 與映像拉取設定為前提。若沿用 Day 5 的原節點，請記錄仍在的差異；仍可操作 SpinKube，但不能把這個環境的映像拉取結果當成「未加設定」的對照。</p>
+<p>每個階段換一個輸出前綴，例如 <code>day6-s1</code>，再逐份用 <code>diff</code> 比對。腳本假設只有一台測試節點；若有多台，要分別選定節點取樣，不能把第一筆 Node 與另一台 node-shell 的結果混用。</p>
+<h2 id="step-1">步驟 1:打包一個 Spin 應用<a class="headerlink" href="#step-1" title="Permanent link">&para;</a></h2>
+<p>本機需要 Spin CLI 4.0.2 與 <code>static-fileserver</code> 範本；安裝方式見 <a href="https://spinframework.dev/v4/install">Spin CLI 官方說明</a>。請依文件的指定版本方式選 4.0.2，再用 <code>spin --version</code> 確認；直接安裝最新版不一定與本課相同。二進位檔手動安裝不會附範本，需依同頁的 Templates 段落另裝。先準備等一下要跑的應用。用 <code>spin</code> CLI 的 <code>static-fileserver</code> 範本建一個 app（<code>spin new -t static-fileserver</code>，依提示輸入專案名稱），它把 <code>assets/</code> 目錄裡的檔案當成靜態網頁回應。切換到新建專案目錄，後面的 <code>spin registry push</code> 也在該目錄執行。在 <code>assets/index.html</code> 放一行 <code>Sprint3 Day6 SpinKube probe</code>。這個範本的 wasm 元件是官方預先編好的，不需要裝 Rust 之類的編譯工具。</p>
+<p>推到 ttl.sh。ttl.sh 是不用帳號的公開 registry，tag 寫 <code>:1h</code> 表示映像保留一小時，適合做實驗；<code>&lt;tag&gt;</code> 換成你自己取的名字：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="gp">$ </span>spin<span class="w"> </span>registry<span class="w"> </span>push<span class="w"> </span>ttl.sh/&lt;tag&gt;:1h
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">Pushed with digest sha256:5e551527…</span>
+</span></code></pre></div>
+<p>依 <a href="https://spinframework.dev/v4/distributing-apps">Spin v4 發佈文件</a>與 <a href="https://github.com/opencontainers/distribution-spec/blob/v1.1.0/spec.md#pulling-manifests">OCI Distribution v1.1.0</a>，推送成功後用 HTTP GET 從 <a href="https://ttl.sh/">ttl.sh</a> 取得 manifest，<code>&lt;tag&gt;</code> 換成剛才推送使用的名稱，並在一小時內執行（依官方文件補上，本課沒有實跑）：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="s1">&#39;https://ttl.sh/v2/&lt;tag&gt;/manifests/1h&#39;</span>
+</span></code></pre></div>
+<p>把這個映像的 manifest 從 registry 拉回來看，layers 欄位是這樣：</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">&quot;layers&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;mediaType&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;application/vnd.wasm.content.layer.v1+wasm&quot;</span><span class="p">,</span><span class="w">         </span><span class="nt">&quot;size&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3781679</span><span class="w"> </span><span class="p">},</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;mediaType&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;application/vnd.fermyon.spin.application.v1+config&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;size&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">609</span><span class="w"> </span><span class="p">}</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="p">]</span>
+</span></code></pre></div>
+<p>Day 4 看過的三種打包都只有一層，Spin 的有兩層。第一層是 wasm 本體。第二層 609 B 叫 <strong>locked app</strong>：Spin 應用的完整描述，包括用什麼觸發（這裡是 HTTP）、哪個路徑交給哪個元件、元件從哪裡來。28 B 的 <code>index.html</code> 也被 base64 編碼後直接放進 locked app，沒有另開一層。</p>
+<p>image config 只有 209 B，裡面只有一個指向 locked app 的 label，沒有 <code>Cmd</code>，也沒有 <code>Entrypoint</code>。這一點在步驟 6 會讓 pod 起不來，先記著。</p>
+<p>把它併進 <a href="../sprint3-day4-wasmedge/#gate">Day 4 的打包對照表</a>，現在有四欄：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>wasmCloud</th>
+<th>runwasi tar</th>
+<th>runwasi wasm-layer</th>
+<th><strong>Spin App</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>layer mediaType</td>
+<td><code>application/wasm</code></td>
+<td><code>…layer.v1.tar</code></td>
+<td><code>…wasm.component.layer.v0+wasm</code></td>
+<td><strong><code>…wasm.content.layer.v1+wasm</code> + <code>…fermyon.spin.application.v1+config</code></strong></td>
+</tr>
+<tr>
+<td>層數</td>
+<td>1</td>
+<td>1</td>
+<td>1</td>
+<td><strong>2</strong></td>
+</tr>
+<tr>
+<td>進入點</td>
+<td>列 WIT 介面</td>
+<td><code>Entrypoint</code></td>
+<td><code>Entrypoint</code> + label</td>
+<td><strong>沒有,config label 指向 locked app</strong></td>
+</tr>
+<tr>
+<td><code>os</code> 欄位</td>
+<td><code>wasip2</code></td>
+<td><code>wasip1</code></td>
+<td><code>wasip1</code></td>
+<td><strong><code>wasip1</code>(但 payload 其實是 component)</strong></td>
+</tr>
+<tr>
+<td>誰讀得懂</td>
+<td>wasmCloud</td>
+<td>WasmEdge</td>
+<td>WasmEdge</td>
+<td>containerd-shim-spin</td>
+</tr>
+</tbody>
+</table>
+<p>最右欄跟前三欄的 mediaType 都不同。wasm 的 OCI 打包沒有共通約定，mediaType 由各家自己定義，同一個 registry 裡的映像，不一定是同一種東西，要看哪個 shim 讀得懂。另外，用 Day 4 的方法看 wasm 檔的前 8 個位元組，是 <code>00 61 73 6d 0d 00 01 00</code>，代表 component；image config 的 <code>os</code> 欄位卻寫 <code>wasip1</code>。所以在 Spin 的打包裡，不能用 <code>os</code> 欄位判斷裡面是 component 還是 core module。</p>
+<h2 id="2-cert-manager-runtime-class-manager">步驟 2:安裝 cert-manager 與 runtime-class-manager<a class="headerlink" href="#2-cert-manager-runtime-class-manager" title="Permanent link">&para;</a></h2>
+<p>先裝 cert-manager v1.21.1，供 Day 7 的 spin-operator 使用。rcm 0.2.0 的 chart 只有六個 template，沒有 webhook，也沒有任何 Certificate 資源。官方安裝指引把 cert-manager 排在第一步，是為了後面的 spin-operator，只裝 shim 可以略過，這裡先裝好給 Day 7 用。cert-manager 的 chart 在 jetstack 的 Helm repo，還沒加過的話，先 <code>helm repo add jetstack https://charts.jetstack.io</code>。</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="gp">$ </span>helm<span class="w"> </span>upgrade<span class="w"> </span>--install<span class="w"> </span>cert-manager<span class="w"> </span>jetstack/cert-manager<span class="w"> </span>-n<span class="w"> </span>cert-manager<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">    </span>--create-namespace<span class="w"> </span>--version<span class="w"> </span>v1.21.1<span class="w"> </span>--set<span class="w"> </span>crds.enabled<span class="o">=</span><span class="nb">true</span><span class="w"> </span>--wait
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="gp">$ </span>helm<span class="w"> </span>upgrade<span class="w"> </span>--install<span class="w"> </span>runtime-class-manager<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span>oci://ghcr.io/spinframework/charts/runtime-class-manager<span class="w"> </span>--version<span class="w"> </span><span class="m">0</span>.2.0<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">    </span>-n<span class="w"> </span>rcm<span class="w"> </span>--create-namespace<span class="w"> </span>--wait
+</span></code></pre></div>
+<p>rcm 的 chart 裝了一個 Deployment（controller 本身）、一個 <code>Shim</code> CRD（<code>shims.runtime.spinkube.dev</code>）、ServiceAccount 與 RBAC。</p>
+<p>跟 Day 4 一樣，每一步前後都比對一次節點：<code>config.toml</code>、<code>containerd config dump</code>、<code>runtimeHandlers</code>、shim 執行檔清單、RuntimeClass 清單，今天再加上 containerd 設定目錄和節點標籤，共七項。裝完這兩個 chart，七項都跟裝之前一樣。controller 跑起來了，但它還沒碰任何節點。</p>
+<h2 id="3-rcm">步驟 3:告訴 rcm 要裝什麼、裝到哪些節點<a class="headerlink" href="#3-rcm" title="Permanent link">&para;</a></h2>
+<p><code>containerd-shim-spin</code> 的每個 release 都附了一份官方 Shim 資源。下載本課保存的 <a href="../../assets/labs/s3d6/shim-spin-v2.yaml">v0.25.1 官方 Shim YAML</a>，存成 <code>shim-spin-v2.yaml</code>，不做任何修改，然後 <code>kubectl apply -f shim-spin-v2.yaml</code>。它的重點欄位是這幾個：</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">spec</span><span class="p">:</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">spin</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;true&quot;</span><span class="p p-Indicator">}</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="nt">fetchStrategy</span><span class="p">:</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">    </span><span class="nt">platforms</span><span class="p">:</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">os</span><span class="p">:</span><span class="w"> </span><span class="nv">linux</span><span class="p p-Indicator">,</span><span class="nt"> arch</span><span class="p">:</span><span class="w"> </span><span class="nv">x86_64</span><span class="p p-Indicator">,</span><span class="nt"> location</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;…/containerd-shim-spin-v2-linux-x86_64.tar.gz&quot;</span><span class="p p-Indicator">,</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="nt">         sha256</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;1755fbeb…&quot;</span><span class="p p-Indicator">}</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">  </span><span class="nt">runtimeClass</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="nv">wasmtime-spin-v2</span><span class="p p-Indicator">,</span><span class="nt"> handler</span><span class="p">:</span><span class="w"> </span><span class="nv">spin-v2</span><span class="p p-Indicator">}</span>
+</span></code></pre></div>
+<p>由上往下看：<code>nodeSelector</code> 指定只有帶 <code>spin=true</code> 標籤的節點會被安裝；<code>fetchStrategy.platforms</code> 依 CPU 架構列出下載位置和 sha256，完整檔案裡另外還有一筆 aarch64；<code>runtimeClass</code> 指定要建的 RuntimeClass 叫 <code>wasmtime-spin-v2</code>，handler 是 <code>spin-v2</code>。</p>
+<p>套用之後，看 rcm 有沒有動作：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>shim<span class="w"> </span>-o<span class="w"> </span>wide
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="go">NAME      RUNTIMECLASS       READY   NODES</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="go">spin-v2   wasmtime-spin-v2   0       0</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span><span class="nb">jobs</span><span class="w"> </span>-A
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="go">No resources found</span>
+</span></code></pre></div>
+<p><code>READY 0</code>、<code>NODES 0</code>，也沒有任何 Job，節點的七項比對全都沒變。叢集裡沒有節點帶 <code>spin=true</code>，所以 rcm 什麼都不做。安裝範圍完全由 <code>nodeSelector</code> 決定，預設一台都沒有。Day 4 的手動路線，範圍是「你連進了哪台節點」，沒有地方記錄；這裡的範圍寫在一個 YAML 欄位裡，查得到。</p>
+<p>替節點貼上標籤：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>label<span class="w"> </span>node<span class="w"> </span>--all<span class="w"> </span><span class="nv">spin</span><span class="o">=</span><span class="nb">true</span>
+</span></code></pre></div>
+<p>貼完之後，叢集裡出現一個 Job，幾秒內就 Complete。這是 rcm 替這台節點建立的 <strong>install Job</strong>，真正改節點的就是它。把它的結構攤開來：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>initContainer: downloader   → 下載 tarball,逐字比對 sha256,不符就失敗
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>container:     provisioner  → 掛 hostPath /,裝 shim、改 config.toml、經 D-Bus 重啟 containerd
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>兩者皆 privileged
+</span></code></pre></div>
+<p>把貼標籤之後的流程畫成圖，由上往下是時間順序：</p>
+<p><img alt="貼上 spin=true 標籤之後的五個步驟：節點符合 Shim 的 nodeSelector；runtime-class-manager 替這台節點建 install Job；initContainer downloader 下載壓縮檔並比對 sha256；privileged 的 provisioner 掛載節點根目錄，放 shim、改 config.toml、寫 rcm-lock.json、重啟 containerd；節點被標上 spin-v2=provisioned" src="../../assets/diagrams/s3d6-install-job.svg" /></p>
+<p>照著圖上的編號看，第 3 步和第 4 步是兩個容器。downloader 先跑，下載 shim 壓縮檔並比對 sha256，雜湊對不上就失敗，Job 不會往下走；Day 4 有在本機核對雜湊，但節點另外下載的那份沒有再次核對；rcm 則在節點上的下載程序驗證。provisioner 以 privileged 模式掛載整台節點的根目錄，做的就是 Day 4 手動做的那幾件事，最後透過 systemd 重啟 containerd。</p>
+<p>再比對一次節點，這次有變化：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>config.toml       +6 行(檔尾,# RCM runtime config for spin-v2 起)
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>/opt/rcm/bin/containerd-shim-spin-v2     83.9 MiB
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>/opt/rcm/rcm-lock.json                   記錄 shim 名、sha256、路徑
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>節點標籤          +spin=true、+spin-v2=provisioned
+</span></code></pre></div>
+<p>shim 放在 <code>/opt/rcm/bin/</code>，不在 <code>PATH</code> 裡。rcm 在 <code>config.toml</code> 的 <code>runtime_type</code> 直接寫這支執行檔的絕對路徑，containerd 2.x 接受這種寫法，所以 shim 不需要放進 <code>PATH</code>。如果你沿用 Day 4 的方式，掃 <code>/usr/bin</code> 和 <code>/usr/local/bin</code> 確認 shim 在不在，會以為沒裝，見<a href="#mine-5">疑難排解：在 <code>/usr/bin</code> 找不到 shim</a>。</p>
+<p>安裝紀錄在 <code>/opt/rcm/rcm-lock.json</code>。之後要確認 shim 的名稱、雜湊值與安裝路徑，可以查這份檔案。</p>
+<h2 id="step-4">步驟 4:先處理同名的 RuntimeClass<a class="headerlink" href="#step-4" title="Permanent link">&para;</a></h2>
+<p>從控制面看，安裝已經完成，每個指標都是成功：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>shim<span class="w"> </span>-o<span class="w"> </span>wide
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="go">NAME      RUNTIMECLASS       READY   NODES</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="go">spin-v2   wasmtime-spin-v2   1       1</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="go">節點標籤:  &quot;spin-v2&quot;: &quot;provisioned&quot;</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="go">install Job: Complete,log 沒有任何 warning,最後一行是 restarting containerd</span>
+</span></code></pre></div>
+<p>Shim 的 <code>RUNTIMECLASS</code> 欄寫著 <code>wasmtime-spin-v2</code>。可是叢集裡本來就有一顆同名的 RuntimeClass，是 <a href="../sprint3-day1-three-generations/#step-4">Day 1 步驟 4</a> 刻意建的對照組，handler 指向不存在的實作。SpinKube 的官方 Shim 資源用的也是這個名字，YAML 註解寫明這是 spin-operator 的預設值。看看 rcm 怎麼處理這個衝突：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="go">{&quot;level&quot;:&quot;debug&quot;,&quot;shim&quot;:&quot;spin-v2&quot;,&quot;message&quot;:&quot;RuntimeClass found: wasmtime-spin-v2&quot;}</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>runtimeclass<span class="w"> </span>wasmtime-spin-v2<span class="w"> </span>-o<span class="w"> </span>yaml
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="go">handler: wasmtime-spin-v2       ← 還是 Day 1 那個壞 handler</span>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="go">resourceVersion: &quot;2402&quot;         ← 完全沒被改過</span>
+</span></code></pre></div>
+<p>rcm 的 log 說它找到了這顆 RuntimeClass，然後就沒有下文。RuntimeClass 的 handler 還是 Day 1 的 <code>wasmtime-spin-v2</code>，<code>resourceVersion</code> 沒變，表示沒有被改過，rcm 也沒有報任何錯誤。rcm 的原始碼只用名字檢查 RuntimeClass 是否存在，存在就跳過建立，不比對裡面的欄位，見<a href="#mine-2">疑難排解：同名的 RuntimeClass 沒有被更新</a>。</p>
+<p>處理方式是刪掉 Day 1 那顆，讓 rcm 重建。Day 1 的對照組要示範的是「handler 不存在會怎樣」，跟名字無關，所以先用一個不會撞名的名字建一顆替代品，再刪原件：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>runtimeclass-day1-control-renamed.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="s">apiVersion: node.k8s.io/v1</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="s">kind: RuntimeClass</span>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="s">metadata:</span>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="s">  name: wasm-day1-missing-handler</span>
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="s">handler: wasmtime-spin-v2</span>
+</span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="s">EOF</span>
+</span><span id="__span-14-8"><a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>runtimeclass-day1-control-renamed.yaml
+</span><span id="__span-14-9"><a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>kubectl<span class="w"> </span>delete<span class="w"> </span>runtimeclass<span class="w"> </span>wasmtime-spin-v2
+</span></code></pre></div>
+<p>刪掉之後等一陣子，<code>wasmtime-spin-v2</code> 不會自己回來。rcm 只監看 Shim、Node、Job 三種資源的變化，RuntimeClass 被刪掉不會觸發它重新處理（reconcile）。對 Shim 做任何一次更新就能觸發，例如加一個 annotation：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>annotate<span class="w"> </span>shim<span class="w"> </span>spin-v2<span class="w"> </span>day6/poke<span class="o">=</span>&lt;任意值&gt;<span class="w"> </span>--overwrite
+</span></code></pre></div>
+<p>rcm 隨即重建 RuntimeClass，見<a href="#mine-3">疑難排解：刪掉的 RuntimeClass 沒有自動重建</a>。重建出來的這一顆長這樣：</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="nt">handler</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">spin-v2</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="nt">metadata</span><span class="p">:</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">  </span><span class="nt">ownerReferences</span><span class="p">:</span>
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="nv">Shim</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">spin-v2</span><span class="p p-Indicator">,</span><span class="nt"> controller</span><span class="p">:</span><span class="w"> </span><span class="nv">true</span><span class="p p-Indicator">}</span>
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="nt">scheduling</span><span class="p">:</span>
+</span><span id="__span-16-6"><a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="w">  </span><span class="nt">nodeSelector</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">spin</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;true&quot;</span><span class="p p-Indicator">}</span>
+</span></code></pre></div>
+<p>這顆有兩個欄位是 Day 4 手動建的 <code>wasmedge</code> 沒有的。<code>scheduling.nodeSelector</code> 在 <a href="../sprint3-day1-three-generations/#mine-3">Day 1 的疑難排解</a>看過：指名這個 RuntimeClass 的 pod，只會被排到帶 <code>spin=true</code> 的節點；沒寫這一欄的 <code>wasmedge</code>，pod 可能被排到沒裝 shim 的節點再失敗。本課只有一台節點，多節點時的過濾行為沒有實際測過。<code>ownerReferences</code> 表示這顆 RuntimeClass 屬於 Shim <code>spin-v2</code>，刪掉 Shim 時，Kubernetes 會連帶刪掉它，Day 8 拆除時會用到這一點。</p>
+<h2 id="step-5">步驟 5:送一顆 pod 進去<a class="headerlink" href="#step-5" title="Permanent link">&para;</a></h2>
+<p>現在 RuntimeClass 的 handler 是 <code>spin-v2</code>。寫一顆最簡單的 Pod 指名它，不經過 spin-operator，測試 <code>spin-v2</code> handler 能否使用。映像換成步驟 1 推上去的那一個：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>pod-spinapp-probe.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="s">kind: Pod</span>
+</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="s">metadata:</span>
+</span><span id="__span-17-5"><a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="s">  name: spinapp-probe</span>
+</span><span id="__span-17-6"><a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="s">  namespace: wasmlab</span>
+</span><span id="__span-17-7"><a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="s">spec:</span>
+</span><span id="__span-17-8"><a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="s">  runtimeClassName: wasmtime-spin-v2</span>
+</span><span id="__span-17-9"><a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="s">  restartPolicy: Never</span>
+</span><span id="__span-17-10"><a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a><span class="s">  containers:</span>
+</span><span id="__span-17-11"><a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a><span class="s">    - name: app</span>
+</span><span id="__span-17-12"><a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a><span class="s">      image: ttl.sh/&lt;tag&gt;:1h</span>
+</span><span id="__span-17-13"><a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a><span class="s">EOF</span>
+</span><span id="__span-17-14"><a id="__codelineno-17-14" name="__codelineno-17-14" href="#__codelineno-17-14"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>pod-spinapp-probe.yaml
+</span></code></pre></div>
+<p><code>kubectl -n wasmlab describe pod spinapp-probe</code> 的事件：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="go">Warning  FailedCreatePodSandBox  kubelet</span>
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="go">  no runtime for &quot;spin-v2&quot; is configured</span>
+</span></code></pre></div>
+<p>這是 <a href="../sprint3-day1-three-generations/#step-4">Day 1</a> 看過的訊息：containerd 不認得這個 handler。可是 install Job 明明改過 <code>config.toml</code>，也重啟過 containerd。用 Day 4 的方法分三層查，分別看設定檔寫了什麼、設定檔經 containerd 解析後包含什麼、kubelet 回報的 handler 清單：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>wasmlab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$NODE_SHELL_POD</span><span class="s2">&quot;</span><span class="w"> </span>--<span class="w"> </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">1</span><span class="w"> </span>-m<span class="w"> </span>--<span class="w"> </span>grep<span class="w"> </span>-c<span class="w"> </span>spin-v2<span class="w"> </span>/etc/containerd/config.toml
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>wasmlab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$NODE_SHELL_POD</span><span class="s2">&quot;</span><span class="w"> </span>--<span class="w"> </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">1</span><span class="w"> </span>-m<span class="w"> </span>--<span class="w"> </span>sh<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;containerd config dump | grep -c spin-v2&#39;</span>
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>node<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.items[0].status.runtimeHandlers}&#39;</span>
+</span></code></pre></div>
+<p>三層的結果：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>config.toml 命中 spin-v2 的行數 = 4      檔案總行數 = 27       ← 宣告面:有
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>containerd config dump 命中     = 0      dump 總行數 = 308      ← 實際載入面:沒有
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>node.status.runtimeHandlers = [&#39;&#39;, &#39;runc&#39;, &#39;untrusted&#39;]         ← 綁定粒度:沒有
+</span></code></pre></div>
+<p><code>config.toml</code> 裡有 4 行提到 <code>spin-v2</code>，設定檔的解析結果裡一行都沒有。dump 本身有 308 行，跟沒裝任何東西時一樣，這指出 rcm 寫入的 handler 沒有出現在設定解析結果；重啟後的 Node 回報也沒有它。kubelet 回報的 handler 清單裡也沒有 <code>spin-v2</code>。</p>
+<p>回頭看 rcm 寫進 <code>config.toml</code> 的那一段，第一行是這樣：</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="k">[plugins.</span><span class="s2">&quot;io.containerd.grpc.v1.cri&quot;</span><span class="k">.containerd.runtimes.spin-v2]</span>
+</span></code></pre></div>
+<p><code>io.containerd.grpc.v1.cri</code> 是 containerd 1.x、config version 2 使用的路徑，config version 3 的 runtime 路徑則是 <code>io.containerd.cri.v1.runtime</code>。<a href="https://github.com/containerd/containerd/blob/main/docs/cri/config.md#config-versions">containerd 官方文件</a> 說明，2.x 仍支援 version 2，會自動轉換為 version 3。本章與 <a href="../sprint3-day4-wasmedge/#mine-2">Day 4</a> 遇到的是新舊 plugin 路徑混用的設定：在本章的 containerd 2.3.3 節點上，rcm 新增的舊路徑區塊沒有出現在解析結果中。rcm 為什麼會選到這個路徑？</p>
+<p>rcm 決定路徑的程式在 <code>internal/containerd/configure.go</code>，v0.2.0 的原文：</p>
+<div class="language-go highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="kd">func</span><span class="w"> </span><span class="nx">generateConfig</span><span class="p">(</span><span class="nx">shimPath</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">runtimeName</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">runtimeOptions</span><span class="w"> </span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">configData</span><span class="w"> </span><span class="p">[]</span><span class="kt">byte</span><span class="p">)</span><span class="w"> </span><span class="kt">string</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="w">    </span><span class="c1">// Config domain for containerd 1.0 (config version 2)</span>
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="w">    </span><span class="nx">domain</span><span class="w"> </span><span class="o">:=</span><span class="w"> </span><span class="s">&quot;io.containerd.grpc.v1.cri&quot;</span>
+</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="nx">strings</span><span class="p">.</span><span class="nx">Contains</span><span class="p">(</span><span class="nb">string</span><span class="p">(</span><span class="nx">configData</span><span class="p">),</span><span class="w"> </span><span class="s">&quot;version = 3&quot;</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-22-5"><a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="w">        </span><span class="c1">// Config domain for containerd 2.0 (config version 3)</span>
+</span><span id="__span-22-6"><a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="w">        </span><span class="nx">domain</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s">&quot;io.containerd.cri.v1.runtime&quot;</span>
+</span><span id="__span-22-7"><a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="w">    </span><span class="p">}</span>
+</span><span id="__span-22-8"><a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="w">    </span><span class="err">…</span>
+</span><span id="__span-22-9"><a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a><span class="p">}</span>
+</span></code></pre></div>
+<p>它在設定檔內文裡找 <code>version = 3</code> 這個字串：找到就用 2.x 路徑，找不到就用 1.x 路徑。<a href="../sprint3-day1-three-generations/">Day 1</a> 看過本章 AKS 節點所用的 <code>config.toml</code>：第一行宣告 <code>version = 2</code>，內容卻已經用 2.x 的 plugin 路徑。下圖呈現這份混用設定在 rcm v0.2.0 與 containerd 2.3.3 下的處理結果：</p>
+<p><img alt="本章混用設定下 rcm v0.2.0 的判斷流程：config.toml 第一行是 version = 2、內容是 io.containerd.cri.v1.runtime；rcm 在檔案裡找不到 &quot;version = 3&quot;，寫入 io.containerd.grpc.v1.cri；containerd 2.3.3 的解析結果沒有新增的 handler；修正方式是把那兩行的路徑換成 io.containerd.cri.v1.runtime" src="../../assets/diagrams/s3d6-plugin-path.svg" /></p>
+<p>我們可以從圖上看到，rcm 的判斷依據是設定檔裡的一個字串。本章設定檔的版本號跟內容不一致，rcm 在這份混用格式的設定中寫出未被採用的新增路徑。Day 4 手動寫設定之前，先用 <code>containerd -c &lt;file&gt; config dump</code> 在副本上確認過路徑，所以沒有遇到這個問題；rcm 用字串比對取代了這一步，而且判斷錯了也不會報錯。</p>
+<p>rcm 的官方文件 <code>supported_distros.md</code> 把 Azure Kubernetes 列為官方支援，但本章的 rcm v0.2.0、containerd 2.3.3 與這份混用設定仍出現上述問題。這個結果不能推論成所有 AKS 節點都會發生；安裝後仍要檢查設定解析結果與 handler 清單。</p>
+<h2 id="step-6">步驟 6:改一個字串，讓 pod 跑起來<a class="headerlink" href="#step-6" title="Permanent link">&para;</a></h2>
+<p>修法只動 rcm 寫的那兩行：把 <code>io.containerd.grpc.v1.cri</code> 換成 <code>io.containerd.cri.v1.runtime</code>，再重啟 containerd。shim、Shim 資源都不用動，也不用重裝。先備份，再替換、重啟：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>wasmlab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$NODE_SHELL_POD</span><span class="s2">&quot;</span><span class="w"> </span>--<span class="w"> </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">1</span><span class="w"> </span>-m<span class="w"> </span>--<span class="w"> </span>cp<span class="w"> </span>/etc/containerd/config.toml<span class="w"> </span>/etc/containerd/config.toml.rcm-1x-backup
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>wasmlab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$NODE_SHELL_POD</span><span class="s2">&quot;</span><span class="w"> </span>--<span class="w"> </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">1</span><span class="w"> </span>-m<span class="w"> </span>--<span class="w"> </span>sed<span class="w"> </span>-i<span class="w"> </span><span class="s1">&#39;s|io\.containerd\.grpc\.v1\.cri&quot;\.containerd\.runtimes\.spin-v2|io.containerd.cri.v1.runtime&quot;.containerd.runtimes.spin-v2|g&#39;</span><span class="w"> </span>/etc/containerd/config.toml
+</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>wasmlab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$NODE_SHELL_POD</span><span class="s2">&quot;</span><span class="w"> </span>--<span class="w"> </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">1</span><span class="w"> </span>-m<span class="w"> </span>--<span class="w"> </span>systemctl<span class="w"> </span>restart<span class="w"> </span>containerd
+</span></code></pre></div>
+<p>這是手動修改節點上的檔案，節點汰換之後就會消失。如果新節點仍使用相同的混用設定，rcm v0.2.0 就會再選到舊路徑。正式環境要等上游修正，或另外想辦法讓它在每台新節點上自動套用；本課沒有測過把 <code>config.toml</code> 第一行改成 <code>version = 3</code> 的做法。另外，rcm 解除安裝時是用字串比對找出自己寫的那一段再刪掉，手改過之後字串對不上，Day 8 會實際走一次。</p>
+<p>重啟之後，再用步驟 5 的方法查 dump 和 handler 清單（下面輸出的前兩行，是在 dump 裡數 <code>spin-v2</code> 出現幾次）。這次 <code>spin-v2</code> 出現了。刪掉步驟 5 那顆 pod，用同一份 YAML 再建一次，事件變成另一種錯誤：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>wasmlab<span class="w"> </span>delete<span class="w"> </span>pod<span class="w"> </span>spinapp-probe
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="gp">$ </span>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>pod-spinapp-probe.yaml
+</span></code></pre></div>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="go">Warning  Failed  Error: … failed to generate spec: no command specified</span>
+</span></code></pre></div>
+<p>映像拉下來了，sandbox 也建好了，卡在產生容器規格這一步。原因在步驟 1：Spin 映像的 image config 沒有 <code>Cmd</code> 也沒有 <code>Entrypoint</code>，容器執行時不知道要執行什麼。spin-operator 產生的 Deployment 會自己補上 <code>command: ["/"]</code>，直接手寫 Pod 就要自己補，見<a href="#mine-4">疑難排解：pod 停在 <code>no command specified</code></a>。</p>
+<p>補上 <code>command</code> 另建一顆：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>pod-spinapp-probe-cmd.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-26-2"><a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-26-3"><a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="s">kind: Pod</span>
+</span><span id="__span-26-4"><a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a><span class="s">metadata:</span>
+</span><span id="__span-26-5"><a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a><span class="s">  name: spinapp-probe-cmd</span>
+</span><span id="__span-26-6"><a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a><span class="s">  namespace: wasmlab</span>
+</span><span id="__span-26-7"><a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a><span class="s">spec:</span>
+</span><span id="__span-26-8"><a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a><span class="s">  runtimeClassName: wasmtime-spin-v2</span>
+</span><span id="__span-26-9"><a id="__codelineno-26-9" name="__codelineno-26-9" href="#__codelineno-26-9"></a><span class="s">  restartPolicy: Never</span>
+</span><span id="__span-26-10"><a id="__codelineno-26-10" name="__codelineno-26-10" href="#__codelineno-26-10"></a><span class="s">  containers:</span>
+</span><span id="__span-26-11"><a id="__codelineno-26-11" name="__codelineno-26-11" href="#__codelineno-26-11"></a><span class="s">    - name: app</span>
+</span><span id="__span-26-12"><a id="__codelineno-26-12" name="__codelineno-26-12" href="#__codelineno-26-12"></a><span class="s">      image: ttl.sh/&lt;tag&gt;:1h</span>
+</span><span id="__span-26-13"><a id="__codelineno-26-13" name="__codelineno-26-13" href="#__codelineno-26-13"></a><span class="s">      command: [&quot;/&quot;]</span>
+</span><span id="__span-26-14"><a id="__codelineno-26-14" name="__codelineno-26-14" href="#__codelineno-26-14"></a><span class="s">      ports:</span>
+</span><span id="__span-26-15"><a id="__codelineno-26-15" name="__codelineno-26-15" href="#__codelineno-26-15"></a><span class="s">        - containerPort: 80</span>
+</span><span id="__span-26-16"><a id="__codelineno-26-16" name="__codelineno-26-16" href="#__codelineno-26-16"></a><span class="s">EOF</span>
+</span><span id="__span-26-17"><a id="__codelineno-26-17" name="__codelineno-26-17" href="#__codelineno-26-17"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>pod-spinapp-probe-cmd.yaml
+</span></code></pre></div>
+<p>pod 進入 Running 之後，看它的 log，再從叢集裡另開一顆 curl pod 打它。<code>&lt;pod-ip&gt;</code> 用 <code>kubectl -n wasmlab get pod spinapp-probe-cmd -o wide</code> 查；curl 的指令是 <code>kubectl -n wasmlab run day6-curl --image=curlimages/curl:8.11.1 -- -sS -i http://&lt;pod-ip&gt;/static/index.html</code>，回應用 <code>kubectl -n wasmlab logs day6-curl</code> 看。下面把修正後的檢查、pod 的 log 與回應整理在一起：</p>
+<p>下面保留的 <code>kubectl logs spinapp-probe-cmd</code> 少了 namespace；Pod manifest 指定的是 <code>wasmlab</code>，正確寫法是 <code>kubectl -n wasmlab logs spinapp-probe-cmd</code>。修正後的寫法本課沒有實跑。</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="go">--- 有效設定裡出現幾次 spin-v2(改前是 0)</span>
+</span><span id="__span-27-2"><a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="go">3</span>
+</span><span id="__span-27-3"><a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>node<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{…runtimeHandlers}&#39;</span>
+</span><span id="__span-27-4"><a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="go">[&#39;&#39;, &#39;runc&#39;, &#39;spin-v2&#39;, &#39;untrusted&#39;]</span>
+</span><span id="__span-27-5"><a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a>
+</span><span id="__span-27-6"><a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a><span class="gp">$ </span>kubectl<span class="w"> </span>logs<span class="w"> </span>spinapp-probe-cmd
+</span><span id="__span-27-7"><a id="__codelineno-27-7" name="__codelineno-27-7" href="#__codelineno-27-7"></a><span class="go">Serving http://0.0.0.0:80</span>
+</span><span id="__span-27-8"><a id="__codelineno-27-8" name="__codelineno-27-8" href="#__codelineno-27-8"></a>
+</span><span id="__span-27-9"><a id="__codelineno-27-9" name="__codelineno-27-9" href="#__codelineno-27-9"></a><span class="gp">$ </span>curl<span class="w"> </span>-sS<span class="w"> </span>-i<span class="w"> </span>http://&lt;pod-ip&gt;/static/index.html
+</span><span id="__span-27-10"><a id="__codelineno-27-10" name="__codelineno-27-10" href="#__codelineno-27-10"></a><span class="go">HTTP/1.1 200 OK</span>
+</span><span id="__span-27-11"><a id="__codelineno-27-11" name="__codelineno-27-11" href="#__codelineno-27-11"></a>
+</span><span id="__span-27-12"><a id="__codelineno-27-12" name="__codelineno-27-12" href="#__codelineno-27-12"></a><span class="go">Sprint3 Day6 SpinKube probe</span>
+</span></code></pre></div>
+<p>修正之後，containerd 的有效設定裡出現 3 行 <code>spin-v2</code>，handler 清單多了 <code>spin-v2</code>，Spin 應用在 80 port 回應 HTTP 200，內容就是步驟 1 放進 <code>index.html</code> 的那一行。從本機打包、推到公開 registry、節點拉取映像、<code>containerd-shim-spin</code> 執行，到 HTTP 回應，整條路都走通了，而且沒有用到 spin-operator。</p>
+<p>還有一件事跟 Day 4 不一樣。Day 4 的 runwasi 映像要在 containerd 加 <code>use_local_image_pull = true</code> 才拉得動，本次新節點的 Spin 映像沒有加任何映像拉取設定就拉成功了。可能跟打包形態有關（Spin 的 layer 不是 tar，沒有東西要解開），本課沒有做對照實驗確認。</p>
+<h2 id="rcm-day-4">rcm 自動化了 Day 4 的哪些事<a class="headerlink" href="#rcm-day-4" title="Permanent link">&para;</a></h2>
+<p>把 Day 4 的手動步驟和 rcm 的做法並排比較：</p>
+<table>
+<thead>
+<tr>
+<th>Day 4 手動</th>
+<th>rcm 自動化</th>
+<th>誰做得比較好</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>curl</code> 下載，自己挑版本與架構</td>
+<td><code>fetchStrategy.platforms</code>，依節點的 CPU 架構選</td>
+<td>rcm：寫在 YAML 裡，一份涵蓋多種架構</td>
+</tr>
+<tr>
+<td>本機核對 SHA256，節點再次下載未重驗</td>
+<td>downloader 在節點比對 sha256，不符就失敗</td>
+<td>rcm：核對實際安裝的下載檔</td>
+</tr>
+<tr>
+<td>沒有任何安裝紀錄</td>
+<td><code>rcm-lock.json</code> 記 shim 名、sha256、路徑</td>
+<td>rcm</td>
+</tr>
+<tr>
+<td>手寫設定，<strong>先離線 parse 確認路徑才寫</strong></td>
+<td>在設定檔裡找 <code>version = 3</code> 字串決定路徑</td>
+<td>Day 4：rcm v0.2.0 在本章混用設定中選錯路徑，而且不報錯</td>
+</tr>
+<tr>
+<td>人決定什麼時候重啟</td>
+<td>provisioner 自己重啟</td>
+<td>rcm 比較方便，但重啟時機無法控制，也不會先把節點上的工作移走</td>
+</tr>
+<tr>
+<td>RuntimeClass 沒帶 <code>scheduling</code></td>
+<td>帶 <code>scheduling.nodeSelector</code> 與 <code>ownerReferences</code></td>
+<td>rcm</td>
+</tr>
+<tr>
+<td>安裝範圍是「連進了哪台節點」</td>
+<td><code>nodeSelector</code>，預設一台都沒有</td>
+<td>rcm：範圍查得到</td>
+</tr>
+<tr>
+<td>新節點加入時什麼都不會發生</td>
+<td>controller 監看 Node，應該會自動補裝</td>
+<td>還沒驗證，Day 7 第一件事</td>
+</tr>
+</tbody>
+</table>
+<p>取得檔案、校驗、放置、記錄、範圍、RuntimeClass 的生命週期，rcm 都比手動做得完整。它選錯的是「設定要寫到哪個 plugin 路徑」，而這正是 Day 4 先在副本上驗證過才寫進節點的那一步。</p>
+<h2 id="_2">疑難排解<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<h3 id="mine-1">rcm 回報已佈建，pod 卻是 <code>no runtime for "spin-v2" is configured</code><a class="headerlink" href="#mine-1" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：Shim <code>READY 1/1</code>、節點標著 <code>spin-v2=provisioned</code>、shim 在磁碟上、install Job <code>Complete</code> 且 log 沒有 warning，指名該 RuntimeClass 的 pod 卻卡在 <code>FailedCreatePodSandBox</code>。</p>
+<p><strong>原因</strong>：rcm v0.2.0 用設定檔裡有沒有 <code>version = 3</code> 來選 plugin 路徑。本章節點的 <code>config.toml</code> 宣告 <code>version = 2</code>、內容是 2.x 寫法，rcm 寫進 1.x 路徑後，containerd 2.3.3 的解析結果沒有那一段。這是本章混用設定的結果，version 2 本身仍受 containerd 2.x 支援。完整過程見<a href="#step-5">步驟 5</a>。</p>
+<p><strong>修法</strong>：把那兩行的 <code>io.containerd.grpc.v1.cri</code> 換成 <code>io.containerd.cri.v1.runtime</code>，重啟 containerd，指令在<a href="#step-6">步驟 6</a>。任何會自動改 containerd 設定的元件，裝完都用 <code>containerd config dump</code> 確認，不要只看 <code>config.toml</code>：前者是磁碟設定經解析、補上預設值的結果；它不是執行中服務的查詢，還要在重啟後檢查 <code>runtimeHandlers</code> 並跑實際 Pod。</p>
+<h3 id="mine-2">同名的 RuntimeClass 沒有被更新<a class="headerlink" href="#mine-2" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：叢集裡已經有一顆同名的 RuntimeClass（handler 是別的值），套上 Shim 之後 <code>kubectl get shim</code> 照樣 READY，那顆 RuntimeClass 的欄位卻都沒變，<code>resourceVersion</code> 也沒變。</p>
+<p><strong>原因</strong>：rcm 只用名字檢查 RuntimeClass 存不存在，存在就跳過建立，不比對欄位。RuntimeClass 是叢集層級的資源，沒有 namespace 可以隔開，前一次安裝的殘留、其他 wasm 方案或手動實驗，都可能先用掉 <code>wasmtime-spin-v2</code> 這個名字。</p>
+<p><strong>修法</strong>：裝 rcm 之前先 <code>kubectl get runtimeclass &lt;name&gt; -o yaml</code>；有同名的就先刪掉，再讓 rcm 重建，做法見<a href="#step-4">步驟 4</a>。刪掉之後還要觸發一次重建，見下一項。</p>
+<h3 id="mine-3">刪掉的 RuntimeClass 沒有自動重建<a class="headerlink" href="#mine-3" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：刪掉 RuntimeClass 之後，controller 的 log 沒有任何反應，<code>kubectl get shim</code> 的 <code>RUNTIMECLASS</code> 欄還印著那個已經不存在的名字。</p>
+<p><strong>原因</strong>：rcm 只監看 Shim、Node、Job 三種資源（controller 啟動時的 log 列出了這三個），RuntimeClass 被刪掉不會觸發它重新處理。</p>
+<p><strong>修法</strong>：對 Shim 做一次更新，例如 <code>kubectl annotate shim &lt;name&gt; k=v --overwrite</code>，RuntimeClass 隨即重建。</p>
+<h3 id="mine-4">pod 停在 <code>no command specified</code><a class="headerlink" href="#mine-4" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：handler 已經出現、映像也拉下來了，pod 卻是 <code>failed to generate spec: no command specified</code>。錯誤訊息裡沒有提到 wasm、Spin 或 shim。</p>
+<p><strong>原因</strong>：Spin 映像的 image config 沒有 <code>Cmd</code> 也沒有 <code>Entrypoint</code>，進入點資訊在 locked app 裡，容器執行時不認得那個 label。見<a href="#step-1">步驟 1</a>與<a href="#step-6">步驟 6</a>。</p>
+<p><strong>修法</strong>：Pod spec 補上 <code>command: ["/"]</code>。用 spin-operator 部署時它會自動補，只有自己手寫 Pod 或 Deployment 時會遇到。</p>
+<h3 id="mine-5">在 <code>/usr/bin</code> 找不到 shim<a class="headerlink" href="#mine-5" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：install Job <code>Complete</code>、log 印 <code>shim installed</code>，但掃 <code>/usr/bin</code>、<code>/usr/local/bin</code> 確認 shim 在不在，會判斷成沒裝。</p>
+<p><strong>原因</strong>：rcm 把 shim 放在自己的目錄 <code>/opt/rcm/bin/</code>，並在 <code>runtime_type</code> 寫絕對路徑，shim 不需要在 <code>PATH</code> 裡。官方文件沒有寫這個位置。</p>
+<p><strong>修法</strong>：換一種安裝方式，就要重新確認 shim 放在哪裡。依可靠程度，依序查 <code>containerd config dump</code> 裡的 <code>runtime_type</code>、<code>/opt/rcm/rcm-lock.json</code>、install Job 的 log。不要用「掃某幾個目錄」判斷有沒有裝。</p>
+<h2 id="_3">想一想<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<ul>
+<li>你在一座新的叢集上用 rcm 裝另一支 shim，節點的 <code>config.toml</code> 第一行是 <code>version = 3</code>。步驟 5 的問題還會出現嗎？裝完之後你會用哪個指令確認？</li>
+<li>同事說：「<code>kubectl get shim</code> 是 READY，節點也標了 <code>provisioned</code>，所以 shim 裝好了。」你會請他再看哪兩樣東西，才能確定 pod 跑得起來？</li>
+<li>一顆 Spin pod 一直卡在 <code>ContainerCreating</code>，事件是 <code>no runtime for "spin-v2" is configured</code>。叢集裡有好幾台節點，只有部分節點貼了 <code>spin=true</code>。依照本章看到的 RuntimeClass 欄位，這顆 pod 有可能被排到沒裝 shim 的節點嗎？你接下來會查什麼？</li>
+</ul>
+<h2 id="_4">小結<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<p>runtime-class-manager 把 Day 4 手動做的事交給 controller：Shim 資源描述要裝哪支 shim、裝到哪些節點，節點貼上符合 <code>nodeSelector</code> 的標籤後，rcm 替它建一個 install Job，下載並比對 sha256、放好執行檔、在 <code>config.toml</code> 加一段設定、寫一份 <code>rcm-lock.json</code>、重啟 containerd。控制面的每個指標都顯示成功，只代表各自那一步做完了，不代表 containerd 真的載入了設定。在本章的混用設定下，rcm v0.2.0 依設定檔裡的字串選錯 plugin 路徑，要用 <code>containerd config dump</code> 和節點的 <code>runtimeHandlers</code> 才看得出來；改掉那兩行的路徑之後，Spin 應用就能跑起來。之後遇到任何自動改節點設定的工具，記得檢查 設定檔經 containerd 解析後包含什麼；遇到叢集層級的資源名稱，先確認有沒有同名的物件。</p>
+<h2 id="_5">延伸閱讀<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<p>想再深入，可以從這幾份開始：</p>
+<ul>
+<li><strong><a href="https://github.com/spinframework/runtime-class-manager">runtime-class-manager</a></strong> —— 本章的主角。README 寫明它負責建立 RuntimeClass 與安裝 containerd shim 執行檔；<code>internal/containerd/configure.go</code> 是步驟 5 那段 <code>strings.Contains</code> 的出處。專案已從 <code>spinkube/*</code> 搬到 GitHub 的 <code>spinframework/*</code>，查文件和 chart 時用新位置。</li>
+<li><strong><a href="https://github.com/spinframework/containerd-shim-spin">containerd-shim-spin</a></strong> —— shim 本體。release 附的 Shim 資源就是本章使用的那份，註解裡說明了 RuntimeClass 為什麼叫 <code>wasmtime-spin-v2</code>。</li>
+<li><strong><a href="../sprint3-day4-wasmedge/#mine-2">Day 4 的疑難排解：混用設定下的 plugin 路徑問題</a></strong> —— 站內連結。該章實測設定中舊路徑未被載入的情況，以及改節點前先在副本上驗證的做法。</li>
+<li><strong>kwasm-operator 舊安裝路線</strong> —— AKS 官方文件曾介紹從 <code>http://kwasm.sh/</code> 安裝 kwasm-operator。本章使用 rcm，閱讀舊教學時要留意安裝元件不同。</li>
+</ul>
+<h2 id="_6">下一步<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
+<p>節點側裝好了，但修 plugin 路徑那一步是手動改的，節點一汰換就會消失。<a href="../sprint3-day7-spinkube-operator/">Day 7</a> 叢集重新開機後，先看新節點上的標籤還在不在、rcm 會不會自動重新安裝、會不會又寫一次錯的路徑。接著才是 Day 7 的主題：安裝 spin-operator。它的最新版本 v0.6.1 發布於 2025-07，之後就沒有新版，這一組元件裡只有它停在那裡。Day 7 也會試試不經過 operator，只用 Deployment 加上 <code>runtimeClassName</code> 跑同一個應用。</p>
+<hr />
+<div class="admonition quote">
+<p>SpinKube 標誌為 CNCF(Linux Foundation)官方資產,此處作社群教學用途。</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到頂端
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="頁腳" >
+        
+          
+          <a href="../sprint3-day5-cost-measurement/" class="md-footer__link md-footer__link--prev" aria-label="上一頁: Day 5 · 執行時間、記憶體與量測範圍">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                上一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 5 · 執行時間、記憶體與量測範圍
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../sprint3-day7-spinkube-operator/" class="md-footer__link md-footer__link--next" aria-label="下一頁: Day 7 · SpinKube（下）：operator">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                下一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 7 · SpinKube（下）：operator
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      KAI Scheduler、HAMi、Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,作社群教學用途
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.code.annotate", "content.code.select", "content.tabs.link", "search.suggest", "search.highlight", "search.share"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u8907\u88fd", "clipboard.copy": "\u8907\u88fd", "search.result.more.one": "\u6b64\u9801\u5c1a\u6709 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.more.other": "\u6b64\u9801\u5c1a\u6709 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.none": "\u6c92\u6709\u7b26\u5408\u7684\u9805\u76ee", "search.result.one": "\u627e\u5230 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.other": "\u627e\u5230 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.placeholder": "\u6253\u5b57\u9032\u884c\u641c\u5c0b", "search.result.term.missing": "\u7f3a\u5c11\u5b57\u8a5e", "select.version": "\u9078\u64c7\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

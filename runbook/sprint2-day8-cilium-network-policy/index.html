@@ -1,0 +1,4118 @@
+
+<!doctype html>
+<html lang="zh-TW" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="雲原生實作課程：GPU 排程、eBPF 與執行期安全、WebAssembly、服務網格與機密運算、遊戲伺服器平台">
+      
+      
+      
+        <link rel="canonical" href="https://deepwavelab.github.io/CloudNativePracticing/runbook/sprint2-day8-cilium-network-policy/">
+      
+      
+        <link rel="prev" href="../sprint2-day7-cilium-kubeproxy/">
+      
+      
+        <link rel="next" href="../sprint2-day9-hubble/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Day 8 · CiliumNetworkPolicy（L3/L4 → L7） - Cloud Native Lab Course</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/terminal.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#day-8-ciliumnetworkpolicyl3l4-l7" class="md-skip">
+          跳轉到
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="頁首">
+    <a href="../.." title="Cloud Native Lab Course" class="md-header__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Cloud Native Lab Course
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Day 8 · CiliumNetworkPolicy（L3/L4 → L7）
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換深色模式"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="切換深色模式" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換淺色模式"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="切換淺色模式" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜尋" placeholder="搜尋" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="搜尋">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="分享" aria-label="分享" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="清除" aria-label="清除" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜尋引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="標籤" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  首頁
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint1-day0-azure-aks-foundation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 1 · GPU 排程三部曲
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../sprint2-day0-ebpf-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 2 · eBPF 與執行期安全
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint3-day0-wasm-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 3 · WebAssembly
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint4-day0-mesh-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 4 · 服務網格與機密運算
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint5-day0-game-server-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 5 · 遊戲伺服器平台
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="導覽列" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Cloud Native Lab Course" class="md-nav__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Cloud Native Lab Course
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首頁
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    首頁
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 3 · WebAssembly 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 4 · 服務網格與機密運算 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint5/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 5 · 遊戲伺服器平台 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day0-azure-aks-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 環境建置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day1-kai-queue-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · KAI 安裝與 Queue 基礎
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day2-gang-scheduling-preemption/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Gang Scheduling 與搶占
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day3-hami-memory-isolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · HAMi 安裝與 VRAM 用量限制
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day4-hami-kai-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · HAMi 與 KAI 整合
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day5-hami-webui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · HAMi-WebUI 觀測介面
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day6-dra-simulated-devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · DRA 概念與模擬裝置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day7-dra-aks-real-gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · DRA 配置實體 GPU
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day8-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · Sprint 1 總結
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day0-ebpf-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · eBPF 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day1-bpftrace-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · bpftrace 三支經典工具
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day2-bpftrace-kubernetes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · 把核心事件接回 Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day3-falco-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Falco 安裝與預設規則
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day4-falco-custom-rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · 自訂規則、誤報調校與告警路由
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day5-tetragon-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Tetragon 與 TracingPolicy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day6-tetragon-enforcement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · 從偵測到攔截
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day7-cilium-kubeproxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Cilium 與 kube-proxy replacement
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · CiliumNetworkPolicy（L3/L4 → L7）
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · CiliumNetworkPolicy（L3/L4 → L7）
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1: 重開叢集，重建實驗用的 pod
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2: 沒有政策時，什麼都通
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 2: 沒有政策時，什麼都通">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cilium-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cilium 怎麼認出一顆 pod
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3: default-deny 與命名空間隔離
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 3: default-deny 與命名空間隔離">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        被丟掉的封包長什麼樣子
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        少了那條空規則會怎樣
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        命名空間隔離
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4: L3/L4 埠限制
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 4: L3/L4 埠限制">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        政策在資料平面上長什麼樣子
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-fqdn-egress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5: FQDN egress
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 5: FQDN egress">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cilium-examplecom-ip" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cilium 怎麼知道 example.com 是哪個 IP
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#curlproxy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        代價：一次 curl，proxy 看到十次查詢
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6: L7，GET 過而 POST 被擋
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 6: L7，GET 過而 POST 被擋">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        呼叫端看到的差別
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        L7 的成本
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 7: nsenter 與 hostNetwork pod
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        選做觀察：改了標籤，同一組副本的 identity 更新不同步
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        疑難排解
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="疑難排解">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        加了一條更窄的規則，流量沒有變少
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        被擋掉的網域照樣查得到、進了快取
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        應用日誌查不到被拒絕的請求
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        丟包記在某顆 pod 名下，那顆 pod 卻沒有發出這個連線
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        同節點的 hostNetwork pod 仍能連到受限服務
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        想一想
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        小結
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day9-hubble/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Hubble 可觀測性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 綜合：四套工具的分工
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 3 · WebAssembly
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 3 · WebAssembly
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day0-wasm-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · wasm 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day1-three-generations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · RuntimeClass 與節點執行路徑
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day2-wasmcloud/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · wasmCloud 與元件模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day3-wasmcloud-distributed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · wasmCloud 分散式模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day4-wasmedge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · WasmEdge 執行期
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day5-cost-measurement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · 執行時間、記憶體與量測範圍
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day6-spinkube-shim/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · SpinKube（上）：shim 佈建
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day7-spinkube-operator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · SpinKube（下）：operator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day8-reversibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · SpinKube 移除與節點殘留
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day9-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · 依工作負載選擇 Wasm 路線
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 4 · 服務網格與機密運算
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 4 · 服務網格與機密運算
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1" id="__nav_5_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part 1 · 服務網格（Day 0–4）
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part 1 · 服務網格（Day 0–4）
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day0-mesh-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 服務網格與入口閘道的三層地圖
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day1-envoy-gateway/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · Envoy Gateway 與 HTTP/3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day2-istio-ambient/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Istio ambient：服務間 mTLS 與連線限制
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day3-cilium-mesh/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Cilium mesh：WireGuard 加密與 L7
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day4-istio-vs-cilium/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · Istio 與 Cilium 比較
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part 2 · 機密運算（Day 5–9）
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part 2 · 機密運算（Day 5–9）
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day5-confidential-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · 機密運算的威脅模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day6-kata-sandboxing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · Kata Pod Sandboxing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day7-katacc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · kata-cc：SEV-SNP 機密硬體
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day8-attestation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 遠端證明：MAA、SKR 與金鑰釋放
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day9-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · 機密容器的需求與驗證範圍
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 5 · 遊戲伺服器平台
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 5 · 遊戲伺服器平台
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day0-game-server-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 遊戲伺服器平台概念
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day1-agones-first-gameserver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · Agones 第一顆 GameServer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day2-fleet-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Fleet 生命週期
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day3-allocation-autoscaler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Allocation 與 autoscaler
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day4-quilkin-udp-proxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · Quilkin UDP proxy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day5-nakama-postgres/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Nakama 與 PostgreSQL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day6-matchmaking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · Matchmaking 串接
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day7-python-client-e2e/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Python client 端到端
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day8-observability-resilience/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 觀測與韌性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day9-unity-client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Unity client 與 relay server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 遊戲伺服器平台總結
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1: 重開叢集，重建實驗用的 pod
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2: 沒有政策時，什麼都通
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 2: 沒有政策時，什麼都通">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cilium-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cilium 怎麼認出一顆 pod
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3: default-deny 與命名空間隔離
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 3: default-deny 與命名空間隔離">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        被丟掉的封包長什麼樣子
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        少了那條空規則會怎樣
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        命名空間隔離
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4: L3/L4 埠限制
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 4: L3/L4 埠限制">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        政策在資料平面上長什麼樣子
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-fqdn-egress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5: FQDN egress
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 5: FQDN egress">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cilium-examplecom-ip" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cilium 怎麼知道 example.com 是哪個 IP
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#curlproxy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        代價：一次 curl，proxy 看到十次查詢
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6: L7，GET 過而 POST 被擋
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 6: L7，GET 過而 POST 被擋">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        呼叫端看到的差別
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        L7 的成本
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 7: nsenter 與 hostNetwork pod
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        選做觀察：改了標籤，同一組副本的 identity 更新不同步
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        疑難排解
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="疑難排解">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        加了一條更窄的規則，流量沒有變少
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        被擋掉的網域照樣查得到、進了快取
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        應用日誌查不到被拒絕的請求
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        丟包記在某顆 pod 名下，那顆 pod 卻沒有發出這個連線
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        同節點的 hostNetwork pod 仍能連到受限服務
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        想一想
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        小結
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="day-8-ciliumnetworkpolicyl3l4-l7">Day 8: CiliumNetworkPolicy——命名空間隔離、L3/L4 埠限制與 L7 方法<a class="headerlink" href="#day-8-ciliumnetworkpolicyl3l4-l7" title="Permanent link">&para;</a></h1>
+<p><img align="right" alt="Cilium 官方標誌" src="../../assets/logos/cilium-icon-color.svg" width="95" /></p>
+<p>你的 <code>netlab</code> 命名空間裡有一個 HTTP 服務 <code>echo7</code>。照設計，只有同命名空間的 <code>client</code> 會呼叫它，而且只會讀（GET），不會寫（POST）。可是 Day 7 裝好 Cilium 之後，叢集裡沒有任何限制：隔壁命名空間的 pod 直接打 <code>echo7</code> 的 pod IP 也通，<code>client</code> 送 POST 也通。你要寫規則把這些擋掉，再確認規則真的在擋。</p>
+<p>這個 sprint 處理過兩次「工作負載連到不該連的地方」：<a href="../sprint2-day4-falco-custom-rules/">Day 4</a> 用 Falco 在事情發生時發告警，<a href="../sprint2-day6-tetragon-enforcement/">Day 6</a> 用 Tetragon 殺掉做出違規動作的行程。這一章用第三種做法：Cilium 的網路政策，在封包層讓連線建立不起來，或在 HTTP 層拒絕特定的方法。</p>
+<p>要擋，就要寫<strong>網路政策</strong>：描述「哪些來源可以連到哪些 pod 的哪些埠」的規則。Kubernetes 有內建的 NetworkPolicy；Cilium 另外提供自己的資源 <strong>CiliumNetworkPolicy</strong>（簡稱 CNP），除了來源和埠，還能寫網域名稱和 HTTP 方法。這一章用的都是 CNP。</p>
+<p>讀完之後，一條網路政策套上去、流量卻沒照預期被擋時，你能判斷是政策根本沒被 Cilium 收下、被另一條較寬的規則蓋過，還是流量來自 hostNetwork pod，本來就不受政策管；呼叫端看到的是逾時還是 403，也能告訴你擋下它的是哪一層的規則。</p>
+<h2 id="1-pod">步驟 1: 重開叢集，重建實驗用的 pod<a class="headerlink" href="#1-pod" title="Permanent link">&para;</a></h2>
+<p>Day 7 收工時用 <code>az aks stop</code> 停下叢集。重新 <code>az aks start</code> 之後，先確認 Day 7 的狀態還在：kube-proxy 沒有回來，Cilium 的 kube-proxy replacement 仍然開著。Day 7 把 kube-proxy 的 DaemonSet 釘在一個不存在的節點選擇器上（Day 7 的<a href="../sprint2-day7-cilium-kubeproxy/#mine-9">「刪掉的 kube-proxy 一分多鐘後又回來了」</a>），這裡要看受管控制面重開叢集時有沒有把這個修改蓋回去。</p>
+<p>下面的指令有兩種執行位置。標著 <code>(node-shell)</code> 的，是在 Day 7 建在 <code>netlab</code> 的 <code>node-shell</code> DaemonSet 裡執行：它在每個節點放一顆開著 <code>hostPID</code>、<code>hostNetwork</code>、<code>privileged</code> 的 ubuntu pod，用 <code>kubectl -n netlab exec &lt;node-shell 的 pod 名稱&gt; -- …</code> 進去，就能在節點上下指令。<code>cilium-dbg</code> 是 Cilium agent 內附的除錯工具，要在節點上的 agent 容器裡執行，例如 <code>kubectl -n kube-system exec ds/cilium -c cilium-agent -- cilium-dbg status</code>。本章之後的 <code>cilium-dbg</code> 指令都用這個方式執行：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>get<span class="w"> </span>ds<span class="w"> </span>kube-proxy<span class="w"> </span>-o<span class="w"> </span>custom-columns<span class="o">=</span>…
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="go">NAME         DES   CUR   RDY   SEL</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="go">kube-proxy   0     0     0     map[lab.local/no-kube-proxy:true]</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-A<span class="w"> </span>--no-headers<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-c<span class="w"> </span>kube-proxy<span class="w">         </span>→<span class="w"> </span><span class="m">0</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="gp">$ </span><span class="o">(</span>node-shell<span class="o">)</span><span class="w"> </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">1</span><span class="w"> </span>-m<span class="w"> </span>-p<span class="w"> </span>--<span class="w"> </span>pgrep<span class="w"> </span>-a<span class="w"> </span>kube-proxy<span class="w">         </span>→<span class="w"> </span><span class="o">(</span>沒有行程<span class="o">)</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="gp">$ </span>cilium-dbg<span class="w"> </span>status<span class="w"> </span>--verbose<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-A2<span class="w"> </span>KubeProxyReplacement
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="go">KubeProxyReplacement:   True</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="go">  Socket LB:            Enabled</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="go">  Socket LB Coverage:   Full</span>
+</span></code></pre></div>
+<p>DaemonSet 的 <code>DES</code>、<code>CUR</code> 都是 0，選擇器還是那個不存在的標籤，節點上找不到 kube-proxy 行程，<code>KubeProxyReplacement</code> 是 <code>True</code>。重開叢集後的這個檢查，每次開工都值得做一次。</p>
+<p>重開叢集換來的是全新的 VM（Day 7 步驟 6）。Deployment 和 DaemonSet 會自己回來，直接用 <code>kind: Pod</code> 建立的 pod 不會。Day 7 的 <code>client</code> 就是這種 pod，要重新建立。</p>
+<p>這一章在 Day 7 的 <code>netlab</code> 命名空間（<code>client</code> 和兩顆 <code>svc-backend</code>）之外，再加三個工作負載：</p>
+<ul>
+<li><strong><code>multiport</code></strong>：一顆 pod 兩個容器（<code>hashicorp/http-echo</code>），分別在 8080 和 9090 回應 <code>PORT-8080</code>、<code>PORT-9090</code>。Service <code>svc-multiport</code> 把 80 對到 8080、90 對到 9090。之後用它測「這個埠通、那個埠不通」。</li>
+<li><strong><code>echo7</code></strong>：<code>traefik/whoami</code>，聽 8080，Service <code>svc-echo7</code> 的 80 對到它。選它是因為沒有政策時它對 GET 和 POST 都回 200。如果後端自己就拒絕 POST，之後看到 POST 失敗，就分不出是政策擋的還是應用拒絕的。</li>
+<li><strong><code>netlab-b</code> 命名空間的 <code>probe</code></strong>：跟 <code>client</code> 一樣是 <code>nicolaka/netshoot</code>，用來從另一個命名空間發請求。<code>probe</code> 也是直接建立的 pod，重開叢集後同樣要重建。</li>
+</ul>
+<p>下面這份檔案把重建 <code>client</code> 和這三個工作負載寫在一起。<code>svc-backend</code> 是 Deployment，重開叢集後會自己回來，不在這份檔案裡：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>day8-lab.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="s">kind: Pod</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="s">metadata:</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="s">  name: client</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="s">  namespace: netlab</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="s">  labels: {app: client}</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="s">spec:</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="s">  containers:</span>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="s">    - name: c</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="s">      image: nicolaka/netshoot:v0.13</span>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="s">      command: [&quot;sleep&quot;, &quot;infinity&quot;]</span>
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="s">---</span>
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="s">kind: Namespace</span>
+</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="s">metadata:</span>
+</span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="s">  name: netlab-b</span>
+</span><span id="__span-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="s">---</span>
+</span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-1-20"><a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="s">kind: Pod</span>
+</span><span id="__span-1-21"><a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a><span class="s">metadata:</span>
+</span><span id="__span-1-22"><a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a><span class="s">  name: probe</span>
+</span><span id="__span-1-23"><a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a><span class="s">  namespace: netlab-b</span>
+</span><span id="__span-1-24"><a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a><span class="s">  labels: {app: probe}</span>
+</span><span id="__span-1-25"><a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="s">spec:</span>
+</span><span id="__span-1-26"><a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a><span class="s">  containers:</span>
+</span><span id="__span-1-27"><a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a><span class="s">    - name: c</span>
+</span><span id="__span-1-28"><a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a><span class="s">      image: nicolaka/netshoot:v0.13</span>
+</span><span id="__span-1-29"><a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a><span class="s">      command: [&quot;sleep&quot;, &quot;infinity&quot;]</span>
+</span><span id="__span-1-30"><a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a><span class="s">---</span>
+</span><span id="__span-1-31"><a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a><span class="s">apiVersion: apps/v1</span>
+</span><span id="__span-1-32"><a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a><span class="s">kind: Deployment</span>
+</span><span id="__span-1-33"><a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a><span class="s">metadata:</span>
+</span><span id="__span-1-34"><a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a><span class="s">  name: multiport</span>
+</span><span id="__span-1-35"><a id="__codelineno-1-35" name="__codelineno-1-35" href="#__codelineno-1-35"></a><span class="s">  namespace: netlab</span>
+</span><span id="__span-1-36"><a id="__codelineno-1-36" name="__codelineno-1-36" href="#__codelineno-1-36"></a><span class="s">spec:</span>
+</span><span id="__span-1-37"><a id="__codelineno-1-37" name="__codelineno-1-37" href="#__codelineno-1-37"></a><span class="s">  replicas: 1</span>
+</span><span id="__span-1-38"><a id="__codelineno-1-38" name="__codelineno-1-38" href="#__codelineno-1-38"></a><span class="s">  selector:</span>
+</span><span id="__span-1-39"><a id="__codelineno-1-39" name="__codelineno-1-39" href="#__codelineno-1-39"></a><span class="s">    matchLabels: {app: multiport}</span>
+</span><span id="__span-1-40"><a id="__codelineno-1-40" name="__codelineno-1-40" href="#__codelineno-1-40"></a><span class="s">  template:</span>
+</span><span id="__span-1-41"><a id="__codelineno-1-41" name="__codelineno-1-41" href="#__codelineno-1-41"></a><span class="s">    metadata:</span>
+</span><span id="__span-1-42"><a id="__codelineno-1-42" name="__codelineno-1-42" href="#__codelineno-1-42"></a><span class="s">      labels: {app: multiport}</span>
+</span><span id="__span-1-43"><a id="__codelineno-1-43" name="__codelineno-1-43" href="#__codelineno-1-43"></a><span class="s">    spec:</span>
+</span><span id="__span-1-44"><a id="__codelineno-1-44" name="__codelineno-1-44" href="#__codelineno-1-44"></a><span class="s">      containers:</span>
+</span><span id="__span-1-45"><a id="__codelineno-1-45" name="__codelineno-1-45" href="#__codelineno-1-45"></a><span class="s">        - name: p8080</span>
+</span><span id="__span-1-46"><a id="__codelineno-1-46" name="__codelineno-1-46" href="#__codelineno-1-46"></a><span class="s">          image: hashicorp/http-echo:1.0</span>
+</span><span id="__span-1-47"><a id="__codelineno-1-47" name="__codelineno-1-47" href="#__codelineno-1-47"></a><span class="s">          args: [&quot;-listen=:8080&quot;, &quot;-text=PORT-8080&quot;]</span>
+</span><span id="__span-1-48"><a id="__codelineno-1-48" name="__codelineno-1-48" href="#__codelineno-1-48"></a><span class="s">          ports: [{containerPort: 8080}]</span>
+</span><span id="__span-1-49"><a id="__codelineno-1-49" name="__codelineno-1-49" href="#__codelineno-1-49"></a><span class="s">        - name: p9090</span>
+</span><span id="__span-1-50"><a id="__codelineno-1-50" name="__codelineno-1-50" href="#__codelineno-1-50"></a><span class="s">          image: hashicorp/http-echo:1.0</span>
+</span><span id="__span-1-51"><a id="__codelineno-1-51" name="__codelineno-1-51" href="#__codelineno-1-51"></a><span class="s">          args: [&quot;-listen=:9090&quot;, &quot;-text=PORT-9090&quot;]</span>
+</span><span id="__span-1-52"><a id="__codelineno-1-52" name="__codelineno-1-52" href="#__codelineno-1-52"></a><span class="s">          ports: [{containerPort: 9090}]</span>
+</span><span id="__span-1-53"><a id="__codelineno-1-53" name="__codelineno-1-53" href="#__codelineno-1-53"></a><span class="s">---</span>
+</span><span id="__span-1-54"><a id="__codelineno-1-54" name="__codelineno-1-54" href="#__codelineno-1-54"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-1-55"><a id="__codelineno-1-55" name="__codelineno-1-55" href="#__codelineno-1-55"></a><span class="s">kind: Service</span>
+</span><span id="__span-1-56"><a id="__codelineno-1-56" name="__codelineno-1-56" href="#__codelineno-1-56"></a><span class="s">metadata:</span>
+</span><span id="__span-1-57"><a id="__codelineno-1-57" name="__codelineno-1-57" href="#__codelineno-1-57"></a><span class="s">  name: svc-multiport</span>
+</span><span id="__span-1-58"><a id="__codelineno-1-58" name="__codelineno-1-58" href="#__codelineno-1-58"></a><span class="s">  namespace: netlab</span>
+</span><span id="__span-1-59"><a id="__codelineno-1-59" name="__codelineno-1-59" href="#__codelineno-1-59"></a><span class="s">spec:</span>
+</span><span id="__span-1-60"><a id="__codelineno-1-60" name="__codelineno-1-60" href="#__codelineno-1-60"></a><span class="s">  selector: {app: multiport}</span>
+</span><span id="__span-1-61"><a id="__codelineno-1-61" name="__codelineno-1-61" href="#__codelineno-1-61"></a><span class="s">  ports:</span>
+</span><span id="__span-1-62"><a id="__codelineno-1-62" name="__codelineno-1-62" href="#__codelineno-1-62"></a><span class="s">    - {name: p8080, port: 80, targetPort: 8080}</span>
+</span><span id="__span-1-63"><a id="__codelineno-1-63" name="__codelineno-1-63" href="#__codelineno-1-63"></a><span class="s">    - {name: p9090, port: 90, targetPort: 9090}</span>
+</span><span id="__span-1-64"><a id="__codelineno-1-64" name="__codelineno-1-64" href="#__codelineno-1-64"></a><span class="s">---</span>
+</span><span id="__span-1-65"><a id="__codelineno-1-65" name="__codelineno-1-65" href="#__codelineno-1-65"></a><span class="s">apiVersion: apps/v1</span>
+</span><span id="__span-1-66"><a id="__codelineno-1-66" name="__codelineno-1-66" href="#__codelineno-1-66"></a><span class="s">kind: Deployment</span>
+</span><span id="__span-1-67"><a id="__codelineno-1-67" name="__codelineno-1-67" href="#__codelineno-1-67"></a><span class="s">metadata:</span>
+</span><span id="__span-1-68"><a id="__codelineno-1-68" name="__codelineno-1-68" href="#__codelineno-1-68"></a><span class="s">  name: echo7</span>
+</span><span id="__span-1-69"><a id="__codelineno-1-69" name="__codelineno-1-69" href="#__codelineno-1-69"></a><span class="s">  namespace: netlab</span>
+</span><span id="__span-1-70"><a id="__codelineno-1-70" name="__codelineno-1-70" href="#__codelineno-1-70"></a><span class="s">spec:</span>
+</span><span id="__span-1-71"><a id="__codelineno-1-71" name="__codelineno-1-71" href="#__codelineno-1-71"></a><span class="s">  replicas: 1</span>
+</span><span id="__span-1-72"><a id="__codelineno-1-72" name="__codelineno-1-72" href="#__codelineno-1-72"></a><span class="s">  selector:</span>
+</span><span id="__span-1-73"><a id="__codelineno-1-73" name="__codelineno-1-73" href="#__codelineno-1-73"></a><span class="s">    matchLabels: {app: echo7}</span>
+</span><span id="__span-1-74"><a id="__codelineno-1-74" name="__codelineno-1-74" href="#__codelineno-1-74"></a><span class="s">  template:</span>
+</span><span id="__span-1-75"><a id="__codelineno-1-75" name="__codelineno-1-75" href="#__codelineno-1-75"></a><span class="s">    metadata:</span>
+</span><span id="__span-1-76"><a id="__codelineno-1-76" name="__codelineno-1-76" href="#__codelineno-1-76"></a><span class="s">      labels: {app: echo7}</span>
+</span><span id="__span-1-77"><a id="__codelineno-1-77" name="__codelineno-1-77" href="#__codelineno-1-77"></a><span class="s">    spec:</span>
+</span><span id="__span-1-78"><a id="__codelineno-1-78" name="__codelineno-1-78" href="#__codelineno-1-78"></a><span class="s">      containers:</span>
+</span><span id="__span-1-79"><a id="__codelineno-1-79" name="__codelineno-1-79" href="#__codelineno-1-79"></a><span class="s">        - name: whoami</span>
+</span><span id="__span-1-80"><a id="__codelineno-1-80" name="__codelineno-1-80" href="#__codelineno-1-80"></a><span class="s">          image: traefik/whoami:v1.10</span>
+</span><span id="__span-1-81"><a id="__codelineno-1-81" name="__codelineno-1-81" href="#__codelineno-1-81"></a><span class="s">          args: [&quot;--port&quot;, &quot;8080&quot;]</span>
+</span><span id="__span-1-82"><a id="__codelineno-1-82" name="__codelineno-1-82" href="#__codelineno-1-82"></a><span class="s">          ports: [{containerPort: 8080}]</span>
+</span><span id="__span-1-83"><a id="__codelineno-1-83" name="__codelineno-1-83" href="#__codelineno-1-83"></a><span class="s">---</span>
+</span><span id="__span-1-84"><a id="__codelineno-1-84" name="__codelineno-1-84" href="#__codelineno-1-84"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-1-85"><a id="__codelineno-1-85" name="__codelineno-1-85" href="#__codelineno-1-85"></a><span class="s">kind: Service</span>
+</span><span id="__span-1-86"><a id="__codelineno-1-86" name="__codelineno-1-86" href="#__codelineno-1-86"></a><span class="s">metadata:</span>
+</span><span id="__span-1-87"><a id="__codelineno-1-87" name="__codelineno-1-87" href="#__codelineno-1-87"></a><span class="s">  name: svc-echo7</span>
+</span><span id="__span-1-88"><a id="__codelineno-1-88" name="__codelineno-1-88" href="#__codelineno-1-88"></a><span class="s">  namespace: netlab</span>
+</span><span id="__span-1-89"><a id="__codelineno-1-89" name="__codelineno-1-89" href="#__codelineno-1-89"></a><span class="s">spec:</span>
+</span><span id="__span-1-90"><a id="__codelineno-1-90" name="__codelineno-1-90" href="#__codelineno-1-90"></a><span class="s">  selector: {app: echo7}</span>
+</span><span id="__span-1-91"><a id="__codelineno-1-91" name="__codelineno-1-91" href="#__codelineno-1-91"></a><span class="s">  ports:</span>
+</span><span id="__span-1-92"><a id="__codelineno-1-92" name="__codelineno-1-92" href="#__codelineno-1-92"></a><span class="s">    - {port: 80, targetPort: 8080}</span>
+</span><span id="__span-1-93"><a id="__codelineno-1-93" name="__codelineno-1-93" href="#__codelineno-1-93"></a><span class="s">EOF</span>
+</span><span id="__span-1-94"><a id="__codelineno-1-94" name="__codelineno-1-94" href="#__codelineno-1-94"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>day8-lab.yaml
+</span><span id="__span-1-95"><a id="__codelineno-1-95" name="__codelineno-1-95" href="#__codelineno-1-95"></a>kubectl<span class="w"> </span>-n<span class="w"> </span>netlab<span class="w"> </span><span class="nb">wait</span><span class="w"> </span>--for<span class="o">=</span><span class="nv">condition</span><span class="o">=</span>Ready<span class="w"> </span>pod<span class="w"> </span>--all<span class="w"> </span>--timeout<span class="o">=</span>180s
+</span></code></pre></div>
+<p>之後寫成「<code>client → svc-multiport:80</code>」這種形式的結果，都是在呼叫端的 pod 裡用 <code>kubectl exec</code> 執行 <code>curl</code> 得到的，例如 <code>kubectl -n netlab exec client -- curl -s -m 5 http://svc-multiport.netlab:80/</code>。</p>
+<p>步驟 7 還會用到一顆特權 pod，到那一步再建。</p>
+<h2 id="2">步驟 2: 沒有政策時，什麼都通<a class="headerlink" href="#2" title="Permanent link">&para;</a></h2>
+<p>先把沒有任何政策時的狀態記下來。之後每看到一次「被擋了」，都要能對照這裡，確認它原本是通的，不是本來就不通。下面是從 <code>client</code> 和 <code>probe</code> 對各個目標發 curl 的結果，左邊是誰打誰，右邊是回應：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="gp">#</span><span class="c1">## 同命名空間</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">client → svc-multiport:80(→8080)        PORT-8080</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="go">client → svc-multiport:90(→9090)        PORT-9090</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="go">client → svc-echo7 GET                  200</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="go">client → svc-echo7 POST                 200</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="gp">#</span><span class="c1">## 出叢集</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="go">client → example.com                    200</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="gp">#</span><span class="c1">## 跨命名空間（netlab-b/probe → netlab）</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="go">probe → svc-multiport:80                PORT-8080</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="go">probe → echo7 的 pod IP                 200      ← 連 Service 都不用經過</span>
+</span></code></pre></div>
+<p>同命名空間全通，對外的 <code>example.com</code> 也通。要注意的是最後一行：<code>probe</code> 在另一個命名空間，直接打 <code>echo7</code> 的 pod IP 也拿到 200。Kubernetes 的命名空間只是把 API 物件分組，本身不擋任何網路流量。</p>
+<h3 id="cilium-pod">Cilium 怎麼認出一顆 pod<a class="headerlink" href="#cilium-pod" title="Permanent link">&para;</a></h3>
+<p>政策寫的是「誰可以連誰」，所以 Cilium 得先能認出「誰」。直覺會想用 IP，可是 pod 重建之後 IP 就變了。來看 Cilium 實際怎麼記這些 pod。Cilium 把它管理的每個網路端點（一般就是一顆 pod）叫 <strong>endpoint</strong>，並替每個 endpoint 建一個 <code>CiliumEndpoint</code> 物件，縮寫是 <code>cep</code>：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>cep<span class="w"> </span>-A<span class="w"> </span>-o<span class="w"> </span>custom-columns<span class="o">=</span>NS:…,NAME:…,ID:.status.identity.id,IP:…
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">NS         NAME                           ID      IP</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="go">netlab     client                         6874    10.244.0.78</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="go">netlab     echo7-…                        42793   10.244.0.212</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="go">netlab     multiport-…                    1029    10.244.0.104</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="go">netlab     svc-backend-…-h2hkx            53393   10.244.0.178</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="go">netlab     svc-backend-…-t5qzj            53393   10.244.0.20      ← 兩顆 pod 同一個號</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="go">netlab-b   probe                          17242   10.244.0.164</span>
+</span></code></pre></div>
+<p>看 <code>ID</code> 欄。每顆 pod 都有一個號碼，兩顆 <code>svc-backend</code> 的 IP 不同，號碼卻都是 <code>53393</code>。這個號碼叫 <strong>security identity</strong>：Cilium 把 endpoint 身上的標籤組合對應成一個數字，標籤一樣的 pod 就拿到同一個號碼。政策比對的是這個號碼，節點上的 BPF map（Day 5 看過的那種核心資料表）存的也是它，不是 IP。所以 pod 重建、換了 IP，只要標籤沒變，政策照樣適用。</p>
+<p>用 agent 的 <code>cilium-dbg</code> 查 53393 由哪些標籤組成：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="gp">$ </span>cilium-dbg<span class="w"> </span>identity<span class="w"> </span>get<span class="w"> </span><span class="m">53393</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="go">53393   k8s:app=svc-backend</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="go">        k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name=netlab</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="go">        k8s:io.cilium.k8s.policy.cluster=default</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="go">        k8s:io.cilium.k8s.policy.serviceaccount=default</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="go">        k8s:io.kubernetes.pod.namespace=netlab</span>
+</span></code></pre></div>
+<p>只有五個標籤。pod 身上其實還有 <code>pod-template-hash</code> 和 <code>topology.kubernetes.io/*</code>，Cilium 預設把這類標籤排除在 identity 之外。如果 <code>pod-template-hash</code> 也算進去，同一個 Deployment 每滾動更新一次，就會換一批新的 identity。</p>
+<p>把這幾個 pod 和它們的號碼畫成圖：</p>
+<p><img alt="netlab 命名空間裡 client、echo7、multiport 各有自己的 identity，兩顆 svc-backend 共用 identity 53393；netlab-b 的 probe 是 17242。53393 由 app、namespace、serviceaccount、cluster 這幾個標籤決定，pod-template-hash 與 topology 標籤不列入" src="../../assets/diagrams/s2d8-identity.svg" /></p>
+<p>我們可以從圖上看到兩件事。第一，號碼跟著標籤走，不跟著 pod 走：兩顆 <code>svc-backend</code> 標籤相同，號碼就相同。把 <code>svc-backend</code> 從 2 顆擴到 3 顆，第三顆的 identity 仍然是 53393。第二，命名空間本身就是 identity 的一部分，所以 <code>netlab-b</code> 的 pod 不可能跟 <code>netlab</code> 的 pod 共用號碼，這是下一步命名空間隔離能成立的原因。反過來，替 pod 加上參與 identity 計算的標籤，identity 就會換掉，見<a href="#mine-1">選做觀察：改了標籤，同一組副本的 identity 更新不同步</a>。</p>
+<h2 id="step-3">步驟 3: default-deny 與命名空間隔離<a class="headerlink" href="#step-3" title="Permanent link">&para;</a></h2>
+<p>現在開始擋。第一條政策讓 <code>netlab</code> 裡所有 pod 預設拒絕所有進來的連線，這叫 <strong>default-deny</strong>；之後再一條條加上允許的來源。</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>default-deny-ingress.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="s">apiVersion: cilium.io/v2</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="s">kind: CiliumNetworkPolicy</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="s">metadata:</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="s">  name: default-deny-ingress</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="s">  namespace: netlab</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="s">spec:</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="s">  endpointSelector: {}                        # every endpoint in this namespace</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="s">  enableDefaultDeny: {ingress: true, egress: false}</span>
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="s">  ingress:</span>
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="s">    - {}</span>
+</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="s">EOF</span>
+</span><span id="__span-5-13"><a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>default-deny-ingress.yaml
+</span></code></pre></div>
+<p><code>endpointSelector: {}</code> 選中這個命名空間的所有 endpoint。讓政策生效的是最後那條空規則 <code>- {}</code>：它讓選中的 endpoint 開始檢查進來的連線，卻沒有列出任何允許的來源，結果就是全部拒絕。<code>enableDefaultDeny</code> 只是把意圖寫明，單靠它不夠，下一小節會看到少了空規則會怎樣。</p>
+<p><a id="mine-4"></a></p>
+<p>套上之後，要確認政策有沒有在執行，得問節點上的 Cilium agent。這個部署的 <code>CiliumEndpoint</code> 沒有同步 <code>.status.policy</code>，所以用 <code>kubectl get cep</code> 查政策欄位會得到 <code>&lt;none&gt;</code>，不能據此判斷政策未生效：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>cep<span class="w"> </span>-n<span class="w"> </span>netlab<span class="w"> </span>-o<span class="w"> </span>custom-columns<span class="o">=</span>NAME:…,IN:.status.policy.ingress.enforcing
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="go">NAME       IN</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="go">client     &lt;none&gt;       ← 政策明明在執行</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="go">multiport  &lt;none&gt;</span>
+</span></code></pre></div>
+<p><code>kubectl get cnp</code> 的 <code>VALID</code> 欄只說明政策被 agent 收下，不代表它正在某個 endpoint 上執行。用 <code>cilium-dbg endpoint list</code> 查執行方向，逐條規則與計數器則用步驟 4 的 <code>cilium-dbg bpf policy get &lt;endpoint 編號&gt;</code> 查。下面每一行依序是 endpoint 編號、identity、正在檢查的方向、標籤，最後兩行是實際打的結果：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="gp">$ </span>cilium-dbg<span class="w"> </span>endpoint<span class="w"> </span>list<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>…
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="go">680   1029    ingress   k8s:app=multiport,k8s:io.kubernetes.pod.namespace=netlab</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="go">2272  6874    ingress   k8s:app=client,…</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="go">62    17242   none      k8s:app=probe,k8s:io.kubernetes.pod.namespace=netlab-b   ← 隔壁不受影響</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="gp">$ </span>client<span class="w"> </span>→<span class="w"> </span>svc-multiport<span class="w">    </span>curl:<span class="w"> </span><span class="o">(</span><span class="m">28</span><span class="o">)</span><span class="w"> </span>逾時
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="gp">$ </span>probe<span class="w">  </span>→<span class="w"> </span>svc-multiport<span class="w">    </span>curl:<span class="w"> </span><span class="o">(</span><span class="m">28</span><span class="o">)</span><span class="w"> </span>逾時
+</span></code></pre></div>
+<p><code>multiport</code>（endpoint 680）和 <code>client</code>（endpoint 2272）的第三欄變成 <code>ingress</code>，表示進來的連線現在要逐一比對政策；<code>netlab-b</code> 的 <code>probe</code> 還是 <code>none</code>，因為這條政策只管它所在命名空間的 endpoint。後面的步驟會用這些編號查各個 endpoint 的狀態。你自己的叢集裡，編號和 identity 號碼會不一樣，照 <code>endpoint list</code> 的輸出代換。同命名空間的 <code>client</code> 現在也連不上 <code>multiport</code> 了。</p>
+<h3 id="_1">被丟掉的封包長什麼樣子<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h3>
+<p>呼叫端只看到逾時。要確認是政策丟的，在節點上的 agent 裡開 <code>cilium-dbg monitor</code>，只看丟包事件。下面是此時（只有 default-deny）<code>client</code> 打 <code>multiport</code> 留下的紀錄：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="gp">$ </span>cilium-dbg<span class="w"> </span>monitor<span class="w"> </span>--type<span class="w"> </span>drop
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="go">xx drop (Policy denied) flow … to endpoint 680, file bpf_lxc.c:2410,</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="go">    identity 6874-&gt;1029: 10.244.0.78:59028 -&gt; 10.244.0.104:8080 tcp SYN     ×4</span>
+</span></code></pre></div>
+<p>這一行有三個地方要看：</p>
+<ol>
+<li><code>to endpoint 680</code>、<code>bpf_lxc.c</code>：丟包發生在目的地 <code>multiport</code> 那一端。<code>bpf_lxc</code> 是 Cilium 掛在每顆 pod 網路介面上的 BPF 程式，進來的連線由被保護的那顆 pod 這一端檢查。</li>
+<li><code>identity 6874-&gt;1029</code>：紀錄寫的是哪個 identity 打哪個 identity，IP 只是附帶資訊。</li>
+<li>目的位址是 <code>multiport</code> 的 pod IP 和 8080，不是 Service 的 ClusterIP 和 80。Day 7 的 socket LB 在 <code>connect()</code> 時就把 ClusterIP 換成了後端位址（Day 7 的<a href="../sprint2-day7-cilium-kubeproxy/#mine-8">「<code>kubeProxyReplacement: false</code> 不代表 kube-proxy 在做事」</a>），政策看到的是換過之後的位址。<code>×4</code> 是同一個 SYN 被丟了四次：TCP 一直重送，呼叫端最後逾時。</li>
+</ol>
+<h3 id="mine-2">少了那條空規則會怎樣<a class="headerlink" href="#mine-2" title="Permanent link">&para;</a></h3>
+<p>寫 default-deny 時，很自然會先試兩種更短的寫法。這一小節的兩段輸出是示範，取自還沒套上正確版時的紀錄。想自己試，記得試完要把正確版套回去，否則後面的步驟結果會不同。第一種只寫 <code>enableDefaultDeny</code>、不寫 <code>ingress</code>，API server 直接退件：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>default-deny-ingress.yaml
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="go">The CiliumNetworkPolicy &quot;default-deny-ingress&quot; is invalid:</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="go">* &lt;nil&gt;: Invalid value: &quot;&quot;: &quot;spec&quot; must validate at least one schema (anyOf)</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="go">* spec.ingress: Required value</span>
+</span></code></pre></div>
+<p>CRD 要求 <code>spec</code> 裡至少要有一個規則區段。對有寫該方向規則的政策而言，<code>enableDefaultDeny</code> 預設就是 <code>true</code>，這個欄位的用途其實是設成 <code>false</code>：讓一條政策套上去時，不要把 endpoint 切成預設拒絕。它是規則的修飾，不能單獨成為一條規則。這種失敗至少看得到，API server 退件，原本套著的政策不受影響。</p>
+<p><a id="mine-3"></a></p>
+<p>第二種補上一個空陣列 <code>ingress: []</code>，<code>kubectl apply</code> 就成功了，但流量完全沒變：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>dd-a.yaml<span class="w">            </span><span class="c1"># enableDefaultDeny + ingress: []</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="go">ciliumnetworkpolicy.cilium.io/default-deny-ingress created</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>cnp<span class="w"> </span>-n<span class="w"> </span>netlab
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="go">NAME                   AGE   VALID</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="go">default-deny-ingress   8s    False</span>
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>netlab<span class="w"> </span>get<span class="w"> </span>cnp<span class="w"> </span>default-deny-ingress<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w"> </span><span class="p">|</span><span class="w"> </span>tail<span class="w"> </span>-5
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="go">status:</span>
+</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="go">  conditions:</span>
+</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="go">  - message: rule must have at least one of Ingress, IngressDeny, Egress, EgressDeny</span>
+</span><span id="__span-10-12"><a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="go">    status: &quot;False&quot;</span>
+</span><span id="__span-10-13"><a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="go">    type: Valid</span>
+</span><span id="__span-10-14"><a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>
+</span><span id="__span-10-15"><a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="gp">#</span><span class="c1">## 流量呢？</span>
+</span><span id="__span-10-16"><a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a><span class="go">client → svc-multiport   PORT-8080     ← 完全沒變</span>
+</span><span id="__span-10-17"><a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a><span class="go">probe  → svc-multiport   PORT-8080     ← 完全沒變</span>
+</span></code></pre></div>
+<p><code>kubectl apply</code> 回 <code>created</code>，結束碼是 0，沒有任何警告。如果你已經套過正確版，同名的政策會被這一版覆蓋，這裡顯示的會是 <code>configured</code>，而且套著正確版時被擋住的流量會重新通過。唯一的線索是 <code>kubectl get cnp</code> 的 <code>VALID</code> 欄是 <code>False</code>，以及 <code>.status.conditions</code> 裡的原因：一條規則至少要有 Ingress、IngressDeny、Egress、EgressDeny 其中一個，空陣列不算。agent 沒有收下這條政策，所以流量照舊。</p>
+<p>換句話說，無效的網路政策不會讓流量停下來，而是讓流量照常通過，跟沒套一樣。套完政策，先看 <code>VALID</code> 欄，再實際打一次，不要只看 <code>kubectl apply</code> 有沒有成功。在 CI 裡要擋這種情況，檢查 <code>.status.conditions[?(@.type=="Valid")].status</code>，不要只看 <code>kubectl apply</code> 的結束碼。</p>
+<p>如果你照著試了這兩種寫法，用步驟一開始那份正確的檔案重新套回去：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>default-deny-ingress.yaml
+</span></code></pre></div>
+<h3 id="_2">命名空間隔離<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h3>
+<p>default-deny 之後，再加一條政策 <code>allow-same-namespace</code>，允許同一個命名空間的 pod 互連。完整檔案如下：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>allow-same-namespace.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="s">apiVersion: cilium.io/v2</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="s">kind: CiliumNetworkPolicy</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="s">metadata:</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="s">  name: allow-same-namespace</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="s">  namespace: netlab</span>
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="s">spec:</span>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="s">  endpointSelector: {}</span>
+</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="s">  ingress:</span>
+</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="s">    - fromEndpoints:</span>
+</span><span id="__span-12-11"><a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a><span class="s">        - {}</span>
+</span><span id="__span-12-12"><a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a><span class="s">EOF</span>
+</span><span id="__span-12-13"><a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>allow-same-namespace.yaml
+</span></code></pre></div>
+<p>它選中所有 endpoint（<code>endpointSelector: {}</code>），重點是 ingress 規則這幾行：</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="w">  </span><span class="nt">ingress</span><span class="p">:</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">fromEndpoints</span><span class="p">:</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{}</span><span class="w">          </span><span class="c1"># &quot;any endpoint in THIS namespace&quot;</span>
+</span></code></pre></div>
+<p><code>fromEndpoints</code> 列出允許的來源。這裡放了一個空的 selector <code>{}</code>，看起來像「任何 endpoint」，但 CNP 是命名空間層級的資源，Cilium 會替它補上「來源也在本命名空間」這個條件。結果：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="go">client(netlab)  → svc-multiport:80    PORT-8080     ✅</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="go">probe(netlab-b) → svc-multiport:80    逾時          ❌</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="go">probe(netlab-b) → multiport 的 pod IP  逾時          ❌   ← 繞過 Service 也沒用</span>
+</span></code></pre></div>
+<p><code>netlab</code> 內部互通，<code>netlab-b</code> 的 <code>probe</code> 不論打 Service 還是直接打 pod IP 都逾時。直接打 pod IP 也擋得住，因為 Cilium 比對的是來源的 identity，而 identity 裡帶著命名空間標籤，跟用哪個位址連過來無關。</p>
+<h2 id="step-4">步驟 4: L3/L4 埠限制<a class="headerlink" href="#step-4" title="Permanent link">&para;</a></h2>
+<p>命名空間隔離只管「誰」。接下來把 <code>multiport</code> 再收緊：只有 <code>client</code> 可以連，而且只能連 8080。這條政策叫 <code>multiport-8080-only</code>，選中 <code>app: multiport</code>，ingress 規則是：</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="w">  </span><span class="nt">ingress</span><span class="p">:</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">fromEndpoints</span><span class="p">:</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">matchLabels</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="nv">client</span><span class="p p-Indicator">}</span>
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="w">      </span><span class="nt">toPorts</span><span class="p">:</span>
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">ports</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[{</span><span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;8080&quot;</span><span class="p p-Indicator">,</span><span class="nt"> protocol</span><span class="p">:</span><span class="w"> </span><span class="nv">TCP</span><span class="p p-Indicator">}]</span><span class="w">   </span><span class="c1"># the endpoint&#39;s port, not the Service&#39;s</span>
+</span></code></pre></div>
+<p><code>toPorts</code> 寫的是 8080，也就是 pod 上的埠，不是 Service 的 80。政策掛在 endpoint 上，比對時看到的已經是 socket LB 換過的後端埠，Service 的埠號對它沒有意義。完整檔案：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>l3l4-port.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="s">apiVersion: cilium.io/v2</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="s">kind: CiliumNetworkPolicy</span>
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="s">metadata:</span>
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="s">  name: multiport-8080-only</span>
+</span><span id="__span-16-6"><a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="s">  namespace: netlab</span>
+</span><span id="__span-16-7"><a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="s">spec:</span>
+</span><span id="__span-16-8"><a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="s">  endpointSelector:</span>
+</span><span id="__span-16-9"><a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="s">    matchLabels: {app: multiport}</span>
+</span><span id="__span-16-10"><a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="s">  ingress:</span>
+</span><span id="__span-16-11"><a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="s">    - fromEndpoints:</span>
+</span><span id="__span-16-12"><a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a><span class="s">        - matchLabels: {app: client}</span>
+</span><span id="__span-16-13"><a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a><span class="s">      toPorts:</span>
+</span><span id="__span-16-14"><a id="__codelineno-16-14" name="__codelineno-16-14" href="#__codelineno-16-14"></a><span class="s">        - ports:</span>
+</span><span id="__span-16-15"><a id="__codelineno-16-15" name="__codelineno-16-15" href="#__codelineno-16-15"></a><span class="s">            - {port: &quot;8080&quot;, protocol: TCP}</span>
+</span><span id="__span-16-16"><a id="__codelineno-16-16" name="__codelineno-16-16" href="#__codelineno-16-16"></a><span class="s">EOF</span>
+</span></code></pre></div>
+<p>把它套上去，再打一次：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>l3l4-port.yaml<span class="w">        </span><span class="c1"># 只放行 client → multiport:8080</span>
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="go">client → :80(8080)   PORT-8080</span>
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="go">client → :90(9090)   PORT-9090        ← 一點都沒收緊</span>
+</span></code></pre></div>
+<p>9090 照樣通，因為上一步的 <code>allow-same-namespace</code> 還在。網路政策是允許清單：一個 endpoint 身上的所有規則取聯集，任何一條允許就放行。<code>allow-same-namespace</code> 已經允許同命名空間的所有連線，再加一條更窄的規則，不會讓已經允許的連線變成拒絕。要收緊，得刪掉那條寬的：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>netlab<span class="w"> </span>delete<span class="w"> </span>cnp<span class="w"> </span>allow-same-namespace
+</span></code></pre></div>
+<p>刪掉之後：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="go">client → :80(8080)        PORT-8080          ✅ 放行的埠通</span>
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="go">client → :90(9090)        curl: (28) 逾時     ❌ 沒放行的埠不通</span>
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="go">client → svc-backend:80   curl: (28) 逾時     ❌ 沒放行的目標不通</span>
+</span></code></pre></div>
+<p>這次 8080 通、9090 不通。<code>svc-backend</code> 也連不上了，因為它身上現在只剩 default-deny，沒有任何允許的來源。</p>
+<p>Cilium 另外有 <code>ingressDeny</code>／<code>egressDeny</code>，用來表達「就算別的規則允許也要擋」。本課沒有驗證這一組規則。</p>
+<h3 id="_3">政策在資料平面上長什麼樣子<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h3>
+<p>每個 endpoint 套用的政策，最後會寫成節點上的一張 BPF map，叫 policy map。用 endpoint 編號查 <code>multiport</code>（680）的那一張：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="gp">$ </span>cilium-dbg<span class="w"> </span>bpf<span class="w"> </span>policy<span class="w"> </span>get<span class="w"> </span><span class="m">680</span><span class="w">           </span><span class="c1"># 680 = multiport 這顆 endpoint</span>
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="go">POLICY   DIRECTION   LABELS                     PORT/PROTO   PROXY PORT   BYTES   PACKETS</span>
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="go">Allow    Ingress     reserved:host              ANY          NONE          968     12</span>
+</span><span id="__span-20-4"><a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="go">Allow    Ingress     k8s:app=client             8080/TCP     NONE          974     12</span>
+</span><span id="__span-20-5"><a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="go">                     k8s:…namespace=netlab</span>
+</span><span id="__span-20-6"><a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="go">Allow    Egress      ANY                        ANY          NONE            -      -</span>
+</span></code></pre></div>
+<p>這張表就是 <code>multiport</code> 現在套用的全部政策。第二行允許 <code>app=client</code> 打 8080/TCP。表裡沒有 9090 這一列，所以 9090 被拒：政策裡並沒有一條「拒絕 9090」的規則，被拒是因為找不到對應的允許條目。</p>
+<p>右邊的 <code>BYTES</code>、<code>PACKETS</code> 是每一列的計數器，可以拿來確認某條規則到底有沒有被用到。這跟 Day 7 用 iptables 的計數器判斷「哪一條規則做了那次翻譯」是同樣的方法。</p>
+<p>第一行的 <code>reserved:host</code> 不是任何一條政策寫出來的，它代表節點本身。步驟 7 會回頭看這一行。</p>
+<h2 id="5-fqdn-egress">步驟 5: FQDN egress<a class="headerlink" href="#5-fqdn-egress" title="Permanent link">&para;</a></h2>
+<p>前面管的都是「誰能連進來」（ingress）。反方向是管 pod 能連出去哪裡（egress）。對外的服務常常換 IP，手動維護 IP 清單很麻煩，Cilium 讓你直接寫網域名稱，這叫 <strong>FQDN 政策</strong>（FQDN 是完整網域名稱）。下面這條政策叫 <code>client-fqdn-egress</code>，選中 <code>app: client</code>，讓它只能連 <code>example.com</code>：</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="w">  </span><span class="nt">egress</span><span class="p">:</span>
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">toEndpoints</span><span class="p">:</span>
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">matchLabels</span><span class="p">:</span>
+</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="w">            </span><span class="nt">io.kubernetes.pod.namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kube-system</span>
+</span><span id="__span-21-5"><a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="w">            </span><span class="nt">k8s-app</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kube-dns</span>
+</span><span id="__span-21-6"><a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="w">      </span><span class="nt">toPorts</span><span class="p">:</span>
+</span><span id="__span-21-7"><a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">ports</span><span class="p">:</span>
+</span><span id="__span-21-8"><a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a><span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;53&quot;</span><span class="p p-Indicator">,</span><span class="nt"> protocol</span><span class="p">:</span><span class="w"> </span><span class="nv">ANY</span><span class="p p-Indicator">}</span>
+</span><span id="__span-21-9"><a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a><span class="w">          </span><span class="nt">rules</span><span class="p">:</span>
+</span><span id="__span-21-10"><a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a><span class="w">            </span><span class="nt">dns</span><span class="p">:</span>
+</span><span id="__span-21-11"><a id="__codelineno-21-11" name="__codelineno-21-11" href="#__codelineno-21-11"></a><span class="w">              </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">matchPattern</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;*&quot;</span>
+</span><span id="__span-21-12"><a id="__codelineno-21-12" name="__codelineno-21-12" href="#__codelineno-21-12"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">toFQDNs</span><span class="p">:</span>
+</span><span id="__span-21-13"><a id="__codelineno-21-13" name="__codelineno-21-13" href="#__codelineno-21-13"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">matchName</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;example.com&quot;</span>
+</span></code></pre></div>
+<p>這裡的 <code>toEndpoints</code> 同時指定 <code>kube-system</code> 命名空間與 <code>k8s-app: kube-dns</code>，選取叢集 DNS 的 pod。<a href="https://docs.cilium.io/en/stable/security/policy/kubernetes/#specifying-namespace-in-endpointselector-fromendpoints-toendpoints">Cilium 官方跨命名空間範例</a>也使用這兩個條件。完整檔案如下：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>fqdn-egress.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="s">apiVersion: cilium.io/v2</span>
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="s">kind: CiliumNetworkPolicy</span>
+</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="s">metadata:</span>
+</span><span id="__span-22-5"><a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="s">  name: client-fqdn-egress</span>
+</span><span id="__span-22-6"><a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="s">  namespace: netlab</span>
+</span><span id="__span-22-7"><a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="s">spec:</span>
+</span><span id="__span-22-8"><a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="s">  endpointSelector:</span>
+</span><span id="__span-22-9"><a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a><span class="s">    matchLabels: {app: client}</span>
+</span><span id="__span-22-10"><a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a><span class="s">  egress:</span>
+</span><span id="__span-22-11"><a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a><span class="s">    - toEndpoints:</span>
+</span><span id="__span-22-12"><a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a><span class="s">        - matchLabels:</span>
+</span><span id="__span-22-13"><a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a><span class="s">            io.kubernetes.pod.namespace: kube-system</span>
+</span><span id="__span-22-14"><a id="__codelineno-22-14" name="__codelineno-22-14" href="#__codelineno-22-14"></a><span class="s">            k8s-app: kube-dns</span>
+</span><span id="__span-22-15"><a id="__codelineno-22-15" name="__codelineno-22-15" href="#__codelineno-22-15"></a><span class="s">      toPorts:</span>
+</span><span id="__span-22-16"><a id="__codelineno-22-16" name="__codelineno-22-16" href="#__codelineno-22-16"></a><span class="s">        - ports:</span>
+</span><span id="__span-22-17"><a id="__codelineno-22-17" name="__codelineno-22-17" href="#__codelineno-22-17"></a><span class="s">            - {port: &quot;53&quot;, protocol: ANY}</span>
+</span><span id="__span-22-18"><a id="__codelineno-22-18" name="__codelineno-22-18" href="#__codelineno-22-18"></a><span class="s">          rules:</span>
+</span><span id="__span-22-19"><a id="__codelineno-22-19" name="__codelineno-22-19" href="#__codelineno-22-19"></a><span class="s">            dns:</span>
+</span><span id="__span-22-20"><a id="__codelineno-22-20" name="__codelineno-22-20" href="#__codelineno-22-20"></a><span class="s">              - matchPattern: &quot;*&quot;</span>
+</span><span id="__span-22-21"><a id="__codelineno-22-21" name="__codelineno-22-21" href="#__codelineno-22-21"></a><span class="s">    - toFQDNs:</span>
+</span><span id="__span-22-22"><a id="__codelineno-22-22" name="__codelineno-22-22" href="#__codelineno-22-22"></a><span class="s">        - matchName: &quot;example.com&quot;</span>
+</span><span id="__span-22-23"><a id="__codelineno-22-23" name="__codelineno-22-23" href="#__codelineno-22-23"></a><span class="s">EOF</span>
+</span><span id="__span-22-24"><a id="__codelineno-22-24" name="__codelineno-22-24" href="#__codelineno-22-24"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>fqdn-egress.yaml
+</span></code></pre></div>
+<p>第二段 <code>toFQDNs</code> 是允許的網域清單。第一段允許 <code>client</code> 對叢集的 DNS（kube-dns）查詢，並加上 <code>rules.dns</code>。這一段不能省，等一下看資料平面就知道為什麼。結果：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="go">client → example.com       200</span>
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="go">client → ifconfig.me       curl: (28) 逾時</span>
+</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="go">client → www.google.com    curl: (28) 逾時</span>
+</span><span id="__span-23-4"><a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="go">client → svc-multiport     curl: (28) 逾時      ← 叢集內也一起被擋了</span>
+</span><span id="__span-23-5"><a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="go">client 的 dig example.com  &lt;addr-a&gt;       ← DNS 本身還通</span>
+</span></code></pre></div>
+<p><code>example.com</code> 通，另外兩個網域逾時，DNS 查詢本身還能用。倒數第二行要特別注意：連同命名空間的 <code>svc-multiport</code> 也不通了。一條政策只要出現 <code>egress</code> 區段，被選中的 endpoint 對外的所有連線就改成預設拒絕，包括原本叢集內的流量。替一顆 pod 加 FQDN 政策時，它需要的叢集內目的地也要一起列進去。</p>
+<h3 id="cilium-examplecom-ip">Cilium 怎麼知道 example.com 是哪個 IP<a class="headerlink" href="#cilium-examplecom-ip" title="Permanent link">&para;</a></h3>
+<p>看 <code>client</code>（endpoint 2272）的 policy map：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="gp">$ </span>cilium-dbg<span class="w"> </span>bpf<span class="w"> </span>policy<span class="w"> </span>get<span class="w"> </span><span class="m">2272</span><span class="w">          </span><span class="c1"># 2272 = client</span>
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="go">Allow  Egress  k8s:k8s-app=kube-dns …   53/UDP    PROXY PORT 44427    34828 bytes</span>
+</span><span id="__span-24-3"><a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="go">Allow  Egress  fqdn:example.com         ANY       NONE                16864 bytes</span>
+</span><span id="__span-24-4"><a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="go">       reserved:world</span>
+</span></code></pre></div>
+<p>兩列都跟步驟 4 的不一樣。DNS 那一列的 <code>PROXY PORT</code> 有一個數字：符合這一列的封包不會直接放行，而是轉給 cilium-agent 裡的 <strong>DNS proxy</strong>。proxy 替 <code>client</code> 轉發查詢，看到回應裡的 IP，再把這些 IP 加進 <code>fqdn:example.com</code> 那一列。所以第二列是執行時動態產生的。它底下那個 <code>reserved:world</code> 是 Cilium 給叢集外部位址的身分：叢集外的 IP 沒有 pod 標籤，一律歸在這個保留身分下。</p>
+<p>proxy 記下的網域與 IP 對應可以直接查：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="gp">$ </span>cilium-dbg<span class="w"> </span>fqdn<span class="w"> </span>cache<span class="w"> </span>list
+</span><span id="__span-25-2"><a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="go">Endpoint  Source  FQDN                TTL   IPs</span>
+</span><span id="__span-25-3"><a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="go">2272      lookup  example.com.        30    &lt;addr-b&gt;,&lt;addr-a&gt;</span>
+</span><span id="__span-25-4"><a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="go">2272      lookup  ifconfig.me.        30    &lt;addr-c&gt;</span>
+</span><span id="__span-25-5"><a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a><span class="go">2272      lookup  www.google.com.     30    &lt;addr-d&gt;,…</span>
+</span></code></pre></div>
+<p>DNS proxy 擷取 DNS 回應中的 IP，供符合 <code>toFQDNs</code> 的政策放行。第一段 <code>rules.dns</code> 讓 DNS 查詢經過 proxy；缺少這段設定，proxy 就無法擷取解析結果，<code>toFQDNs</code> 也沒有對應的 IP 可供放行。</p>
+<p>快取裡還有 <code>ifconfig.me</code> 和 <code>www.google.com</code>，可是這兩個網域的連線剛剛被擋了，見<a href="#mine-6">疑難排解：被擋掉的網域照樣查得到、進了快取</a>。</p>
+<h3 id="curlproxy">代價：一次 curl，proxy 看到十次查詢<a class="headerlink" href="#curlproxy" title="Permanent link">&para;</a></h3>
+<p><a href="../sprint2-day4-falco-custom-rules/#mine-4">Day 4</a> 看過 <code>ndots:5</code>：pod 查一個點數不夠多的名字時，會先依序接上各個搜尋網域試一輪。在 <code>client</code> 上執行一次 <code>curl http://example.com/</code>，同時用 <code>cilium-dbg monitor --type l7</code> 看 DNS proxy 收到的查詢，一共十次：</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>查詢名稱</th>
+<th>結果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1–2</td>
+<td><code>example.com.netlab.svc.cluster.local.</code></td>
+<td>空</td>
+</tr>
+<tr>
+<td>3–4</td>
+<td><code>example.com.svc.cluster.local.</code></td>
+<td>空</td>
+</tr>
+<tr>
+<td>5–6</td>
+<td><code>example.com.cluster.local.</code></td>
+<td>空</td>
+</tr>
+<tr>
+<td>7–8</td>
+<td><code>example.com.&lt;Azure 內部搜尋域&gt;.</code></td>
+<td>空</td>
+</tr>
+<tr>
+<td>9–10</td>
+<td><code>example.com.</code></td>
+<td><strong>有答案</strong></td>
+</tr>
+</tbody>
+</table>
+<p>每個名字查 A 和 AAAA 各一次，所以兩次一組。第 7–8 那一組是 AKS 在 <code>/etc/resolv.conf</code> 多加的 Azure 內部搜尋網域，所以在 AKS 上比一般 Kubernetes 多一輪。十次裡只有最後兩次有答案，但十次全部要經過使用者空間的 proxy。</p>
+<p>再比較套政策前後，解析一個名字要花多少時間（<code>curl</code> 的 <code>time_namelookup</code>，各量 30 次）：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>                     mean     p50     p90     max
+</span><span id="__span-26-2"><a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a>無 egress 政策       1.99 ms  1.61    1.85    7.56
+</span><span id="__span-26-3"><a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a>FQDN 政策            4.35 ms  3.98    6.26    8.12
+</span></code></pre></div>
+<p>p50 從 1.61 ms 變成 3.98 ms，約 2.5 倍。這是解析一個名字的總時間，包含那十次查詢。同樣的 <code>ndots:5</code> 在 Day 4 讓 Falco 每分鐘多出 180 條要有人去看的誤報；在這裡則是每次解析多花約 2.4 ms。</p>
+<p>下一步要從 <code>client</code> 打叢集內的 <code>echo7</code>。這條 egress 政策還在的話，<code>client</code> 連不到叢集內的任何服務，所以先刪掉它：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>netlab<span class="w"> </span>delete<span class="w"> </span>cnp<span class="w"> </span>client-fqdn-egress
+</span></code></pre></div>
+<h2 id="step-6">步驟 6: L7，GET 過而 POST 被擋<a class="headerlink" href="#step-6" title="Permanent link">&para;</a></h2>
+<p>回到開場的需求：<code>echo7</code> 只讓 <code>client</code> 讀，不讓它寫。GET 和 POST 走同一個埠、同一種 TCP 連線，只看位址和埠的 L3/L4 規則分不出來，要讀到 HTTP 請求的內容才行。看應用層內容做判斷的政策叫 <strong>L7 政策</strong>。這條政策叫 <code>echo7-get-only</code>，選中 <code>app: echo7</code>，寫法跟步驟 4 一樣，只在 <code>toPorts</code> 底下多一段 <code>rules.http</code>。完整檔案：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-28-1"><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>l7-http.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-28-2"><a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="s">apiVersion: cilium.io/v2</span>
+</span><span id="__span-28-3"><a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="s">kind: CiliumNetworkPolicy</span>
+</span><span id="__span-28-4"><a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a><span class="s">metadata:</span>
+</span><span id="__span-28-5"><a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a><span class="s">  name: echo7-get-only</span>
+</span><span id="__span-28-6"><a id="__codelineno-28-6" name="__codelineno-28-6" href="#__codelineno-28-6"></a><span class="s">  namespace: netlab</span>
+</span><span id="__span-28-7"><a id="__codelineno-28-7" name="__codelineno-28-7" href="#__codelineno-28-7"></a><span class="s">spec:</span>
+</span><span id="__span-28-8"><a id="__codelineno-28-8" name="__codelineno-28-8" href="#__codelineno-28-8"></a><span class="s">  endpointSelector:</span>
+</span><span id="__span-28-9"><a id="__codelineno-28-9" name="__codelineno-28-9" href="#__codelineno-28-9"></a><span class="s">    matchLabels: {app: echo7}</span>
+</span><span id="__span-28-10"><a id="__codelineno-28-10" name="__codelineno-28-10" href="#__codelineno-28-10"></a><span class="s">  ingress:</span>
+</span><span id="__span-28-11"><a id="__codelineno-28-11" name="__codelineno-28-11" href="#__codelineno-28-11"></a><span class="s">    - fromEndpoints:</span>
+</span><span id="__span-28-12"><a id="__codelineno-28-12" name="__codelineno-28-12" href="#__codelineno-28-12"></a><span class="s">        - matchLabels: {app: client}</span>
+</span><span id="__span-28-13"><a id="__codelineno-28-13" name="__codelineno-28-13" href="#__codelineno-28-13"></a><span class="s">      toPorts:</span>
+</span><span id="__span-28-14"><a id="__codelineno-28-14" name="__codelineno-28-14" href="#__codelineno-28-14"></a><span class="s">        - ports:</span>
+</span><span id="__span-28-15"><a id="__codelineno-28-15" name="__codelineno-28-15" href="#__codelineno-28-15"></a><span class="s">            - {port: &quot;8080&quot;, protocol: TCP}</span>
+</span><span id="__span-28-16"><a id="__codelineno-28-16" name="__codelineno-28-16" href="#__codelineno-28-16"></a><span class="s">          rules:</span>
+</span><span id="__span-28-17"><a id="__codelineno-28-17" name="__codelineno-28-17" href="#__codelineno-28-17"></a><span class="s">            http:</span>
+</span><span id="__span-28-18"><a id="__codelineno-28-18" name="__codelineno-28-18" href="#__codelineno-28-18"></a><span class="s">              - method: &quot;GET&quot;</span>
+</span><span id="__span-28-19"><a id="__codelineno-28-19" name="__codelineno-28-19" href="#__codelineno-28-19"></a><span class="s">EOF</span>
+</span><span id="__span-28-20"><a id="__codelineno-28-20" name="__codelineno-28-20" href="#__codelineno-28-20"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>l7-http.yaml
+</span></code></pre></div>
+<p>新增的就是這幾行：</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-29-1"><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="w">      </span><span class="nt">toPorts</span><span class="p">:</span>
+</span><span id="__span-29-2"><a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">ports</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[{</span><span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;8080&quot;</span><span class="p p-Indicator">,</span><span class="nt"> protocol</span><span class="p">:</span><span class="w"> </span><span class="nv">TCP</span><span class="p p-Indicator">}]</span>
+</span><span id="__span-29-3"><a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="w">          </span><span class="nt">rules</span><span class="p">:</span>
+</span><span id="__span-29-4"><a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a><span class="w">            </span><span class="nt">http</span><span class="p">:</span>
+</span><span id="__span-29-5"><a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a><span class="w">              </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">method</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;GET&quot;</span>
+</span></code></pre></div>
+<p>貼上之前，<code>echo7</code> 被 default-deny 擋著，<code>client</code> 的 GET 會逾時。貼上之後：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-30-1"><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="gp">$ </span>curl<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s1">&#39;http_code=%{http_code} time_total=%{time_total}\n&#39;</span><span class="w"> </span>http://svc-echo7.netlab/
+</span><span id="__span-30-2"><a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a><span class="go">http_code=200 time_total=0.003433</span>
+</span><span id="__span-30-3"><a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a>
+</span><span id="__span-30-4"><a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a><span class="gp">$ </span>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>-d<span class="w"> </span><span class="nv">x</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>http://svc-echo7.netlab/
+</span><span id="__span-30-5"><a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a><span class="go">Access denied</span>
+</span><span id="__span-30-6"><a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a><span class="go">http_code=403 time_total=0.003860</span>
+</span><span id="__span-30-7"><a id="__codelineno-30-7" name="__codelineno-30-7" href="#__codelineno-30-7"></a>
+</span><span id="__span-30-8"><a id="__codelineno-30-8" name="__codelineno-30-8" href="#__codelineno-30-8"></a><span class="gp">$ </span>PUT<span class="w"> </span>→<span class="w"> </span><span class="m">403</span><span class="w">     </span>DELETE<span class="w"> </span>→<span class="w"> </span><span class="m">403</span>
+</span></code></pre></div>
+<p>GET 回 200，POST、PUT、DELETE 都回 403。同一顆 pod、同一個 Service、同一個 8080/TCP，結果只因為 HTTP 方法不同而不同。</p>
+<h3 id="_4">呼叫端看到的差別<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
+<p>L7 政策擋下請求的方式跟 L4 完全不同。把兩種拒絕在呼叫端看到的東西並排：上面是 POST 被 L7 政策拒絕，下面是步驟 4 的 9090 被 L4 政策擋下：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-31-1"><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="gp">#</span><span class="c1">## L7 拒絕（POST → echo7）</span>
+</span><span id="__span-31-2"><a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="gp">$ </span>curl<span class="w"> </span>-i<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>-d<span class="w"> </span><span class="nv">x</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>http://svc-echo7.netlab/
+</span><span id="__span-31-3"><a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a><span class="go">HTTP/1.1 403 Forbidden</span>
+</span><span id="__span-31-4"><a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a><span class="go">content-type: text/plain</span>
+</span><span id="__span-31-5"><a id="__codelineno-31-5" name="__codelineno-31-5" href="#__codelineno-31-5"></a><span class="go">server: envoy               ← 注意這一行</span>
+</span><span id="__span-31-6"><a id="__codelineno-31-6" name="__codelineno-31-6" href="#__codelineno-31-6"></a><span class="go">connection: close</span>
+</span><span id="__span-31-7"><a id="__codelineno-31-7" name="__codelineno-31-7" href="#__codelineno-31-7"></a>
+</span><span id="__span-31-8"><a id="__codelineno-31-8" name="__codelineno-31-8" href="#__codelineno-31-8"></a><span class="go">Access denied</span>
+</span><span id="__span-31-9"><a id="__codelineno-31-9" name="__codelineno-31-9" href="#__codelineno-31-9"></a>
+</span><span id="__span-31-10"><a id="__codelineno-31-10" name="__codelineno-31-10" href="#__codelineno-31-10"></a><span class="gp">#</span><span class="c1">## L4 丟包（client → multiport:9090）</span>
+</span><span id="__span-31-11"><a id="__codelineno-31-11" name="__codelineno-31-11" href="#__codelineno-31-11"></a><span class="gp">$ </span>curl<span class="w"> </span>-v<span class="w"> </span>http://svc-multiport.netlab:90/
+</span><span id="__span-31-12"><a id="__codelineno-31-12" name="__codelineno-31-12" href="#__codelineno-31-12"></a><span class="go">*   Trying 10.0.78.148:90...</span>
+</span><span id="__span-31-13"><a id="__codelineno-31-13" name="__codelineno-31-13" href="#__codelineno-31-13"></a><span class="go">* Connection timed out after 5002 milliseconds</span>
+</span><span id="__span-31-14"><a id="__codelineno-31-14" name="__codelineno-31-14" href="#__codelineno-31-14"></a><span class="go">curl: (28) Connection timed out after 5002 milliseconds</span>
+</span></code></pre></div>
+<p>L7 的拒絕是一個完整的 HTTP 回應，header 裡有 <code>server: envoy</code>。<strong>Envoy</strong> 是一個 HTTP proxy，Cilium 在每個節點上以 <code>cilium-envoy</code> DaemonSet 執行它（Day 7 裝 Cilium 時就看過這個元件）。有了 <code>rules.http</code>，送往 <code>echo7</code> 8080 的連線會先轉給 Envoy，由它解析 HTTP 方法，再決定轉送或拒絕。L4 規則則是直接丟掉 SYN，呼叫端什麼都收不到，只能等到逾時。</p>
+<p>把兩條路徑畫成圖：</p>
+<p><img alt="上半部是 L4 規則：client 送出 SYN，multiport 的 BPF 程式在 policy map 找不到 9090 的條目就丟掉，封包不會送達 multiport，client 5 秒後逾時。下半部是 L7 規則：echo7 的 BPF 程式把連線轉給 cilium-envoy，Envoy 解析 HTTP 方法，GET 轉送給 echo7，POST 由 Envoy 直接回 403，echo7 收不到" src="../../assets/diagrams/s2d8-l4-vs-l7.svg" /></p>
+<p>照著圖上兩條路徑看。L4 那條，封包在 <code>multiport</code> 的 BPF 程式就被丟掉，什麼都不回。L7 那條，BPF 程式把連線轉給 Envoy，GET 繼續送到 <code>echo7</code>，POST 由 Envoy 直接回 403，<code>echo7</code> 根本沒收到這個請求。</p>
+<p>這個差別在實務上有三個影響：</p>
+<ol>
+<li><strong>失敗多快回來</strong>：403 在 3.9 毫秒內就回來；L4 要等呼叫端的連線逾時，這裡是 5 秒，正式環境常設 30 秒以上。等待的這段時間，呼叫端的執行緒和連線都被佔著。</li>
+<li><strong>好不好追查</strong>：403 帶著回應本文和 header，會留在呼叫端的日誌裡。L4 的逾時跟「對方掛了」「網路斷了」「DNS 壞了」看起來一樣，要到節點上開 <code>cilium-dbg monitor</code> 才看得到 <code>Policy denied</code>。</li>
+<li><strong>會不會重試</strong>：多數 HTTP 用戶端遇到逾時會重試，遇到 403 不會。同樣擋一個請求，L4 寫法會讓被擋的呼叫端一直重打，L7 寫法不會。</li>
+</ol>
+<p>Envoy 回的 403 也有副作用，見<a href="#mine-7">疑難排解：應用日誌查不到被拒絕的請求</a>。</p>
+<h3 id="l7">L7 的成本<a class="headerlink" href="#l7" title="Permanent link">&para;</a></h3>
+<p>多經過一個 proxy 要付出時間。同一個 <code>client</code> 對 <code>echo7</code> 送同一個 GET，兩種政策只差 <code>rules.http</code> 那三行，各量 400 次：L7 政策的 p50 比 L4 多約 0.49 ms（約 +34%）。同一種政策再量一輪，p50 只差 30 µs 以內，所以這個差距來自 L7 規則。對一般的服務呼叫，這通常可以接受；對一次請求要經過很多層服務、或延遲很敏感的路徑，要把它算進去。</p>
+<p>時間花在哪裡，從資料平面看得出來。下面比較兩種政策下 <code>echo7</code>（endpoint 160）的 policy map，以及 agent 回報的 proxy 狀態：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-32-1"><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="gp">#</span><span class="c1">## L7 政策生效時</span>
+</span><span id="__span-32-2"><a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="gp">$ </span>cilium-dbg<span class="w"> </span>bpf<span class="w"> </span>policy<span class="w"> </span>get<span class="w"> </span><span class="m">160</span><span class="w">         </span><span class="c1"># 160 = echo7</span>
+</span><span id="__span-32-3"><a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a><span class="go">Allow  Ingress  k8s:app=client   8080/TCP   PROXY PORT 12286</span>
+</span><span id="__span-32-4"><a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a><span class="gp">$ </span>cilium-dbg<span class="w"> </span>status<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>Proxy
+</span><span id="__span-32-5"><a id="__codelineno-32-5" name="__codelineno-32-5" href="#__codelineno-32-5"></a><span class="go">Proxy Status:  OK, … 1 redirects active on ports 10000-20000, Envoy: external</span>
+</span><span id="__span-32-6"><a id="__codelineno-32-6" name="__codelineno-32-6" href="#__codelineno-32-6"></a>
+</span><span id="__span-32-7"><a id="__codelineno-32-7" name="__codelineno-32-7" href="#__codelineno-32-7"></a><span class="gp">#</span><span class="c1">## 換成 L4 政策</span>
+</span><span id="__span-32-8"><a id="__codelineno-32-8" name="__codelineno-32-8" href="#__codelineno-32-8"></a><span class="go">Allow  Ingress  k8s:app=client   8080/TCP   PROXY PORT NONE</span>
+</span><span id="__span-32-9"><a id="__codelineno-32-9" name="__codelineno-32-9" href="#__codelineno-32-9"></a><span class="go">Proxy Status:  OK, … 0 redirects active</span>
+</span></code></pre></div>
+<p><code>PROXY PORT</code> 從 <code>NONE</code> 變成一個數字，<code>redirects</code> 從 0 變成 1：封包不再由 BPF 查完 map 直接轉送，而是進到使用者空間給 Envoy 解析。<code>Envoy: external</code> 表示 Envoy 跑在獨立的 <code>cilium-envoy</code> DaemonSet 裡，不在 agent 行程內。這組數字只代表一顆 endpoint、一條 HTTP 規則的情況；<code>cilium-envoy</code> 的記憶體在這個規模下維持在 14 Mi 左右，規則或流量多起來會怎樣，本課沒有測。</p>
+<h2 id="step-7">步驟 7: <code>nsenter</code> 與 hostNetwork pod<a class="headerlink" href="#step-7" title="Permanent link">&para;</a></h2>
+<p>Day 6 看過一個繞過攔截的方法：Tetragon 的攔截以 cgroup 為範圍，<code>nsenter</code> 只換命名空間、不換 cgroup，所以另一個命名空間的特權 pod 鑽進受保護的 pod，做被禁止的事也不會被殺（Day 6 <a href="../sprint2-day6-tetragon-enforcement/#step-4">步驟 4</a>）。同樣的做法對網路政策有沒有用？</p>
+<p>在 <code>attacker</code> 命名空間建一顆特權 pod <code>nsenter-box</code>：開著 <code>hostPID</code>（看得到節點上所有行程，才查得到別的 pod 的 PID）和 <code>privileged</code>，另外還開了 <code>hostNetwork</code>（直接使用節點的網路）：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-33-1"><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>attacker.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-33-2"><a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-33-3"><a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="s">kind: Namespace</span>
+</span><span id="__span-33-4"><a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a><span class="s">metadata:</span>
+</span><span id="__span-33-5"><a id="__codelineno-33-5" name="__codelineno-33-5" href="#__codelineno-33-5"></a><span class="s">  name: attacker</span>
+</span><span id="__span-33-6"><a id="__codelineno-33-6" name="__codelineno-33-6" href="#__codelineno-33-6"></a><span class="s">---</span>
+</span><span id="__span-33-7"><a id="__codelineno-33-7" name="__codelineno-33-7" href="#__codelineno-33-7"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-33-8"><a id="__codelineno-33-8" name="__codelineno-33-8" href="#__codelineno-33-8"></a><span class="s">kind: Pod</span>
+</span><span id="__span-33-9"><a id="__codelineno-33-9" name="__codelineno-33-9" href="#__codelineno-33-9"></a><span class="s">metadata:</span>
+</span><span id="__span-33-10"><a id="__codelineno-33-10" name="__codelineno-33-10" href="#__codelineno-33-10"></a><span class="s">  name: nsenter-box</span>
+</span><span id="__span-33-11"><a id="__codelineno-33-11" name="__codelineno-33-11" href="#__codelineno-33-11"></a><span class="s">  namespace: attacker</span>
+</span><span id="__span-33-12"><a id="__codelineno-33-12" name="__codelineno-33-12" href="#__codelineno-33-12"></a><span class="s">  labels: {app: nsenter-box}</span>
+</span><span id="__span-33-13"><a id="__codelineno-33-13" name="__codelineno-33-13" href="#__codelineno-33-13"></a><span class="s">spec:</span>
+</span><span id="__span-33-14"><a id="__codelineno-33-14" name="__codelineno-33-14" href="#__codelineno-33-14"></a><span class="s">  hostPID: true</span>
+</span><span id="__span-33-15"><a id="__codelineno-33-15" name="__codelineno-33-15" href="#__codelineno-33-15"></a><span class="s">  hostNetwork: true</span>
+</span><span id="__span-33-16"><a id="__codelineno-33-16" name="__codelineno-33-16" href="#__codelineno-33-16"></a><span class="s">  tolerations:</span>
+</span><span id="__span-33-17"><a id="__codelineno-33-17" name="__codelineno-33-17" href="#__codelineno-33-17"></a><span class="s">    - operator: Exists</span>
+</span><span id="__span-33-18"><a id="__codelineno-33-18" name="__codelineno-33-18" href="#__codelineno-33-18"></a><span class="s">  containers:</span>
+</span><span id="__span-33-19"><a id="__codelineno-33-19" name="__codelineno-33-19" href="#__codelineno-33-19"></a><span class="s">    - name: c</span>
+</span><span id="__span-33-20"><a id="__codelineno-33-20" name="__codelineno-33-20" href="#__codelineno-33-20"></a><span class="s">      image: nicolaka/netshoot:v0.13</span>
+</span><span id="__span-33-21"><a id="__codelineno-33-21" name="__codelineno-33-21" href="#__codelineno-33-21"></a><span class="s">      command: [&quot;sleep&quot;, &quot;infinity&quot;]</span>
+</span><span id="__span-33-22"><a id="__codelineno-33-22" name="__codelineno-33-22" href="#__codelineno-33-22"></a><span class="s">      securityContext:</span>
+</span><span id="__span-33-23"><a id="__codelineno-33-23" name="__codelineno-33-23" href="#__codelineno-33-23"></a><span class="s">        privileged: true</span>
+</span><span id="__span-33-24"><a id="__codelineno-33-24" name="__codelineno-33-24" href="#__codelineno-33-24"></a><span class="s">EOF</span>
+</span><span id="__span-33-25"><a id="__codelineno-33-25" name="__codelineno-33-25" href="#__codelineno-33-25"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>attacker.yaml
+</span></code></pre></div>
+<p>要進入 <code>client</code> 的網路命名空間，得先知道 <code>client</code> 在節點上的 PID。<code>/proc/&lt;pid&gt;</code> 裡只有指令列，看不出屬於哪顆 pod，所以改用位址反查：逐一進入每個行程的網路命名空間讀 <code>eth0</code> 的位址，跟 <code>client</code> 的 pod IP 比對：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-34-1"><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a><span class="nv">ECHO7_IP</span><span class="o">=</span><span class="k">$(</span>kubectl<span class="w"> </span>-n<span class="w"> </span>netlab<span class="w"> </span>get<span class="w"> </span>pod<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>echo7<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.items[0].status.podIP}&#39;</span><span class="k">)</span>
+</span><span id="__span-34-2"><a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a><span class="nv">MULTI_IP</span><span class="o">=</span><span class="k">$(</span>kubectl<span class="w"> </span>-n<span class="w"> </span>netlab<span class="w"> </span>get<span class="w"> </span>pod<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>multiport<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.items[0].status.podIP}&#39;</span><span class="k">)</span>
+</span><span id="__span-34-3"><a id="__codelineno-34-3" name="__codelineno-34-3" href="#__codelineno-34-3"></a><span class="nv">PROBE_IP</span><span class="o">=</span><span class="k">$(</span>kubectl<span class="w"> </span>-n<span class="w"> </span>netlab-b<span class="w"> </span>get<span class="w"> </span>pod<span class="w"> </span>probe<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.podIP}&#39;</span><span class="k">)</span>
+</span><span id="__span-34-4"><a id="__codelineno-34-4" name="__codelineno-34-4" href="#__codelineno-34-4"></a>A<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span>kubectl<span class="w"> </span>-n<span class="w"> </span>attacker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>nsenter-box<span class="w"> </span>--<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$@</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+</span><span id="__span-34-5"><a id="__codelineno-34-5" name="__codelineno-34-5" href="#__codelineno-34-5"></a><span class="nv">CLIENT_IP</span><span class="o">=</span><span class="k">$(</span>kubectl<span class="w"> </span>-n<span class="w"> </span>netlab<span class="w"> </span>get<span class="w"> </span>pod<span class="w"> </span>client<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.podIP}&#39;</span><span class="k">)</span>
+</span><span id="__span-34-6"><a id="__codelineno-34-6" name="__codelineno-34-6" href="#__codelineno-34-6"></a><span class="nv">pids</span><span class="o">=</span><span class="k">$(</span>A<span class="w"> </span>sh<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;for p in $(ls /proc | grep -E &quot;^[0-9]+$&quot;); do</span>
+</span><span id="__span-34-7"><a id="__codelineno-34-7" name="__codelineno-34-7" href="#__codelineno-34-7"></a><span class="s1">  ip=$(nsenter -t $p -n ip -4 -o addr show dev eth0 2&gt;/dev/null | awk &quot;{print \$4}&quot;)</span>
+</span><span id="__span-34-8"><a id="__codelineno-34-8" name="__codelineno-34-8" href="#__codelineno-34-8"></a><span class="s1">  [ -n &quot;$ip&quot; ] &amp;&amp; echo &quot;$p ${ip%%/*}&quot;; done&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sort<span class="w"> </span>-u<span class="k">)</span>
+</span><span id="__span-34-9"><a id="__codelineno-34-9" name="__codelineno-34-9" href="#__codelineno-34-9"></a><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$pids</span><span class="s2">&quot;</span>
+</span><span id="__span-34-10"><a id="__codelineno-34-10" name="__codelineno-34-10" href="#__codelineno-34-10"></a><span class="nv">CLIENT_PID</span><span class="o">=</span><span class="k">$(</span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$pids</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>awk<span class="w"> </span>-v<span class="w"> </span><span class="nv">ip</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$CLIENT_IP</span><span class="s2">&quot;</span><span class="w"> </span><span class="s1">&#39;$2==ip{print $1; exit}&#39;</span><span class="k">)</span>
+</span><span id="__span-34-11"><a id="__codelineno-34-11" name="__codelineno-34-11" href="#__codelineno-34-11"></a><span class="nv">PROBE_PID</span><span class="o">=</span><span class="k">$(</span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$pids</span><span class="s2">&quot;</span><span class="w">  </span><span class="p">|</span><span class="w"> </span>awk<span class="w"> </span>-v<span class="w"> </span><span class="nv">ip</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$PROBE_IP</span><span class="s2">&quot;</span><span class="w">  </span><span class="s1">&#39;$2==ip{print $1; exit}&#39;</span><span class="k">)</span>
+</span></code></pre></div>
+<p>這段也查出 <code>probe</code> 的 PID，以及 <code>echo7</code>、<code>multiport</code> 的目標 IP。此時 <code>echo7</code> 只准 <code>client</code> 送 GET，<code>multiport</code> 只准 <code>client</code> 打 8080。從這顆 pod 用三種方式打同樣的目標：第 0 組直接用它自己的網路；第 1 組用 <code>nsenter -t &lt;client 的 PID&gt; -n</code> 進入 <code>client</code> 的網路命名空間再打；第 2 組進入 <code>probe</code> 的網路命名空間再打：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-35-1"><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;=== 0) attacker 自己的 netns(hostNetwork → reserved:host) ===&quot;</span>
+</span><span id="__span-35-2"><a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a><span class="nb">echo</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;  GET  echo7 : &quot;</span><span class="p">;</span><span class="w"> </span>A<span class="w"> </span>curl<span class="w"> </span>-s<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s1">&#39;%{http_code}\n&#39;</span><span class="w"> </span>-m<span class="w"> </span><span class="m">6</span><span class="w"> </span><span class="s2">&quot;http://</span><span class="nv">$ECHO7_IP</span><span class="s2">:8080/&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span>TIMEOUT
+</span><span id="__span-35-3"><a id="__codelineno-35-3" name="__codelineno-35-3" href="#__codelineno-35-3"></a><span class="nb">echo</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;  POST echo7 : &quot;</span><span class="p">;</span><span class="w"> </span>A<span class="w"> </span>curl<span class="w"> </span>-s<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s1">&#39;%{http_code}\n&#39;</span><span class="w"> </span>-m<span class="w"> </span><span class="m">6</span><span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>-d<span class="w"> </span><span class="nv">x</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="s2">&quot;http://</span><span class="nv">$ECHO7_IP</span><span class="s2">:8080/&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span>TIMEOUT
+</span><span id="__span-35-4"><a id="__codelineno-35-4" name="__codelineno-35-4" href="#__codelineno-35-4"></a><span class="nb">echo</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;  multiport:9090 : &quot;</span><span class="p">;</span><span class="w"> </span>A<span class="w"> </span>curl<span class="w"> </span>-s<span class="w"> </span>-m<span class="w"> </span><span class="m">6</span><span class="w"> </span><span class="s2">&quot;http://</span><span class="nv">$MULTI_IP</span><span class="s2">:9090/&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span>TIMEOUT
+</span><span id="__span-35-5"><a id="__codelineno-35-5" name="__codelineno-35-5" href="#__codelineno-35-5"></a>
+</span><span id="__span-35-6"><a id="__codelineno-35-6" name="__codelineno-35-6" href="#__codelineno-35-6"></a><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;=== 1) nsenter -t </span><span class="nv">$CLIENT_PID</span><span class="s2"> -n(netlab/client 的 netns) ===&quot;</span>
+</span><span id="__span-35-7"><a id="__codelineno-35-7" name="__codelineno-35-7" href="#__codelineno-35-7"></a><span class="nb">echo</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;  GET  echo7 : &quot;</span><span class="p">;</span><span class="w"> </span>A<span class="w"> </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CLIENT_PID</span><span class="s2">&quot;</span><span class="w"> </span>-n<span class="w"> </span>--<span class="w"> </span>curl<span class="w"> </span>-s<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s1">&#39;%{http_code}\n&#39;</span><span class="w"> </span>-m<span class="w"> </span><span class="m">6</span><span class="w"> </span><span class="s2">&quot;http://</span><span class="nv">$ECHO7_IP</span><span class="s2">:8080/&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span>TIMEOUT
+</span><span id="__span-35-8"><a id="__codelineno-35-8" name="__codelineno-35-8" href="#__codelineno-35-8"></a><span class="nb">echo</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;  POST echo7 : &quot;</span><span class="p">;</span><span class="w"> </span>A<span class="w"> </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CLIENT_PID</span><span class="s2">&quot;</span><span class="w"> </span>-n<span class="w"> </span>--<span class="w"> </span>curl<span class="w"> </span>-s<span class="w"> </span>-w<span class="w"> </span><span class="s1">&#39; code=%{http_code}\n&#39;</span><span class="w"> </span>-m<span class="w"> </span><span class="m">6</span><span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>-d<span class="w"> </span><span class="nv">x</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="s2">&quot;http://</span><span class="nv">$ECHO7_IP</span><span class="s2">:8080/&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span>TIMEOUT
+</span><span id="__span-35-9"><a id="__codelineno-35-9" name="__codelineno-35-9" href="#__codelineno-35-9"></a><span class="nb">echo</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;  multiport:9090 : &quot;</span><span class="p">;</span><span class="w"> </span>A<span class="w"> </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$CLIENT_PID</span><span class="s2">&quot;</span><span class="w"> </span>-n<span class="w"> </span>--<span class="w"> </span>curl<span class="w"> </span>-s<span class="w"> </span>-m<span class="w"> </span><span class="m">6</span><span class="w"> </span><span class="s2">&quot;http://</span><span class="nv">$MULTI_IP</span><span class="s2">:9090/&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span>TIMEOUT
+</span><span id="__span-35-10"><a id="__codelineno-35-10" name="__codelineno-35-10" href="#__codelineno-35-10"></a>
+</span><span id="__span-35-11"><a id="__codelineno-35-11" name="__codelineno-35-11" href="#__codelineno-35-11"></a><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;=== 2) nsenter -t </span><span class="nv">$PROBE_PID</span><span class="s2"> -n(netlab-b/probe 的 netns) ===&quot;</span>
+</span><span id="__span-35-12"><a id="__codelineno-35-12" name="__codelineno-35-12" href="#__codelineno-35-12"></a><span class="nb">echo</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;  GET  echo7 : &quot;</span><span class="p">;</span><span class="w"> </span>A<span class="w"> </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROBE_PID</span><span class="s2">&quot;</span><span class="w"> </span>-n<span class="w"> </span>--<span class="w"> </span>curl<span class="w"> </span>-s<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s1">&#39;%{http_code}\n&#39;</span><span class="w"> </span>-m<span class="w"> </span><span class="m">6</span><span class="w"> </span><span class="s2">&quot;http://</span><span class="nv">$ECHO7_IP</span><span class="s2">:8080/&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span>TIMEOUT
+</span><span id="__span-35-13"><a id="__codelineno-35-13" name="__codelineno-35-13" href="#__codelineno-35-13"></a><span class="nb">echo</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;  multiport:8080 : &quot;</span><span class="p">;</span><span class="w"> </span>A<span class="w"> </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PROBE_PID</span><span class="s2">&quot;</span><span class="w"> </span>-n<span class="w"> </span>--<span class="w"> </span>curl<span class="w"> </span>-s<span class="w"> </span>-m<span class="w"> </span><span class="m">6</span><span class="w"> </span><span class="s2">&quot;http://</span><span class="nv">$MULTI_IP</span><span class="s2">:8080/&quot;</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span>TIMEOUT
+</span></code></pre></div>
+<p>三組請求的結果如下。第 1 組裡的 <code>multiport:8080</code> 那一行，是腳本以外另外發的一次請求，腳本裡沒有對應的指令：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-36-1"><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a><span class="go">=== 0) 攻擊者用自己的網路命名空間（hostNetwork: true）===</span>
+</span><span id="__span-36-2"><a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a><span class="go">  GET  echo7                200</span>
+</span><span id="__span-36-3"><a id="__codelineno-36-3" name="__codelineno-36-3" href="#__codelineno-36-3"></a><span class="go">  POST echo7                200          ← L7 政策形同不存在</span>
+</span><span id="__span-36-4"><a id="__codelineno-36-4" name="__codelineno-36-4" href="#__codelineno-36-4"></a><span class="go">  multiport:9090            PORT-9090    ← client 都打不到的埠</span>
+</span><span id="__span-36-5"><a id="__codelineno-36-5" name="__codelineno-36-5" href="#__codelineno-36-5"></a>
+</span><span id="__span-36-6"><a id="__codelineno-36-6" name="__codelineno-36-6" href="#__codelineno-36-6"></a><span class="go">=== 1) nsenter -t &lt;client-pid&gt; -n（鑽進 client 的 netns）===</span>
+</span><span id="__span-36-7"><a id="__codelineno-36-7" name="__codelineno-36-7" href="#__codelineno-36-7"></a><span class="go">  GET  echo7                200</span>
+</span><span id="__span-36-8"><a id="__codelineno-36-8" name="__codelineno-36-8" href="#__codelineno-36-8"></a><span class="go">  POST echo7                403          ← 被 client 的政策擋住</span>
+</span><span id="__span-36-9"><a id="__codelineno-36-9" name="__codelineno-36-9" href="#__codelineno-36-9"></a><span class="go">  multiport:8080            PORT-8080</span>
+</span><span id="__span-36-10"><a id="__codelineno-36-10" name="__codelineno-36-10" href="#__codelineno-36-10"></a><span class="go">  multiport:9090            curl: (28) 逾時   ← 被 client 的政策擋住</span>
+</span><span id="__span-36-11"><a id="__codelineno-36-11" name="__codelineno-36-11" href="#__codelineno-36-11"></a>
+</span><span id="__span-36-12"><a id="__codelineno-36-12" name="__codelineno-36-12" href="#__codelineno-36-12"></a><span class="go">=== 2) nsenter -t &lt;probe-pid&gt; -n（鑽進另一個命名空間的 pod）===</span>
+</span><span id="__span-36-13"><a id="__codelineno-36-13" name="__codelineno-36-13" href="#__codelineno-36-13"></a><span class="go">  GET  echo7                curl: (28) 逾時</span>
+</span><span id="__span-36-14"><a id="__codelineno-36-14" name="__codelineno-36-14" href="#__codelineno-36-14"></a><span class="go">  multiport:8080            curl: (28) 逾時   ← 比原本更少權限</span>
+</span></code></pre></div>
+<p>先看第 1、2 組。進入 <code>client</code> 的網路命名空間後，GET 通、POST 403、9090 逾時，跟 <code>client</code> 自己打的結果一樣；進入 <code>probe</code> 的網路命名空間，連 GET 都不通。這跟 Day 6 的結果相反：在這裡，<code>nsenter</code> 讓封包帶上那顆 pod 的 identity。同一時間開著 <code>cilium-dbg monitor</code>，丟包紀錄也記在被進入的那顆 pod 名下：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-37-1"><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a><span class="go">identity 17242-&gt;1029: …  ← probe 的 identity</span>
+</span><span id="__span-37-2"><a id="__codelineno-37-2" name="__codelineno-37-2" href="#__codelineno-37-2"></a><span class="go">identity  6874-&gt;1029: …  ← client 的 identity</span>
+</span></code></pre></div>
+<p>原因在政策執行的位置。每顆 pod 的網路命名空間透過一對 veth（成對的虛擬網路介面，一端在 pod 裡、一端在節點上）接到節點，Cilium 的 BPF 程式就掛在這條 veth 上（Day 0 介紹過的 tc 掛載點）。進了 <code>client</code> 的網路命名空間，封包就從 <code>client</code> 的 veth 出去，帶著 <code>client</code> 的 identity，碰到的也是 <code>client</code> 的那一套政策。Tetragon 綁的是 cgroup，<code>nsenter</code> 不換 cgroup，所以繞得過；Cilium 綁的是網路命名空間，而 <code>nsenter -n</code> 換的正是網路命名空間。</p>
+<p>再看第 0 組。不用 <code>nsenter</code>，直接從自己的網路發出去，GET、POST 都是 200，連 <code>client</code> 都打不到的 9090 也通。原因在步驟 4 那張 policy map 的第一行：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-38-1"><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a><span class="gp">$ </span>cilium-dbg<span class="w"> </span>bpf<span class="w"> </span>policy<span class="w"> </span>get<span class="w"> </span><span class="m">680</span>
+</span><span id="__span-38-2"><a id="__codelineno-38-2" name="__codelineno-38-2" href="#__codelineno-38-2"></a><span class="go">Allow    Ingress     reserved:host      ANY      NONE      968     12</span>
+</span></code></pre></div>
+<p><code>hostNetwork: true</code> 的 pod 直接使用節點的網路命名空間，在 Cilium 看來它就是節點本身，identity 是 <strong><code>reserved:host</code></strong>。這次環境的 endpoint policy map 有一條本機 host 的預設放行規則。host firewall（管理主機流量的功能）也沒有啟用，但那是另一項設定，不能把這條放行規則單純歸因於 host firewall 沒開。這一行有它的用途：kubelet 對 pod 做健康檢查也是從節點發出的，少了它，第一條 default-deny 就會讓健康檢查失敗。但它同時讓同一節點上的 hostNetwork pod，不論在哪個命名空間，仍能連到本課測試中受限的服務。<code>reserved:host</code> 只代表本機節點，從其他節點的 hostNetwork pod 來的連線，身分是 <code>remote-node</code>；本課的叢集只有一個節點，多節點的情況沒有驗證。對照 <code>probe</code>：同樣是別的命名空間的 pod，只因為沒有用 hostNetwork，什麼都打不到。</p>
+<p>把三組畫在一起：</p>
+<p><img alt="左邊三個來源：client 的網路命名空間、probe 的網路命名空間、節點的網路命名空間（hostNetwork 的 nsenter-box）。右邊是 echo7 的 policy map：從 client 命名空間出發的封包帶 identity 6874，對到 app=client 只准 GET 那一列，GET 200、POST 403；從 probe 出發的帶 identity 17242，沒有符合的條目，丟棄；從節點出發的帶 reserved:host，對到 ANY 那一列，全部放行" src="../../assets/diagrams/s2d8-enforcement-point.svg" /></p>
+<p>從圖上看，決定結果的是封包從哪個網路命名空間出發。從 <code>client</code> 或 <code>probe</code> 的命名空間出發，帶的是那顆 pod 的 identity，套的是那顆 pod 的政策；從節點的命名空間出發，帶的是 <code>reserved:host</code>，碰到的是那一行無條件的允許。所以在預設設定下，能建立 hostNetwork pod 的人，從同一個節點發出的連線就不受任何網路政策限制，而這件事在 <code>kubectl get cnp</code> 上完全看不出來。要處理它，先限制誰能建立 hostNetwork pod，再區分本機 host 到 endpoint 的放行設定與主機流量政策，見<a href="#mine-9">疑難排解：同節點的 hostNetwork pod 仍能連到受限服務</a>。</p>
+<h2 id="mine-1">選做觀察：改了標籤，同一組副本的 identity 更新不同步<a class="headerlink" href="#mine-1" title="Permanent link">&para;</a></h2>
+<p>想觀察標籤變更後的 identity 更新，可以給兩顆 <code>svc-backend</code> 加一個 <code>tier=extra</code> 標籤。下面的紀錄中，兩顆副本的 identity 曾短暫不同：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-39-1"><a id="__codelineno-39-1" name="__codelineno-39-1" href="#__codelineno-39-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>netlab<span class="w"> </span>label<span class="w"> </span>pod<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>svc-backend<span class="w"> </span><span class="nv">tier</span><span class="o">=</span>extra<span class="w"> </span>--overwrite
+</span><span id="__span-39-2"><a id="__codelineno-39-2" name="__codelineno-39-2" href="#__codelineno-39-2"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>cep<span class="w"> </span>…<span class="w">                                </span>（15<span class="w"> </span>秒後）
+</span><span id="__span-39-3"><a id="__codelineno-39-3" name="__codelineno-39-3" href="#__codelineno-39-3"></a><span class="go">svc-backend-…-h2hkx   53393        ← 還沒換</span>
+</span><span id="__span-39-4"><a id="__codelineno-39-4" name="__codelineno-39-4" href="#__codelineno-39-4"></a><span class="go">svc-backend-…-t5qzj   3065         ← 已經換了</span>
+</span><span id="__span-39-5"><a id="__codelineno-39-5" name="__codelineno-39-5" href="#__codelineno-39-5"></a>
+</span><span id="__span-39-6"><a id="__codelineno-39-6" name="__codelineno-39-6" href="#__codelineno-39-6"></a><span class="gp">$ </span>cilium-dbg<span class="w"> </span>endpoint<span class="w"> </span>list
+</span><span id="__span-39-7"><a id="__codelineno-39-7" name="__codelineno-39-7" href="#__codelineno-39-7"></a><span class="go">1389   …  53393   … waiting-for-identity     ← 過渡狀態</span>
+</span><span id="__span-39-8"><a id="__codelineno-39-8" name="__codelineno-39-8" href="#__codelineno-39-8"></a><span class="go">632    …  3065    … ready</span>
+</span><span id="__span-39-9"><a id="__codelineno-39-9" name="__codelineno-39-9" href="#__codelineno-39-9"></a>
+</span><span id="__span-39-10"><a id="__codelineno-39-10" name="__codelineno-39-10" href="#__codelineno-39-10"></a><span class="go">（再 10 秒）兩顆都是 3065</span>
+</span></code></pre></div>
+<p>identity 由參與計算的標籤組合決定。這次加上 <code>tier=extra</code> 後，一顆副本已換成 3065，另一顆仍是 53393、狀態為 <code>waiting-for-identity</code>；再過 10 秒，兩顆才都變成 3065。這段紀錄只顯示 identity 更新不同步，沒有比較規則或流量，不能據此判定兩顆副本適用的政策不同。</p>
+<p>標籤變更是否改變適用規則，取決於政策的 selector 是否因此選中或不再選中這些 pod。替 pod 加查詢用的標籤（<code>tier</code>、<code>owner</code> 之類）之前，先確認相關 selector 的條件。</p>
+<h2 id="_5">疑難排解<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<h3 id="mine-5">加了一條更窄的規則，流量沒有變少<a class="headerlink" href="#mine-5" title="Permanent link">&para;</a></h3>
+<p>一個 endpoint 身上的允許規則取聯集，較寬的那一條已經允許的流量，窄規則收不回來，要刪掉或改掉寬的那一條，做法見<a href="#step-4">步驟 4</a>。多人共用一個命名空間時要特別注意：只要有人為了方便加了一條 <code>fromEndpoints: [{}]</code>，其他人寫的細規則就全部不起作用，而且他們自己測試時都會通過。</p>
+<h3 id="mine-6">被擋掉的網域照樣查得到、進了快取<a class="headerlink" href="#mine-6" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：<code>client</code> 套了只允許 <code>example.com</code> 的 FQDN 政策，連 <code>ifconfig.me</code>、<code>www.google.com</code> 都逾時，但 <code>cilium-dbg fqdn cache list</code> 裡有這兩個網域，表示它們的 DNS 查詢成功了（步驟 5）。</p>
+<p><strong>原因</strong>：DNS 那一段寫的是 <code>matchPattern: "*"</code>，所有查詢都放行；<code>toFQDNs</code> 管的只是查到 IP 之後的連線。這有好有壞。好處是失敗的樣子是「查得到、連不上」，比「查不到」容易追查。壞處是 DNS 這條往外送資料的路沒有關上：被 FQDN 政策限制的 pod，仍然可以把資料編進網域名稱查出去，DNS proxy 會照樣轉發，並寫進快取。</p>
+<p>另外，快取裡的 TTL 都是 30 秒，原始回應是 8 秒。Cilium 替 FQDN 快取設了最短 TTL，所以後端換了 IP 之後，舊 IP 最長還會被允許 30 秒。</p>
+<p><strong>修法</strong>：要關掉 DNS 這條路，得把 <code>matchPattern</code> 收成明確的網域清單，代價是又要手動維護清單，而 FQDN 政策原本就是為了不用維護清單。這跟 Day 4 調校 Falco 規則時的取捨同一類（Day 4 的<a href="../sprint2-day4-falco-custom-rules/#mine-5">「這兩條例外放行了什麼」</a>）。本課沒有驗證收窄之後的行為。</p>
+<h3 id="mine-7">應用日誌查不到被拒絕的請求<a class="headerlink" href="#mine-7" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：呼叫端收到 403，去查被呼叫服務的日誌，卻找不到這個請求。</p>
+<p><strong>原因</strong>：403 是 Envoy 回的，請求在 Envoy 就被擋下，根本沒送到應用（步驟 6 的圖）。官方文件也說明，違反 L7 規則時 Cilium 不會丟封包，而是回 HTTP 403。回應的 header 還帶著 <code>server: envoy</code>，讓對方看得出這裡有 L7 政策，而且由 Envoy 執行；每次試探只要幾毫秒、也不會逾時，對方可以換不同的方法和路徑，一一試出政策允許哪些請求。L4 的丟包不給這些資訊。</p>
+<p><strong>修法</strong>：追查 403 時，先看 header 有沒有 <code>server: envoy</code>。有的話，這個拒絕要從 Cilium 這一側查，不要在應用日誌裡找。Day 9 會用 Hubble 看這類被拒絕的請求。</p>
+<h3 id="mine-8">丟包記在某顆 pod 名下，那顆 pod 卻沒有發出這個連線<a class="headerlink" href="#mine-8" title="Permanent link">&para;</a></h3>
+<p>有人用 <code>nsenter -n</code> 進入了那顆 pod 的網路命名空間。Cilium 依網路命名空間決定 identity，所以紀錄寫的是被進入的那顆 pod（<a href="#step-7">步驟 7</a>）。網路政策的紀錄裡沒有行程資訊，光看 <code>cilium-dbg monitor</code> 分不出是 pod 自己發的，還是有人鑽進來發的。要知道是哪個行程，得靠 Day 3–6 的工具：Falco 看得到 <code>nsenter</code> 這個動作，Tetragon 記得到是哪個行程。</p>
+<h3 id="mine-9">同節點的 hostNetwork pod 仍能連到受限服務<a class="headerlink" href="#mine-9" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：一顆 <code>hostNetwork: true</code> 的 pod，不論在哪個命名空間，都能打到同一節點上被 L7 方法限制、埠限制、命名空間隔離擋住的目標，<code>kubectl get cnp</code> 上看不出任何異狀（步驟 7）。</p>
+<p><strong>原因</strong>：這次環境允許本機 host 存取本機 endpoint，policy map 有一行 <code>Allow Ingress reserved:host ANY</code>，無條件放行來自本機節點的連線，而 hostNetwork pod 在 Cilium 看來就是節點。其他節點來的連線身分是 <code>remote-node</code>，本課只有一個節點，沒有驗證那種情況。</p>
+<p><strong>修法</strong>：兩個方向。一是限制誰能建立 hostNetwork pod，這是 RBAC 與 Pod Security 的設定。Kubernetes 內建的 Pod Security admission 依 Pod Security Standards 的三個等級（Privileged、Baseline、Restricted）限制命名空間裡的 pod 能用哪些設定，從 Baseline 等級起就不允許 hostNetwork。二是依官方文件檢查本機 host 到 endpoint 的設定：agent 的 <code>--allow-localhost=policy</code> 會將這類流量交給政策控制，還要配合 endpoint 政策，保留 kubelet 健康檢查等必要連線。若要管理主機網路流量，則另行評估 <code>hostFirewall.enabled=true</code>，並以 CiliumClusterwideNetworkPolicy 的 <code>nodeSelector</code> 選取主機。兩者作用範圍不同，不能只開 host firewall 就假定上面的放行已消失。本課沒有實作這些修法，Day 9 仍觀察原設定。</p>
+<h2 id="_6">想一想<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
+<ul>
+<li>同事在 <code>payments</code> 命名空間套了一條 CNP，只允許 <code>app=api</code> 打 8443，<code>kubectl apply</code> 也成功了，但從 <code>app=batch</code> 的 pod 打 8443 還是通。你會依序查哪三件事，來分辨是政策沒被收下、被別的規則蓋過，還是 <code>batch</code> 的 pod 本來就不受政策管？</li>
+<li>兩個服務都被同一條政策擋下。一個的呼叫端回報「逾時，重試後還是逾時」，另一個回報「收到 403，header 是 <code>server: envoy</code>」。哪一個是 L7 規則擋的？逾時那一個，你要到哪裡、用什麼指令確認它是被政策丟掉的？收到 403 的那一個，為什麼在被呼叫服務的應用日誌裡找不到？</li>
+<li>監控系統的收集器以 <code>hostNetwork: true</code> 的 DaemonSet 執行，要抓 <code>netlab</code> 各 pod 的 metrics。<code>netlab</code> 套了 default-deny 之後，跟目標 pod 在同一個節點上的那顆收集器還抓得到嗎？這件事對「default-deny 有沒有把這個命名空間保護起來」的判斷有什麼影響？</li>
+</ul>
+<h2 id="_7">小結<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h2>
+<p>Cilium 的網路政策不看 IP，看的是 identity：一組標籤對應一個號碼，命名空間也是其中一個標籤，所以命名空間隔離擋得住直接打 pod IP，而標籤變更是否改變適用規則，要看政策的 selector。政策是允許清單，同一個 endpoint 上的規則取聯集，加規則只會放寬；無效的政策則會讓流量照常通過，跟沒套一樣，<code>kubectl apply</code> 成功不代表它在執行，要看 <code>VALID</code> 欄並問 agent。L4 規則在 BPF 程式裡直接丟封包，呼叫端只看到逾時；L7 規則把連線交給 Envoy，呼叫端很快拿到 403，代價是每個請求多約 0.5 ms，而且應用本身完全不知道有這個請求。之後遇到「政策套了卻沒擋住」，先看政策有沒有被收下、有沒有更寬的規則，再看流量是不是從 hostNetwork pod 來的：在預設設定下，同節點的 hostNetwork pod 仍能連到受限服務。</p>
+<h2 id="_8">延伸閱讀<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h2>
+<p>想再深入，可以從這幾份開始：</p>
+<ul>
+<li><strong><a href="https://docs.cilium.io/en/stable/security/policy/intro/">政策規則的基本語意</a></strong> —— 官方說明政策是允許清單，兩條規則並存時，較寬那一條允許的流量全部放行，對應步驟 4。</li>
+<li><strong><a href="https://docs.cilium.io/en/stable/security/policy/layer7/">L7 政策</a></strong> —— HTTP 的 method 與 path 規則怎麼寫、為什麼要經過節點上的 Envoy，以及官方對「違反 L7 規則不會丟包，而是回 403」的說明，對應<a href="#step-6">步驟 6</a>。</li>
+<li><strong><a href="https://docs.cilium.io/en/stable/security/policy/layer3/#access-to-from-local-host">本機 host 與 endpoint 的政策</a></strong> —— 本機來源的預設放行與 <code>--allow-localhost=policy</code>，對應<a href="#mine-9">疑難排解的本機連線</a>。</li>
+<li><strong><a href="https://docs.cilium.io/en/stable/security/policy/host/">Host Policies</a></strong> —— 以 <code>nodeSelector</code> 選取主機的政策及 host firewall 設定；與 endpoint 政策分開閱讀。</li>
+<li><strong><a href="https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/">Pod 的 DNS 設定與 ndots</a></strong> —— 步驟 5 那十次查詢的來源；同一個機制在 Day 4 造成誤報，在這裡造成延遲。</li>
+</ul>
+<h2 id="_9">下一步<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h2>
+<p>這一章留下兩種被擋下的流量：L4 的丟包，呼叫端只看到逾時；L7 的拒絕，呼叫端拿到 403，被保護的應用卻沒有任何紀錄。Day 9 換上 Hubble，看這兩種流量在 Cilium 的觀測工具裡分別長什麼樣子，也看它能不能認出步驟 7 那種從 hostNetwork pod 來的連線。<a href="../sprint2-day9-hubble/">Day 9</a></p>
+<hr />
+<div class="admonition quote">
+<p>Cilium 標誌為 Cilium 專案之官方資產（CNCF artwork），此處作社群教學用途。</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到頂端
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="頁腳" >
+        
+          
+          <a href="../sprint2-day7-cilium-kubeproxy/" class="md-footer__link md-footer__link--prev" aria-label="上一頁: Day 7 · Cilium 與 kube-proxy replacement">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                上一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 7 · Cilium 與 kube-proxy replacement
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../sprint2-day9-hubble/" class="md-footer__link md-footer__link--next" aria-label="下一頁: Day 9 · Hubble 可觀測性">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                下一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 9 · Hubble 可觀測性
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      KAI Scheduler、HAMi、Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,作社群教學用途
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.code.annotate", "content.code.select", "content.tabs.link", "search.suggest", "search.highlight", "search.share"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u8907\u88fd", "clipboard.copy": "\u8907\u88fd", "search.result.more.one": "\u6b64\u9801\u5c1a\u6709 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.more.other": "\u6b64\u9801\u5c1a\u6709 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.none": "\u6c92\u6709\u7b26\u5408\u7684\u9805\u76ee", "search.result.one": "\u627e\u5230 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.other": "\u627e\u5230 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.placeholder": "\u6253\u5b57\u9032\u884c\u641c\u5c0b", "search.result.term.missing": "\u7f3a\u5c11\u5b57\u8a5e", "select.version": "\u9078\u64c7\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

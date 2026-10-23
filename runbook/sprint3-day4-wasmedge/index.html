@@ -1,0 +1,4072 @@
+
+<!doctype html>
+<html lang="zh-TW" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="雲原生實作課程：GPU 排程、eBPF 與執行期安全、WebAssembly、服務網格與機密運算、遊戲伺服器平台">
+      
+      
+      
+        <link rel="canonical" href="https://deepwavelab.github.io/CloudNativePracticing/runbook/sprint3-day4-wasmedge/">
+      
+      
+        <link rel="prev" href="../sprint3-day3-wasmcloud-distributed/">
+      
+      
+        <link rel="next" href="../sprint3-day5-cost-measurement/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Day 4 · WasmEdge 執行期 - Cloud Native Lab Course</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/terminal.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#day-4-wasmedge-runwasi-shim-containerd-wasm" class="md-skip">
+          跳轉到
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="頁首">
+    <a href="../.." title="Cloud Native Lab Course" class="md-header__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Cloud Native Lab Course
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Day 4 · WasmEdge 執行期
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換深色模式"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="切換深色模式" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換淺色模式"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="切換淺色模式" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜尋" placeholder="搜尋" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="搜尋">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="分享" aria-label="分享" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="清除" aria-label="清除" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜尋引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="標籤" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  首頁
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint1-day0-azure-aks-foundation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 1 · GPU 排程三部曲
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint2-day0-ebpf-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 2 · eBPF 與執行期安全
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../sprint3-day0-wasm-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 3 · WebAssembly
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint4-day0-mesh-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 4 · 服務網格與機密運算
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint5-day0-game-server-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 5 · 遊戲伺服器平台
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="導覽列" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Cloud Native Lab Course" class="md-nav__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Cloud Native Lab Course
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首頁
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    首頁
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 3 · WebAssembly 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 4 · 服務網格與機密運算 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint5/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 5 · 遊戲伺服器平台 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day0-azure-aks-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 環境建置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day1-kai-queue-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · KAI 安裝與 Queue 基礎
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day2-gang-scheduling-preemption/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Gang Scheduling 與搶占
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day3-hami-memory-isolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · HAMi 安裝與 VRAM 用量限制
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day4-hami-kai-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · HAMi 與 KAI 整合
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day5-hami-webui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · HAMi-WebUI 觀測介面
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day6-dra-simulated-devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · DRA 概念與模擬裝置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day7-dra-aks-real-gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · DRA 配置實體 GPU
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day8-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · Sprint 1 總結
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day0-ebpf-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · eBPF 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day1-bpftrace-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · bpftrace 三支經典工具
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day2-bpftrace-kubernetes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · 把核心事件接回 Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day3-falco-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Falco 安裝與預設規則
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day4-falco-custom-rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · 自訂規則、誤報調校與告警路由
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day5-tetragon-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Tetragon 與 TracingPolicy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day6-tetragon-enforcement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · 從偵測到攔截
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day7-cilium-kubeproxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Cilium 與 kube-proxy replacement
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day8-cilium-network-policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · CiliumNetworkPolicy（L3/L4 → L7）
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day9-hubble/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Hubble 可觀測性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 綜合：四套工具的分工
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 3 · WebAssembly
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 3 · WebAssembly
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day0-wasm-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · wasm 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day1-three-generations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · RuntimeClass 與節點執行路徑
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day2-wasmcloud/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · wasmCloud 與元件模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day3-wasmcloud-distributed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · wasmCloud 分散式模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · WasmEdge 執行期
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · WasmEdge 執行期
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#wasmedge-kubernetes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WasmEdge 要怎麼接上 Kubernetes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="WasmEdge 要怎麼接上 Kubernetes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        另外兩種做法為什麼不用
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        節點上原本有什麼
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        開始之前：存一份節點快照
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#install-shim" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1：把 shim 放上節點
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configure-handler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2：在 containerd 設定裡加一個 handler
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 2：在 containerd 設定裡加一個 handler">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#plugin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        先決定 plugin 路徑
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#containerd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        套用設定，讓 containerd 重新讀取
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        第二次比對
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-runtimeclass" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3：建 RuntimeClass
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run-images" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4：跑第一顆 wasm pod
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 4：跑第一顆 wasm pod">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#containerd-wasm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        讓 containerd 解開 wasm 平台的映像
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        節點從哪一步開始不一樣
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        同一支 wasm 程式，兩邊都能跑嗎
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="同一支 wasm 程式，兩邊都能跑嗎">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        三份映像的打包方式
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        前 8 個位元組
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wasmcloud-wasmedge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        把 wasmCloud 的元件交給 WasmEdge
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#core-module-wasmcloud" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        反方向：把 core module 交給 wasmCloud
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        三種打包的差異
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wasmedge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WasmEdge 這條路適合誰
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        疑難排解
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="疑難排解">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --help 和 feature flag 都說 WasmWasi 還在
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pod 停在 parent snapshot … does not exist
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        同一個映像出現兩種不同的失敗
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        runwasi 的 wasmedge shim 沒有開 component model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        wasmCloud 收到 core module 時沒有錯誤，只會一直重試
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        想一想
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        小結
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day5-cost-measurement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · 執行時間、記憶體與量測範圍
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day6-spinkube-shim/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · SpinKube（上）：shim 佈建
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day7-spinkube-operator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · SpinKube（下）：operator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day8-reversibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · SpinKube 移除與節點殘留
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day9-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · 依工作負載選擇 Wasm 路線
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 4 · 服務網格與機密運算
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 4 · 服務網格與機密運算
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1" id="__nav_5_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part 1 · 服務網格（Day 0–4）
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part 1 · 服務網格（Day 0–4）
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day0-mesh-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 服務網格與入口閘道的三層地圖
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day1-envoy-gateway/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · Envoy Gateway 與 HTTP/3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day2-istio-ambient/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Istio ambient：服務間 mTLS 與連線限制
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day3-cilium-mesh/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Cilium mesh：WireGuard 加密與 L7
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day4-istio-vs-cilium/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · Istio 與 Cilium 比較
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part 2 · 機密運算（Day 5–9）
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part 2 · 機密運算（Day 5–9）
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day5-confidential-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · 機密運算的威脅模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day6-kata-sandboxing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · Kata Pod Sandboxing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day7-katacc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · kata-cc：SEV-SNP 機密硬體
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day8-attestation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 遠端證明：MAA、SKR 與金鑰釋放
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day9-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · 機密容器的需求與驗證範圍
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 5 · 遊戲伺服器平台
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 5 · 遊戲伺服器平台
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day0-game-server-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 遊戲伺服器平台概念
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day1-agones-first-gameserver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · Agones 第一顆 GameServer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day2-fleet-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Fleet 生命週期
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day3-allocation-autoscaler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Allocation 與 autoscaler
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day4-quilkin-udp-proxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · Quilkin UDP proxy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day5-nakama-postgres/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Nakama 與 PostgreSQL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day6-matchmaking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · Matchmaking 串接
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day7-python-client-e2e/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Python client 端到端
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day8-observability-resilience/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 觀測與韌性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day9-unity-client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Unity client 與 relay server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 遊戲伺服器平台總結
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#wasmedge-kubernetes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WasmEdge 要怎麼接上 Kubernetes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="WasmEdge 要怎麼接上 Kubernetes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        另外兩種做法為什麼不用
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        節點上原本有什麼
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        開始之前：存一份節點快照
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#install-shim" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1：把 shim 放上節點
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configure-handler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2：在 containerd 設定裡加一個 handler
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 2：在 containerd 設定裡加一個 handler">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#plugin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        先決定 plugin 路徑
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#containerd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        套用設定，讓 containerd 重新讀取
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        第二次比對
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-runtimeclass" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3：建 RuntimeClass
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#run-images" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4：跑第一顆 wasm pod
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 4：跑第一顆 wasm pod">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#containerd-wasm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        讓 containerd 解開 wasm 平台的映像
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        節點從哪一步開始不一樣
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        同一支 wasm 程式，兩邊都能跑嗎
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="同一支 wasm 程式，兩邊都能跑嗎">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        三份映像的打包方式
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        前 8 個位元組
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wasmcloud-wasmedge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        把 wasmCloud 的元件交給 WasmEdge
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#core-module-wasmcloud" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        反方向：把 core module 交給 wasmCloud
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        三種打包的差異
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#wasmedge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WasmEdge 這條路適合誰
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        疑難排解
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="疑難排解">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --help 和 feature flag 都說 WasmWasi 還在
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pod 停在 parent snapshot … does not exist
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        同一個映像出現兩種不同的失敗
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        runwasi 的 wasmedge shim 沒有開 component model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        wasmCloud 收到 core module 時沒有錯誤，只會一直重試
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        想一想
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        小結
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="day-4-wasmedge-runwasi-shim-containerd-wasm">Day 4: WasmEdge 與 runwasi——在節點上裝 shim、改 containerd 設定，以及兩種 wasm 格式<a class="headerlink" href="#day-4-wasmedge-runwasi-shim-containerd-wasm" title="Permanent link">&para;</a></h1>
+<p><img align="right" alt="WasmEdge 官方標誌" src="../../assets/logos/wasmedge-icon-color.svg" width="82" /></p>
+<p>假設你手上有一支編成 wasm 的小程式，想讓它在現有的 AKS 叢集上跑，排程、log、<code>kubectl</code> 都照一般 pod 的方式用，不想像 <a href="../sprint3-day2-wasmcloud/">Day 2–3</a> 的 wasmCloud 那樣另外學一套 host 和 CRD。上網找「WasmEdge Kubernetes」，會找到三種做法：AKS 的 <code>--workload-runtime WasmWasi</code>、WasmEdge 官網用 crun 的教學，以及 containerd 底下的 runwasi 專案。AKS 的 WASI node pool 已退場；crun 是另一套容器執行期，官網那份舊教學本課沒有驗證。第三種已有實測，但要你自己進到節點上，放一個執行檔、改 containerd 的設定檔、重啟 containerd。</p>
+<p>這一章走第三種做法，在 AKS 節點上把 WasmEdge 接上 Kubernetes。每做完一步，就把節點的狀態和開始前比一次，找出節點是從哪一步開始改變行為的。最後拿 wasmCloud 用的那支程式交給 WasmEdge 跑，看「編成 wasm」是不是等於兩邊都能跑。</p>
+<p>讀完之後，一顆指定 WasmEdge 的 pod 起不來時，你能分辨是節點還沒接上 shim、映像沒有被解開，還是 wasm 檔本身是另一種格式。</p>
+<h2 id="wasmedge-kubernetes">WasmEdge 要怎麼接上 Kubernetes<a class="headerlink" href="#wasmedge-kubernetes" title="Permanent link">&para;</a></h2>
+<p>WasmEdge 是一個 wasm 執行期：它讀進一個 <code>.wasm</code> 檔，然後執行裡面的程式。Kubernetes 不會直接呼叫它。<a href="../sprint3-day1-three-generations/#step-4">Day 1</a> 追過那條鏈：kubelet 把 pod 交給 containerd，containerd 依 pod 指定的 handler 找到設定檔裡對應的一段，再啟動一個 <strong>shim</strong>（每個容器各一個、負責實際啟動與看管容器的小程式）。一般容器用的是節點內建的 <code>containerd-shim-runc-v2</code>。</p>
+<p><strong>runwasi</strong> 是 containerd 底下的專案，它把 wasm 執行期包成 containerd 認得的 shim。今天用的是它發佈的 <code>containerd-shim-wasmedge-v1</code> v0.6.1，需要的 WasmEdge 程式庫也一起編進這個執行檔，稱為靜態連結。Day 1 那條鏈換成 WasmEdge 版，長這樣：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>RuntimeClass.handler → 節點 config.toml 的 runtimes.&lt;name&gt; → runtime_type 指到的 shim 二進位檔
+</span></code></pre></div>
+<p>把這條鏈畫成圖，上半部存在叢集（etcd）裡，下半部在每一台節點的磁碟上。圖上的「步驟 1–3」是本章依序要加上去的東西：</p>
+<p><img alt="本章要接起來的鏈：叢集側的 Pod 寫 runtimeClassName: wasmedge，指到 RuntimeClass wasmedge（步驟 3）；它的 handler 名稱要逐字對應節點 config.toml 裡的 runtimes.wasmedge（步驟 2，以橘色強調），那一段的 runtime_type 決定 containerd 去找哪個 shim；shim 是 /usr/local/bin/containerd-shim-wasmedge-v1（步驟 1），由它執行 .wasm" src="../../assets/diagrams/s3d4-chain.svg" /></p>
+<p>圖中的設定範圍與作用如下：</p>
+<ol>
+<li>下半部的兩樣東西（shim 執行檔、config.toml 的那一段）都在節點上，每一台要跑 wasm 的節點都得各做一次。上半部的 RuntimeClass 只要在叢集建一次。</li>
+<li>中間那段設定是唯一會讓 containerd 改變行為的地方。後面每一步都會比對節點，看這件事是不是真的。</li>
+</ol>
+<h3 id="_1">另外兩種做法為什麼不用<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h3>
+<p>AKS 自己的 WASI node pool 已經退役，Day 1 對它下過指令，拿到的是 <code>InvalidWorkloadRuntimeSettingError</code>。<code>az</code> 的 <code>--help</code> 和訂閱層的 feature flag 到現在都還列著它，不能拿來判斷這個功能還在不在，見<a href="#mine-1">疑難排解：<code>--help</code> 和 feature flag 都說有</a>。</p>
+<p>WasmEdge 的 containerd 整合文件轉介到 runwasi，本章採用這條路，透過 shim 接上節點既有的 containerd。</p>
+<h3 id="_2">節點上原本有什麼<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h3>
+<p>動手之前先確認 AKS 的節點上沒有任何 wasm 執行期，免得裝了兩份互相干擾。下面是節點檢查的結果節錄，<code>逐一 command -v</code> 是摘要；實際可逐一輸入 <code>command -v crun</code> 等命令。進節點的方式沿用 Day 1 的 <code>node-shell</code>：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="gp">$ </span>containerd<span class="w"> </span>--version
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="go">containerd github.com/containerd/containerd/v2 2.3.3-2</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="gp">$ </span><span class="o">(</span>逐一<span class="w"> </span><span class="nb">command</span><span class="w"> </span>-v<span class="o">)</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="go">  crun / youki / wasmedge                        NOT FOUND</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="go">  containerd-shim-wasmedge-v1 / -wasmtime-v1     NOT FOUND</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="go">  containerd-shim-spin-v2 / -slight-v1           NOT FOUND</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="gp">$ </span>find<span class="w"> </span>/usr<span class="w"> </span>/opt<span class="w"> </span>/var/lib<span class="w"> </span>-maxdepth<span class="w"> </span><span class="m">4</span><span class="w"> </span>-type<span class="w"> </span>f<span class="w"> </span>-name<span class="w"> </span><span class="s2">&quot;*wasm*&quot;</span>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="go">/usr/share/mime/application/wasm.xml              ← 命中數 1</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="gp">$ </span>find<span class="w"> </span>/usr/bin<span class="w"> </span>/usr/local/bin<span class="w"> </span>-maxdepth<span class="w"> </span><span class="m">1</span><span class="w"> </span>-type<span class="w"> </span>f<span class="w"> </span><span class="p">|</span><span class="w"> </span>wc<span class="w"> </span>-l
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="go">947</span>
+</span></code></pre></div>
+<p>所有 wasm 相關的執行檔都是 <code>NOT FOUND</code>，搜尋範圍內只找到一個 MIME 類型定義檔。</p>
+<p>再看 <code>/etc/containerd/</code> 底下：只有 <code>config.toml</code> 與 <code>kubenet_template.conf</code>，沒有放額外設定檔的子目錄，<code>config.toml</code> 裡也沒有 <code>imports</code>。所以要加 handler，就只能直接改 <code>config.toml</code> 這一個檔。</p>
+<h2 id="_3">開始之前：存一份節點快照<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<p>這一章要回答「節點從哪一步開始不一樣」，所以每一步前後都要取同樣的五份資料來比。Day 2 證明 wasmCloud 沒動節點，用的也是這五份：</p>
+<table>
+<thead>
+<tr>
+<th>快照</th>
+<th>看什麼</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>config.toml</code></td>
+<td>節點上的 containerd 設定檔原文</td>
+</tr>
+<tr>
+<td>config dump</td>
+<td>目前設定檔經 containerd 解析、展開的內容</td>
+</tr>
+<tr>
+<td>runtimeHandlers</td>
+<td>kubelet 回報這台節點有哪些 handler</td>
+</tr>
+<tr>
+<td>shim 清單</td>
+<td>磁碟上有哪些 runtime 與 shim 執行檔</td>
+</tr>
+<tr>
+<td>RuntimeClass</td>
+<td>叢集裡有哪些 RuntimeClass</td>
+</tr>
+</tbody>
+</table>
+<p>第二份要特別說明。<code>containerd config dump</code> 讀取目前設定檔並補上預設值，不會向執行中的服務查詢。它能用來檢查設定是否可被解析；要確認服務已載入，還要在重啟後檢查 <code>runtimeHandlers</code> 與實際 Pod。</p>
+<p>本章假設叢集只有 system pool 的一台節點，<code>.items[0]</code> 都指它。<code>node-shell</code> 是 Day 1 建的 DaemonSet；先確認目前節點上的 Pod 已就緒，並依 Day 1 查出 <code>NODE_SHELL_POD</code>。下面這個函式取一次五份快照，參數是檔名前綴：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>nodesh<span class="o">()</span><span class="w"> </span><span class="o">{</span><span class="w"> </span>kubectl<span class="w"> </span>-n<span class="w"> </span>wasmlab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$NODE_SHELL_POD</span><span class="s2">&quot;</span><span class="w"> </span>--<span class="w"> </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">1</span><span class="w"> </span>-m<span class="w"> </span>--<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$@</span><span class="s2">&quot;</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>snap<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>nodesh<span class="w"> </span>cat<span class="w"> </span>/etc/containerd/config.toml<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">-containerd-config.toml&quot;</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span>nodesh<span class="w"> </span>containerd<span class="w"> </span>config<span class="w"> </span>dump<span class="w">          </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">-containerd-config-dump.toml&quot;</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span>kubectl<span class="w"> </span>get<span class="w"> </span>node<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.items[0].status.runtimeHandlers}&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="p">|</span><span class="w"> </span>python3<span class="w"> </span>-m<span class="w"> </span>json.tool<span class="w">            </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">-node-runtimehandlers.json&quot;</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span>nodesh<span class="w"> </span>sh<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;ls -l /usr/bin/runc /usr/bin/crun /usr/bin/containerd-shim-runc-v2 \</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="s1">    /usr/bin/containerd-shim-wasmedge-v1 /usr/bin/containerd-shim-wasmtime-v1 \</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="s1">    /usr/local/bin/containerd-shim-wasmedge-v1 /usr/local/bin/crun 2&gt;/dev/null || true&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">    </span><span class="p">|</span><span class="w"> </span>tr<span class="w"> </span>-s<span class="w"> </span><span class="s1">&#39; &#39;</span><span class="w">                       </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">-shim-binaries.txt&quot;</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">  </span>kubectl<span class="w"> </span>get<span class="w"> </span>runtimeclass<span class="w"> </span>-o<span class="w"> </span>custom-columns<span class="o">=</span><span class="s1">&#39;NAME:.metadata.name,HANDLER:.handler&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">    </span>--no-headers<span class="w"> </span><span class="p">|</span><span class="w"> </span>sort<span class="w"> </span><span class="p">|</span><span class="w"> </span>tr<span class="w"> </span>-s<span class="w"> </span><span class="s1">&#39; &#39;</span><span class="w">   </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">-runtimeclasses.txt&quot;</span>
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="o">}</span>
+</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>snap<span class="w"> </span>s0-baseline
+</span></code></pre></div>
+<p><code>ls -l</code> 使用執行檔的完整路徑，避免模糊比對混入其他檔案。之後每一步做完就 <code>snap s1-…</code>、<code>snap s2-…</code>，再用 <code>diff</code> 逐份比對前一次。</p>
+<h2 id="install-shim">步驟 1：把 shim 放上節點<a class="headerlink" href="#install-shim" title="Permanent link">&para;</a></h2>
+<p>先在自己的電腦上下載 release，確認雜湊值和 release 附的 <code>SHA256SUMS</code> 相同：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nv">V</span><span class="o">=</span>https://github.com/containerd/runwasi/releases/download/containerd-shim-wasmedge/v0.6.1
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>curl<span class="w"> </span>-sLO<span class="w"> </span><span class="nv">$V</span>/containerd-shim-wasmedge-x86_64-linux-musl.tar.gz
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>shasum<span class="w"> </span>-a<span class="w"> </span><span class="m">256</span><span class="w"> </span>containerd-shim-wasmedge-x86_64-linux-musl.tar.gz
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>curl<span class="w"> </span>-sL<span class="w"> </span><span class="nv">$V</span>/SHA256SUMS
+</span></code></pre></div>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="gp">$ </span>shasum<span class="w"> </span>-a<span class="w"> </span><span class="m">256</span><span class="w"> </span>containerd-shim-wasmedge-x86_64-linux-musl.tar.gz
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="go">99f7f56c64a0524ea1ec3922cd095b108825a513d0212db75a5dfb08ba196cce</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="gp">$ </span>curl<span class="w"> </span>-sL<span class="w"> </span>…/SHA256SUMS
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="go">99f7f56c64a0524ea1ec3922cd095b108825a513d0212db75a5dfb08ba196cce  …    ← 相符</span>
+</span></code></pre></div>
+<p>兩邊的值相同，再讓節點自己下載同一個檔案。進到節點的 shell，在一個暫存目錄裡下載、解開，把執行檔裝進 <code>/usr/local/bin</code>：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>kubectl<span class="w"> </span>-n<span class="w"> </span>wasmlab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-it<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$NODE_SHELL_POD</span><span class="s2">&quot;</span><span class="w"> </span>--<span class="w"> </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">1</span><span class="w"> </span>-m<span class="w"> </span>--<span class="w"> </span>bash
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1"># inside the node</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="nb">cd</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span>mktemp<span class="w"> </span>-d<span class="k">)</span><span class="s2">&quot;</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="nv">V</span><span class="o">=</span>https://github.com/containerd/runwasi/releases/download/containerd-shim-wasmedge/v0.6.1
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>curl<span class="w"> </span>-sLO<span class="w"> </span><span class="nv">$V</span>/containerd-shim-wasmedge-x86_64-linux-musl.tar.gz
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>tar<span class="w"> </span>-xzf<span class="w"> </span>containerd-shim-wasmedge-x86_64-linux-musl.tar.gz
+</span></code></pre></div>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="gp">$ </span>install<span class="w"> </span>-m<span class="w"> </span><span class="m">0755</span><span class="w"> </span>containerd-shim-wasmedge-v1<span class="w"> </span>/usr/local/bin/
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="go">-rwxr-xr-x 1 root root 114524904 /usr/local/bin/containerd-shim-wasmedge-v1</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="gp">$ </span>/usr/local/bin/containerd-shim-wasmedge-v1<span class="w"> </span>-v
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="go">  Runtime: wasmedge    Version: 0.6.1    Revision: 5a8fc8e9ee0df28</span>
+</span></code></pre></div>
+<p>壓縮檔 37.3 MiB，解開後是 109 MiB。節點原有的 <code>containerd-shim-runc-v2</code> 是 8.4 MiB，這一個大了 13 倍，因為整個 WasmEdge 執行期都靜態連結在裡面。</p>
+<p>回到定義 <code>snap</code> 的本機終端機，取第二次快照（<code>snap s1-shim-installed</code>），和開始前比：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="go">containerd-config.toml           IDENTICAL</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="go">containerd-config-dump.toml      IDENTICAL</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="go">node-runtimehandlers.json        IDENTICAL</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="go">runtimeclasses.txt               IDENTICAL</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="go">shim-binaries.txt                DIFFERS</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="go">      &gt; -rwxr-xr-x 1 root root 114524904 /usr/local/bin/containerd-shim-wasmedge-v1</span>
+</span></code></pre></div>
+<p>五份裡只有 shim 清單多了一行。containerd 的設定、kubelet 回報的 handler 都沒變：磁碟上多了一個執行檔，但還沒有任何設定指向它，containerd 不會去用它。</p>
+<h2 id="configure-handler">步驟 2：在 containerd 設定裡加一個 handler<a class="headerlink" href="#configure-handler" title="Permanent link">&para;</a></h2>
+<p>要讓 containerd 用這個 shim，就要在 <code>config.toml</code> 加一段 <code>runtimes.wasmedge</code>，這段的名字 <code>wasmedge</code> 就是之後 RuntimeClass 要寫的 handler。</p>
+<h3 id="plugin">先決定 plugin 路徑<a class="headerlink" href="#plugin" title="Permanent link">&para;</a></h3>
+<p>Day 1 比較過新舊 plugin 路徑。containerd 2.x 能遷移完整的 version 2 設定，但本課 AKS 檔案已使用新 plugin 名稱，額外加入舊路徑時未得到預期 handler，見 Day 1 的<a href="../sprint3-day1-three-generations/#mine-1">設定路徑檢查</a>。這台節點是 containerd 2.3.3，照理該用 2.x 路徑。麻煩的是 runwasi 自己的資料就有兩種寫法。它的 quickstart 文件寫的是 2.x 路徑：</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># runwasi 的文件(quickstart.md)——containerd 2.x 的路徑</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="k">[plugins.</span><span class="s2">&quot;io.containerd.cri.v1.runtime&quot;</span><span class="k">.containerd.runtimes.wasm]</span>
+</span></code></pre></div>
+<p>同一個 tag 裡，它自己的 CI 用的 kind 節點映像是 Kubernetes v1.29.1，寫的是 1.x 路徑：</p>
+<div class="language-dockerfile highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c"># 同一個 tag 裡,runwasi 自己的 CI(test/k8s/Dockerfile,kind v1.29.1)——1.x 的路徑</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="o">[</span>plugins.<span class="s2">&quot;io.containerd.grpc.v1.cri&quot;</span>.containerd.runtimes.wasm<span class="o">]</span>
+</span></code></pre></div>
+<p>網路上的範例兩種都有。與其改了節點、重啟之後才知道對不對，不如先在副本上確認。<code>containerd -c &lt;檔案&gt; config dump</code> 會讀指定的設定檔、印出有效設定，但不啟動任何東西，不影響正在跑的 containerd。在節點上把 <code>config.toml</code> 複製兩份，各加上一種寫法：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># inside the node, in a scratch directory</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>cp<span class="w"> </span>/etc/containerd/config.toml<span class="w"> </span>cfg-1x.toml
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>cat<span class="w"> </span>&gt;&gt;<span class="w"> </span>cfg-1x.toml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="s">[plugins.&quot;io.containerd.grpc.v1.cri&quot;.containerd.runtimes.wasmedge]</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="s">  runtime_type = &quot;io.containerd.wasmedge.v1&quot;</span>
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="s">EOF</span>
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>cp<span class="w"> </span>/etc/containerd/config.toml<span class="w"> </span>cfg-2x.toml
+</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>cat<span class="w"> </span>&gt;&gt;<span class="w"> </span>cfg-2x.toml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>
+</span><span id="__span-10-12"><a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="s">[plugins.&quot;io.containerd.cri.v1.runtime&quot;.containerd.runtimes.wasmedge]</span>
+</span><span id="__span-10-13"><a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="s">  runtime_type = &quot;io.containerd.wasmedge.v1&quot;</span>
+</span><span id="__span-10-14"><a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="s">EOF</span>
+</span><span id="__span-10-15"><a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a>
+</span><span id="__span-10-16"><a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a>containerd<span class="w"> </span>-c<span class="w"> </span>cfg-1x.toml<span class="w"> </span>config<span class="w"> </span>dump<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-n<span class="w"> </span>wasmedge
+</span><span id="__span-10-17"><a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a>containerd<span class="w"> </span>-c<span class="w"> </span>cfg-2x.toml<span class="w"> </span>config<span class="w"> </span>dump<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-n<span class="w"> </span>wasmedge
+</span></code></pre></div>
+<p>再把兩份的有效設定行數、命中行，以及和沒加任何東西的基準比對的結果整理在一起（下面輸出裡副本放在 <code>/tmp/</code>，檔名是自己取的）：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="gp">$ </span>containerd<span class="w"> </span>-c<span class="w"> </span>/tmp/cfg-1x.toml<span class="w"> </span>config<span class="w"> </span>dump<span class="w">      </span><span class="c1"># io.containerd.grpc.v1.cri…runtimes.wasmedge</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="go">  有效設定行數: 308</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="go">  命中 wasmedge 的行數: 0</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="go">  與未加任何東西的基準相比: IDENTICAL</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="gp">$ </span>containerd<span class="w"> </span>-c<span class="w"> </span>/tmp/cfg-2x.toml<span class="w"> </span>config<span class="w"> </span>dump<span class="w">      </span><span class="c1"># io.containerd.cri.v1.runtime…runtimes.wasmedge</span>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="go">  有效設定行數: 323</span>
+</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="go">    111:  [plugins.&#39;io.containerd.cri.v1.runtime&#39;.containerd.runtimes.wasmedge]</span>
+</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="go">    112:    runtime_type = &#39;io.containerd.wasmedge.v1&#39;</span>
+</span></code></pre></div>
+<p>加入 1.x 路徑的副本解析後，<code>wasmedge</code> 設定沒有出現在有效設定裡，containerd 未針對被忽略的設定發出警告。stderr 有一則設定從 version 2 遷移的警告，與這段設定被忽略是兩件事。這份有效設定共 308 行，與基準逐字相同；2.x 寫法則出現在有效設定的第 111–112 行。</p>
+<p><span id="mine-2"></span>在這台 containerd 2.3.3 節點的有效設定裡，<code>io.containerd.grpc.v1.cri</code> 仍存在，但只剩 streaming server 的欄位，runtime 設定已移到 <code>io.containerd.cri.v1.runtime</code>。因此，搜尋到舊 plugin 名稱，不代表 <code>runtimes.wasmedge</code> 已生效。以下節錄舊 plugin 的有效設定：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="go">  [plugins.&#39;io.containerd.grpc.v1.cri&#39;]</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="go">    disable_tcp_service = true</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="go">    stream_server_address = &#39;127.0.0.1&#39;</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="go">    …                                    ← runtimes 已經搬走了</span>
+</span></code></pre></div>
+<p>對加入舊路徑的副本執行 <code>containerd config migrate</code>，輸出雖然從 version 2 轉成 version 4，仍沒有 <code>wasmedge</code> 設定。套用前要在副本的 <code>config dump</code> 裡確認完整的 handler 設定，再依下一節重啟 containerd。</p>
+<h3 id="containerd">套用設定，讓 containerd 重新讀取<a class="headerlink" href="#containerd" title="Permanent link">&para;</a></h3>
+<p>確定用 2.x 路徑之後，先把節點的 <code>config.toml</code> 複製一份備份，再把 <code>cfg-2x.toml</code> 裡加的那三行（一行空白、兩行設定）附加到 <code>/etc/containerd/config.toml</code> 結尾。</p>
+<p>containerd 要重新讀設定才會生效。三種常見的做法，只有一種有用：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="gp">$ </span>systemctl<span class="w"> </span>reload<span class="w"> </span>containerd
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="go">Failed to reload containerd.service: Job type reload is not applicable for unit containerd.service.</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="gp">$ </span><span class="nb">kill</span><span class="w"> </span>-HUP<span class="w"> </span><span class="k">$(</span>pidof<span class="w"> </span>containerd<span class="k">)</span>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>node<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{…runtimeHandlers}&#39;</span>
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="go">[&#39;&#39;, &#39;runc&#39;, &#39;untrusted&#39;]                       ← SIGHUP 沒有讓新 runtime 生效</span>
+</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>
+</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="gp">$ </span>systemctl<span class="w"> </span>restart<span class="w"> </span>containerd
+</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>node<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{…runtimeHandlers}&#39;</span>
+</span><span id="__span-13-10"><a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="go">[&#39;&#39;, &#39;runc&#39;, &#39;untrusted&#39;, &#39;wasmedge&#39;]           ← 生效</span>
+</span></code></pre></div>
+<p><code>reload</code> 直接被 systemd 拒絕；送 <code>SIGHUP</code> 不會顯示錯誤，但 handler 清單沒變；<code>systemctl restart</code> 之後，kubelet 回報的清單才多了 <code>wasmedge</code>。</p>
+<p>重啟 containerd 聽起來會影響節點上所有的容器。實際比對重啟前後全叢集 pod 的 <code>RESTARTS</code>，再看節點的 <code>Ready</code> 狀態：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="gp">$ </span>diff<span class="w"> </span>pods-pre-restart.txt<span class="w"> </span>pods-post-restart.txt
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="go">IDENTICAL——21 個 pod,沒有任何一個被重建或重啟</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>node<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{…conditions[?(@.type==&quot;Ready&quot;)]}&#39;</span>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="go">True  lastTransition=07:17:03Z       ← 早於 07:24:37 的重啟,節點沒掉出 Ready</span>
+</span></code></pre></div>
+<p>沒有任何 pod 重啟，<code>Ready</code> 最後一次變化的時間也在重啟之前。原因是每個容器都由自己的 shim 行程看管，shim 不是 containerd 的子行程，而 containerd 的 systemd unit 設定的是 <code>KillMode=process</code>，重啟時只停掉 containerd 主行程本身。</p>
+<h3 id="_4">第二次比對<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
+<p>取快照 <code>snap s2-containerd-configured</code>，和上一次比：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="go">containerd-config.toml           DIFFERS</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="go">      &gt; [plugins.&quot;io.containerd.cri.v1.runtime&quot;.containerd.runtimes.wasmedge]</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="go">      &gt;   runtime_type = &quot;io.containerd.wasmedge.v1&quot;</span>
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="go">containerd-config-dump.toml      DIFFERS(新增 15 行,containerd 把預設值全部展開)</span>
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="go">node-runtimehandlers.json        DIFFERS</span>
+</span><span id="__span-15-6"><a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="go">      &gt;   &quot;name&quot;: &quot;wasmedge&quot;</span>
+</span><span id="__span-15-7"><a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="go">      &gt;   &quot;features&quot;: { &quot;recursiveReadOnlyMounts&quot;: false, &quot;userNamespaces&quot;: false }</span>
+</span><span id="__span-15-8"><a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="go">shim-binaries.txt                IDENTICAL</span>
+</span><span id="__span-15-9"><a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="go">runtimeclasses.txt               IDENTICAL</span>
+</span></code></pre></div>
+<p>這次設定檔、有效設定、handler 清單三份都變了。設定檔只加兩行，有效設定卻多 15 行，是 containerd 把這個 runtime 的所有預設欄位都展開了。</p>
+<p>看 handler 那兩個 <code>features</code>：它們是 kubelet 向 runtime 問來的能力，分別表示這個 handler 支不支援遞迴的唯讀掛載、支不支援 Pod 的 user namespace。<code>runc</code> 兩項都是 <code>true</code>，<code>wasmedge</code> 兩項都是 <code>false</code>。Day 8 整理 wasm 工作負載用不到哪些 Pod 功能時，會再回到這裡。</p>
+<h2 id="3-runtimeclass">步驟 3：建 RuntimeClass<a class="headerlink" href="#3-runtimeclass" title="Permanent link">&para;</a></h2>
+<p>最後一塊在叢集這一側。<code>handler</code> 要逐字等於上一步 <code>config.toml</code> 裡 <code>runtimes.</code> 後面的名字，不是 <code>runtime_type</code>：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>runtimeclass-wasmedge.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="s">apiVersion: node.k8s.io/v1</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="s">kind: RuntimeClass</span>
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="s">metadata:</span>
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="s">  name: wasmedge</span>
+</span><span id="__span-16-6"><a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="s">handler: wasmedge      # must match runtimes.&lt;name&gt; in config.toml, NOT runtime_type</span>
+</span><span id="__span-16-7"><a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="s">EOF</span>
+</span></code></pre></div>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>runtimeclass-wasmedge.yaml
+</span></code></pre></div>
+<p>第三次快照（<code>snap s3-runtimeclass</code>）只有 RuntimeClass 清單多一行，節點上的四份都和上一次相同。RuntimeClass 存在 etcd 裡，建它不會動到節點，也就是 Day 1 那條鏈的叢集側。</p>
+<h2 id="run-images">步驟 4：跑第一顆 wasm pod<a class="headerlink" href="#run-images" title="Permanent link">&para;</a></h2>
+<p>用 runwasi 提供的範例映像 <code>wasi-demo-app</code>。這個映像的進入點已經是 <code>/wasi-demo-app.wasm</code>，<code>args</code> 只要給它的子命令與參數：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>pod-runwasi-demo.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="s">kind: Pod</span>
+</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="s">metadata:</span>
+</span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="s">  name: wasmedge-runwasi-demo</span>
+</span><span id="__span-18-6"><a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="s">  namespace: wasmlab</span>
+</span><span id="__span-18-7"><a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="s">spec:</span>
+</span><span id="__span-18-8"><a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="s">  runtimeClassName: wasmedge</span>
+</span><span id="__span-18-9"><a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a><span class="s">  restartPolicy: Never</span>
+</span><span id="__span-18-10"><a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a><span class="s">  containers:</span>
+</span><span id="__span-18-11"><a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a><span class="s">    - name: demo</span>
+</span><span id="__span-18-12"><a id="__codelineno-18-12" name="__codelineno-18-12" href="#__codelineno-18-12"></a><span class="s">      image: ghcr.io/containerd/runwasi/wasi-demo-app:latest</span>
+</span><span id="__span-18-13"><a id="__codelineno-18-13" name="__codelineno-18-13" href="#__codelineno-18-13"></a><span class="s">      args: [&quot;echo&quot;, &quot;hello-from-wasmedge&quot;]</span>
+</span><span id="__span-18-14"><a id="__codelineno-18-14" name="__codelineno-18-14" href="#__codelineno-18-14"></a><span class="s">EOF</span>
+</span><span id="__span-18-15"><a id="__codelineno-18-15" name="__codelineno-18-15" href="#__codelineno-18-15"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>pod-runwasi-demo.yaml
+</span></code></pre></div>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>wasmlab<span class="w"> </span>get<span class="w"> </span>pod<span class="w"> </span>wasmedge-runwasi-demo
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="go">NAME                    READY   STATUS                 AGE</span>
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="go">wasmedge-runwasi-demo   0/1     CreateContainerError   25s</span>
+</span><span id="__span-19-4"><a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>
+</span><span id="__span-19-5"><a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="go">Events:</span>
+</span><span id="__span-19-6"><a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="go">  Normal   Pulled   Successfully pulled image … Image size: 2265395 bytes.</span>
+</span><span id="__span-19-7"><a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="go">  Warning  Failed   Error: failed to create containerd container:</span>
+</span><span id="__span-19-8"><a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="go">                    parent snapshot sha256:5e274030… does not exist: not found</span>
+</span></code></pre></div>
+<p>映像拉成功了，shim 和 handler 也都在，卻停在 <code>CreateContainerError</code>，訊息說某個 <strong>snapshot</strong> 不存在。snapshot 是 containerd 把映像的一層層 layer 解開之後的檔案系統，容器啟動時就以它當根目錄。訊息的意思是：這個映像的 layer 沒有被解開。</p>
+<p>用 <code>ctr</code> 直接問節點上的 containerd：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="gp">$ </span>ctr<span class="w"> </span>-n<span class="w"> </span>k8s.io<span class="w"> </span>images<span class="w"> </span>ls<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>wasi-demo-app
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="go">…runwasi/wasi-demo-app:latest   2.2 MiB   wasip1/wasm   io.cri-containerd.image=managed</span>
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="go">                                          ^^^^^^^^^^^</span>
+</span><span id="__span-20-4"><a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="gp">$ </span>ctr<span class="w"> </span>-n<span class="w"> </span>k8s.io<span class="w"> </span>snapshots<span class="w"> </span>ls<span class="w"> </span><span class="p">|</span><span class="w"> </span>wc<span class="w"> </span>-l
+</span><span id="__span-20-5"><a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="go">265</span>
+</span><span id="__span-20-6"><a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="gp">$ </span>ctr<span class="w"> </span>-n<span class="w"> </span>k8s.io<span class="w"> </span>snapshots<span class="w"> </span>ls<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>5e274030
+</span><span id="__span-20-7"><a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="go">（無輸出——265 個 snapshot 裡沒有這一個,layer 從來沒有被解開）</span>
+</span></code></pre></div>
+<p>看 <code>PLATFORMS</code> 欄。每個映像都會標明它是給哪個<strong>平台</strong>（作業系統與 CPU 架構的組合）用的，一般容器映像是 <code>linux/amd64</code>，這個映像標的是 <code>wasip1/wasm</code>。節點的 containerd 只替符合本機平台 <code>linux/amd64</code> 的映像解開 layer，其他平台的映像，下載下來的內容存著，但不會解開成 snapshot。所以 shim 要去 rootfs 裡讀 <code>.wasm</code>，讀不到。錯誤訊息只說 snapshot 不存在，完全沒提平台，要自己看 <code>PLATFORMS</code> 欄才知道。</p>
+<h3 id="containerd-wasm">讓 containerd 解開 wasm 平台的映像<a class="headerlink" href="#containerd-wasm" title="Permanent link">&para;</a></h3>
+<p>containerd 的映像設定裡有一個 <code>runtime_platforms</code>，名字看起來就是為這件事設計的。只加它的結果是這樣：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="gp"># </span>岔路:runtime_platforms,名字看起來完全就是為這件事準備的
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="go">[plugins.&quot;io.containerd.cri.v1.images&quot;.runtime_platforms.wasmedge]</span>
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="go">  platform = &#39;wasip1/wasm&#39;          ← 設定確實進了有效設定</span>
+</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="go">                                       套用、重啟、重拉,行為一模一樣</span>
+</span></code></pre></div>
+<p>設定有進到有效設定裡，但 pod 還是同一個錯誤。要再加同一段設定裡的另一個欄位：</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="k">[plugins.</span><span class="s2">&quot;io.containerd.cri.v1.images&quot;</span><span class="k">]</span>
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="w">  </span><span class="n">use_local_image_pull</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span><span class="w">       </span><span class="c1"># default false → CRI hands pulling to the transfer</span>
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="w">                                    </span><span class="c1"># service, which ignores runtime_platforms</span>
+</span></code></pre></div>
+<p>這個欄位預設是 <code>false</code>，此時 Kubernetes 要求拉映像時，containerd 把工作交給另一個負責下載的元件（transfer service），而那個元件不看 <code>runtime_platforms</code>。改成 <code>true</code> 之後，拉映像改由 Kubernetes 介面（CRI）這一側自己處理，<code>runtime_platforms</code> 才有作用。</p>
+<p>要注意寫的位置：<code>config.toml</code> 裡已經有 <code>[plugins."io.containerd.cri.v1.images"]</code> 這一段，<code>use_local_image_pull = true</code> 要加在這一段的標題底下，不要在檔尾再寫一次同樣的段落標題。<code>runtime_platforms</code> 那一段則附加在檔尾：</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="k">[plugins.</span><span class="s2">&quot;io.containerd.cri.v1.images&quot;</span><span class="k">.runtime_platforms.wasmedge]</span>
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="w">  </span><span class="n">platform</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;wasip1/wasm&quot;</span>
+</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="w">  </span><span class="n">snapshotter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;overlayfs&quot;</span>
+</span></code></pre></div>
+<p>改完之後，在節點 shell 執行 <code>systemctl restart containerd</code>。回本機刪除 <code>wasmlab</code> 裡的 <code>wasmedge-runwasi-demo</code> Pod；再到節點 shell 用 <code>ctr -n k8s.io images rm ghcr.io/containerd/runwasi/wasi-demo-app:latest</code> 移除這個測試映像的快取。最後回本機重新執行 <code>kubectl apply -f pod-runwasi-demo.yaml</code>，讓 kubelet 重拉映像並建 Pod。成功後查看 Pod log：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>wasmlab<span class="w"> </span>logs<span class="w"> </span>wasmedge-runwasi-demo
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="go">hello-from-wasmedge</span>
+</span><span id="__span-24-3"><a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="go">exiting</span>
+</span></code></pre></div>
+<p>pod 跑完、狀態是 <code>Completed</code>，log 是預期的兩行。WasmEdge 在 AKS 上跑起來了。</p>
+<p>本課驗證過能跑的設定是 <code>use_local_image_pull</code> 和 <code>runtime_platforms</code> 兩段都加，照這份做就好。「只加 <code>use_local_image_pull</code> 夠不夠」本課沒有拆開驗證；想精簡設定，先在測試節點拿掉 <code>runtime_platforms</code> 試一次。這個問題的完整整理見<a href="#mine-3">疑難排解：pod 停在 <code>parent snapshot … does not exist</code></a>。</p>
+<div class="admonition warning">
+<p class="admonition-title"><code>use_local_image_pull</code> 會影響整台節點</p>
+<p>它改的是這台節點上所有映像的拉取路徑，不只 wasm 映像。對一般容器映像的拉取行為、速度、registry 鏡像設定有沒有影響，本課沒有測。要用在正式環境的節點上，先在測試節點觀察一般映像的拉取。</p>
+</div>
+<h2 id="_5">節點從哪一步開始不一樣<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<p>把四個步驟各自造成的變化放在一起（步驟 4 的快照是 <code>snap s4-image-pull-fixed</code>）。每一列是一個步驟，每一欄是一份快照，「變了」表示這一步做完之後，那份和前一次不同：</p>
+<p><img alt="四個步驟對五份快照的影響：步驟 1 放上 shim 執行檔只改了 shim 清單；步驟 2 改 containerd 設定並重啟，config.toml、有效設定、kubelet handler 三份都變了，這一列以橘色強調；步驟 3 建 RuntimeClass 只改 RuntimeClass；步驟 4 補映像拉取設定並重啟，改了 config.toml 與有效設定" src="../../assets/diagrams/s3d4-node-diff.svg" /></p>
+<p>照著圖由上往下看：</p>
+<ol>
+<li>步驟 1 雖然在節點上放了 109 MiB 的執行期，containerd 的設定和 kubelet 看到的 handler 都沒變。評估風險時，「複製一個檔案」和「改變節點行為」要分開看。</li>
+<li>節點的行為從步驟 2 開始改變，也就是改 <code>config.toml</code> 並重啟 containerd 的那一步。</li>
+</ol>
+<p>和 Day 1 的節點基準相比，全部做完之後節點累計多了這些東西：</p>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>相對 Day 1 基準的變化</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/etc/containerd/config.toml</code></td>
+<td><strong>8 行新增</strong>、0 行移除</td>
+</tr>
+<tr>
+<td><code>containerd config dump</code></td>
+<td><strong>21 行新增</strong>、1 行變更</td>
+</tr>
+<tr>
+<td>kubelet 的 <code>runtimeHandlers</code></td>
+<td><strong>多一個 <code>wasmedge</code></strong>(兩項 feature 皆 false)</td>
+</tr>
+<tr>
+<td><code>/usr/local/bin</code></td>
+<td><strong>多一個 109 MiB 的 shim</strong></td>
+</tr>
+<tr>
+<td>RuntimeClass</td>
+<td>多一個(在 etcd,不在節點)</td>
+</tr>
+<tr>
+<td>containerd 重啟</td>
+<td><strong>2 次,pod 零重啟、節點沒掉出 Ready</strong></td>
+</tr>
+</tbody>
+</table>
+<p>對照另外兩條路：Day 2 的 wasmCloud 五份快照完全沒變；WasmEdge 要在每台節點加 8 行設定和一個 shim 執行檔；Day 6 的 SpinKube 會改用 operator 替你做類似的事。</p>
+<h2 id="gate">同一支 wasm 程式，兩邊都能跑嗎<a class="headerlink" href="#gate" title="Permanent link">&para;</a></h2>
+<p>到這裡，叢集上同時有 Day 2–3 的 wasmCloud 和今天的 WasmEdge。直覺上，程式編成 wasm 之後，交給哪個 wasm 執行期都能跑。下面拿兩邊現成的映像來試。</p>
+<h3 id="_6">三份映像的打包方式<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
+<p>先看映像在 registry 上怎麼打包。每個 OCI 映像都有一份 manifest，列出一份設定（config）和幾層內容（layer），各自用 <strong>mediaType</strong> 標明是什麼格式。下面是三份映像的 manifest 內容，第一份是 Day 2 用的 wasmCloud 範例，後兩份是 runwasi 的範例：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="go">--- wasmcloud/components/hello-world:0.1.0</span>
+</span><span id="__span-25-2"><a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="go">  config.mediaType   = application/vnd.wasm.config.v0+json                            (469 B)</span>
+</span><span id="__span-25-3"><a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="go">  layer[0].mediaType = application/wasm                                               (224241 B)</span>
+</span><span id="__span-25-4"><a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="go">--- containerd/runwasi/wasi-demo-app:latest</span>
+</span><span id="__span-25-5"><a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a><span class="go">  config.mediaType   = application/vnd.oci.image.config.v1+json                       (281 B)</span>
+</span><span id="__span-25-6"><a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a><span class="go">  layer[0].mediaType = application/vnd.oci.image.layer.v1.tar                         (2264576 B)</span>
+</span><span id="__span-25-7"><a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a><span class="go">--- containerd/runwasi/wasi-demo-oci:latest</span>
+</span><span id="__span-25-8"><a id="__codelineno-25-8" name="__codelineno-25-8" href="#__codelineno-25-8"></a><span class="go">  config.mediaType   = application/vnd.oci.image.config.v1+json                       (320 B)</span>
+</span><span id="__span-25-9"><a id="__codelineno-25-9" name="__codelineno-25-9" href="#__codelineno-25-9"></a><span class="go">  layer[0].mediaType = application/vnd.bytecodealliance.wasm.component.layer.v0+wasm  (2262850 B)</span>
+</span></code></pre></div>
+<p>三份的打包都不一樣。wasmCloud 的設定是 wasm 專用的格式，layer 直接就是一個 <code>.wasm</code> 檔；<code>wasi-demo-app</code> 是標準的容器映像，layer 是一個 tar 包；<code>wasi-demo-oci</code> 用標準的容器設定，layer 卻直接放 <code>.wasm</code>。</p>
+<p>把後兩份裡的 <code>.wasm</code> 取出來比雜湊值：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="gp">$ </span>shasum<span class="w"> </span>-a<span class="w"> </span><span class="m">256</span><span class="w"> </span>wasi-demo-app.wasm<span class="w"> </span>demo-oci.wasm
+</span><span id="__span-26-2"><a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="go">245c955714067729ab7b3fdd26681caa8bbc5d09ba054a846aa7f5bd9a393f45  wasi-demo-app.wasm</span>
+</span><span id="__span-26-3"><a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="go">245c955714067729ab7b3fdd26681caa8bbc5d09ba054a846aa7f5bd9a393f45  demo-oci.wasm</span>
+</span></code></pre></div>
+<p>兩份是同一支程式，只是打包方式不同。步驟 4 已經跑過 <code>wasi-demo-app</code>；<code>wasi-demo-oci</code> 用同一份 pod 寫法，只把 <code>image</code> 換掉、拿掉 <code>args</code>，pod 名稱改成 <code>wasmedge-runwasi-oci</code>，也跑得起來，log 是一首重複的歌詞。這一組說明：對 WasmEdge 來說，這兩種打包方式都能用。</p>
+<h3 id="8">前 8 個位元組<a class="headerlink" href="#8" title="Permanent link">&para;</a></h3>
+<p>再看檔案本身。三個 <code>.wasm</code> 的前 8 個位元組：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="gp">$ </span>xxd<span class="w"> </span>-l<span class="w"> </span><span class="m">8</span><span class="w"> </span>-g<span class="w"> </span><span class="m">1</span><span class="w"> </span>&lt;各檔&gt;
+</span><span id="__span-27-2"><a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="go">  hello-world.wasm      00 61 73 6d 0d 00 01 00    version=0x000d layer=0x0001 → component</span>
+</span><span id="__span-27-3"><a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="go">  wasi-demo-app.wasm    00 61 73 6d 01 00 00 00    version=0x0001 layer=0x0000 → core module</span>
+</span><span id="__span-27-4"><a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="go">  wasi-demo-oci.wasm    00 61 73 6d 01 00 00 00    同上</span>
+</span></code></pre></div>
+<p>把兩種開頭並排畫出來：</p>
+<p><img alt="兩種 wasm 檔的前 8 個位元組：wasi-demo-app.wasm 是 00 61 73 6d 01 00 00 00，為 core module；hello-world.wasm 是 00 61 73 6d 0d 00 01 00，為 component。前四個位元組 \0asm 兩者相同，從 offset 0x04 開始不同；箭頭指向 hello-world 的第 5 個位元組，標示 WasmEdge 的錯誤訊息 Bytecode offset: 0x00000004。wasmCloud 只載入 component，runwasi 的 wasmedge shim 只載入 core module" src="../../assets/diagrams/s3d4-wasm-header.svg" /></p>
+<p>前四個位元組 <code>00 61 73 6d</code> 是所有 wasm 檔共用的開頭（<code>\0asm</code>）。後四個位元組標示版本與種類，兩種檔案從這裡開始不同：</p>
+<ul>
+<li><strong>core module</strong>：<code>01 00 00 00</code>，最原始的 wasm 格式，也就是 WASI 0.1（<code>wasip1</code>）程式編出來的樣子。</li>
+<li><strong>component</strong>：<code>0d 00 01 00</code>，Day 0 介紹的 Component Model 格式，用 WIT 描述對外的介面，WASI 0.2（<code>wasip2</code>）的程式是這種。</li>
+</ul>
+<p>wasmCloud 的 <code>hello-world</code> 是 component，runwasi 的兩個範例是 core module。</p>
+<h3 id="wasmcloud-wasmedge">把 wasmCloud 的元件交給 WasmEdge<a class="headerlink" href="#wasmcloud-wasmedge" title="Permanent link">&para;</a></h3>
+<p>把 <code>hello-world:0.1.0</code> 寫進一顆 <code>runtimeClassName: wasmedge</code> 的 pod。只寫 <code>image</code> 時，pod 停在 <code>no command specified</code>：wasmCloud 的映像設定裡沒有 <code>Entrypoint</code>，CRI 不知道要執行什麼。補上 <code>command</code> 之後，容器真的啟動了，接著失敗：</p>
+<details class="example">
+<summary>pod-wasmcloud-component-cmd.yaml</summary>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-28-1"><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>pod-wasmcloud-component-cmd.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-28-2"><a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-28-3"><a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="s">kind: Pod</span>
+</span><span id="__span-28-4"><a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a><span class="s">metadata:</span>
+</span><span id="__span-28-5"><a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a><span class="s">  name: wasmedge-wasmcloud-cmd</span>
+</span><span id="__span-28-6"><a id="__codelineno-28-6" name="__codelineno-28-6" href="#__codelineno-28-6"></a><span class="s">  namespace: wasmlab</span>
+</span><span id="__span-28-7"><a id="__codelineno-28-7" name="__codelineno-28-7" href="#__codelineno-28-7"></a><span class="s">spec:</span>
+</span><span id="__span-28-8"><a id="__codelineno-28-8" name="__codelineno-28-8" href="#__codelineno-28-8"></a><span class="s">  runtimeClassName: wasmedge</span>
+</span><span id="__span-28-9"><a id="__codelineno-28-9" name="__codelineno-28-9" href="#__codelineno-28-9"></a><span class="s">  restartPolicy: Never</span>
+</span><span id="__span-28-10"><a id="__codelineno-28-10" name="__codelineno-28-10" href="#__codelineno-28-10"></a><span class="s">  containers:</span>
+</span><span id="__span-28-11"><a id="__codelineno-28-11" name="__codelineno-28-11" href="#__codelineno-28-11"></a><span class="s">    - name: hello</span>
+</span><span id="__span-28-12"><a id="__codelineno-28-12" name="__codelineno-28-12" href="#__codelineno-28-12"></a><span class="s">      image: ghcr.io/wasmcloud/components/hello-world:0.1.0</span>
+</span><span id="__span-28-13"><a id="__codelineno-28-13" name="__codelineno-28-13" href="#__codelineno-28-13"></a><span class="s">      command: [&quot;/hello-world.wasm&quot;]</span>
+</span><span id="__span-28-14"><a id="__codelineno-28-14" name="__codelineno-28-14" href="#__codelineno-28-14"></a><span class="s">EOF</span>
+</span><span id="__span-28-15"><a id="__codelineno-28-15" name="__codelineno-28-15" href="#__codelineno-28-15"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>pod-wasmcloud-component-cmd.yaml
+</span></code></pre></div>
+</details>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-29-1"><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>wasmlab<span class="w"> </span>logs<span class="w"> </span>wasmedge-wasmcloud-cmd
+</span><span id="__span-29-2"><a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="go">[error] loading failed: illegal opcode, Code: 0x117</span>
+</span><span id="__span-29-3"><a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="go">[error]     This instruction or syntax requires enabling Component Model proposal</span>
+</span><span id="__span-29-4"><a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a><span class="go">[error]     Bytecode offset: 0x00000004</span>
+</span><span id="__span-29-5"><a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a><span class="go">[error]     At AST node: component</span>
+</span></code></pre></div>
+<p><code>Bytecode offset: 0x00000004</code> 就是圖上箭頭指的位置：WasmEdge 讀完 <code>\0asm</code>，看到第 5 個位元組是 component 的版本號，就停下來了。第二行訊息也直接說出原因：要開啟 Component Model 才能載入。這兩種失敗的分辨方式，見<a href="#mine-4">疑難排解：同一個映像兩種失敗</a>。</p>
+<p>本章使用的 wasmedge shim v0.6.1 透過 <code>wasmedge_sdk</code> 的 <code>Module::from_bytes</code> 載入 core module，使用預設設定，沒有啟用 Component Model，也未提供 pod annotation、環境變數或 containerd 設定來啟用。這個限制針對本章採用的 shim 版本；WasmEdge 執行期本身支援 Component Model，不代表這個 shim 能載入 component。</p>
+<h3 id="core-module-wasmcloud">反方向：把 core module 交給 wasmCloud<a class="headerlink" href="#core-module-wasmcloud" title="Permanent link">&para;</a></h3>
+<p>再把 <code>wasi-demo-app</code> 寫成 wasmCloud 的 <code>WorkloadDeployment</code>，交給 Day 2–3 的 host：</p>
+<details class="example">
+<summary>wasmcloud-runwasi-core-module.yaml</summary>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-30-1"><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>wasmcloud-runwasi-core-module.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-30-2"><a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a><span class="s">apiVersion: runtime.wasmcloud.dev/v1alpha1</span>
+</span><span id="__span-30-3"><a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="s">kind: WorkloadDeployment</span>
+</span><span id="__span-30-4"><a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a><span class="s">metadata:</span>
+</span><span id="__span-30-5"><a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a><span class="s">  name: runwasi-core-module</span>
+</span><span id="__span-30-6"><a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a><span class="s">  namespace: wasmcloud</span>
+</span><span id="__span-30-7"><a id="__codelineno-30-7" name="__codelineno-30-7" href="#__codelineno-30-7"></a><span class="s">spec:</span>
+</span><span id="__span-30-8"><a id="__codelineno-30-8" name="__codelineno-30-8" href="#__codelineno-30-8"></a><span class="s">  replicas: 1</span>
+</span><span id="__span-30-9"><a id="__codelineno-30-9" name="__codelineno-30-9" href="#__codelineno-30-9"></a><span class="s">  template:</span>
+</span><span id="__span-30-10"><a id="__codelineno-30-10" name="__codelineno-30-10" href="#__codelineno-30-10"></a><span class="s">    spec:</span>
+</span><span id="__span-30-11"><a id="__codelineno-30-11" name="__codelineno-30-11" href="#__codelineno-30-11"></a><span class="s">      hostSelector:</span>
+</span><span id="__span-30-12"><a id="__codelineno-30-12" name="__codelineno-30-12" href="#__codelineno-30-12"></a><span class="s">        hostgroup: default</span>
+</span><span id="__span-30-13"><a id="__codelineno-30-13" name="__codelineno-30-13" href="#__codelineno-30-13"></a><span class="s">      components:</span>
+</span><span id="__span-30-14"><a id="__codelineno-30-14" name="__codelineno-30-14" href="#__codelineno-30-14"></a><span class="s">        - name: runwasi-demo</span>
+</span><span id="__span-30-15"><a id="__codelineno-30-15" name="__codelineno-30-15" href="#__codelineno-30-15"></a><span class="s">          image: ghcr.io/containerd/runwasi/wasi-demo-app:latest</span>
+</span><span id="__span-30-16"><a id="__codelineno-30-16" name="__codelineno-30-16" href="#__codelineno-30-16"></a><span class="s">EOF</span>
+</span><span id="__span-30-17"><a id="__codelineno-30-17" name="__codelineno-30-17" href="#__codelineno-30-17"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>wasmcloud-runwasi-core-module.yaml
+</span></code></pre></div>
+<p>另一份 <code>runwasi-oci-artifact</code> 寫法相同，名稱與 component 名改掉，<code>image</code> 換成 <code>wasi-demo-oci:latest</code>，結果一樣。</p>
+</details>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-31-1"><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>wasmcloud<span class="w"> </span>get<span class="w"> </span>workload<span class="w"> </span>runwasi-core-module-…<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status}&#39;</span>
+</span><span id="__span-31-2"><a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="go">  Sync    False   &quot;workload is not operational: WORKLOAD_STATE_NOT_FOUND&quot;</span>
+</span><span id="__span-31-3"><a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a><span class="go">  Ready   False   &quot;workload is not placed or not synced&quot;</span>
+</span><span id="__span-31-4"><a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a>
+</span><span id="__span-31-5"><a id="__codelineno-31-5" name="__codelineno-31-5" href="#__codelineno-31-5"></a><span class="gp"># </span>三顆<span class="w"> </span>host<span class="w"> </span>的<span class="w"> </span>log<span class="w"> </span>逐行看
+</span><span id="__span-31-6"><a id="__codelineno-31-6" name="__codelineno-31-6" href="#__codelineno-31-6"></a><span class="go">  log 共 10 / 14 / 12 行,其中 8 行是 pull_component 的 WARN</span>
+</span><span id="__span-31-7"><a id="__codelineno-31-7" name="__codelineno-31-7" href="#__codelineno-31-7"></a><span class="go">  提到 runwasi 且含 &#39;Starting workload&#39; 的行數 = 0</span>
+</span><span id="__span-31-8"><a id="__codelineno-31-8" name="__codelineno-31-8" href="#__codelineno-31-8"></a><span class="go">  對照:同一批 log 裡 blobby / hello-world 的 &#39;Starting workload&#39; = 1 / 2 / 2</span>
+</span></code></pre></div>
+<p><code>Workload</code> 一直不就緒，三顆 host 的 log 裡只有拉取映像的 WARN，沒有任何錯誤，也沒有 <code>Starting workload</code>。Day 3 說過，拉取的 WARN 本身不代表失敗，要看下一行有沒有 <code>Starting workload</code>（Day 3 的<a href="../sprint3-day3-wasmcloud-distributed/#mine-7">「每次拉元件都會噴一行像認證失敗的 WARN」</a>）。這次還要合看 Workload 未就緒、反覆重試、正常元件的對照，以及前面確認的 core module 格式。單憑缺少這一行 log，不能判定其他映像也是格式不相容。</p>
+<p>這兩個 <code>WorkloadDeployment</code> 會每 60 秒換一顆 host 重拉映像，看完結果就刪掉：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-32-1"><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>wasmcloud<span class="w"> </span>delete<span class="w"> </span>workloaddeployment<span class="w"> </span>runwasi-core-module<span class="w"> </span>runwasi-oci-artifact
+</span></code></pre></div>
+<p>細節見<a href="#mine-6">疑難排解：wasmCloud 收到 core module 時只會重試</a>。</p>
+<h3 id="_7">三種打包的差異<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h3>
+<p>rootfs 是容器啟動後看見的根檔案系統；OCI manifest 與 config 則記錄映像層及執行設定。</p>
+<p>三份映像的差異整理如下：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>wasmCloud <code>hello-world</code></th>
+<th>runwasi <code>wasi-demo-app</code></th>
+<th>runwasi <code>wasi-demo-oci</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>config mediaType</td>
+<td><code>…vnd.wasm.config.v0+json</code></td>
+<td><code>…vnd.oci.image.config.v1+json</code></td>
+<td><code>…vnd.oci.image.config.v1+json</code></td>
+</tr>
+<tr>
+<td>layer mediaType</td>
+<td><code>application/wasm</code></td>
+<td><code>…image.layer.v1.tar</code></td>
+<td><code>…wasm.component.layer.v0+wasm</code></td>
+</tr>
+<tr>
+<td>layer 大小</td>
+<td>219 KiB</td>
+<td>2.16 MiB</td>
+<td>2.16 MiB</td>
+</tr>
+<tr>
+<td><code>architecture</code> / <code>os</code></td>
+<td><code>wasm</code> / <strong><code>wasip2</code></strong></td>
+<td><code>wasm</code> / <code>wasip1</code></td>
+<td><code>wasm</code> / <code>wasip1</code></td>
+</tr>
+<tr>
+<td>rootfs</td>
+<td><strong>沒有這個欄位</strong></td>
+<td><code>diff_ids</code> 有 1 個</td>
+<td><code>diff_ids</code> <strong>是空的</strong></td>
+</tr>
+<tr>
+<td>進入點</td>
+<td><strong>沒有</strong>,改成 <code>component.exports/imports</code> 列 WIT 介面</td>
+<td><code>Entrypoint</code></td>
+<td><code>Entrypoint</code> + <code>containerd.runwasi.layers</code> label</td>
+</tr>
+<tr>
+<td>wasm 二進位</td>
+<td><strong>component</strong></td>
+<td><strong>core module</strong></td>
+<td>同左,<strong>SHA256 與左欄相同</strong></td>
+</tr>
+<tr>
+<td>本章成功載入的執行方式</td>
+<td>wasmCloud</td>
+<td>wasmedge shim</td>
+<td>wasmedge shim</td>
+</tr>
+</tbody>
+</table>
+<p>結果是：兩種打包方式 WasmEdge 都能讀，擋住互通的是 wasm 格式。同一份原始碼要給兩邊跑，就要編兩次：給 WasmEdge 編 <code>wasm32-wasip1</code> 的 core module，給 wasmCloud 編 <code>wasm32-wasip2</code>，Rust 會直接產出 component，不需要固定再做一次 component 轉換。格式符合之後，仍要核對 host 支援的匯入、匯出介面。這個結論是從格式差異推出來的，本章沒有拿同一份原始碼實際編兩次；<a href="../sprint3-day5-cost-measurement/">Day 5</a> 量成本時會自己編。</p>
+<h2 id="wasmedge">WasmEdge 這條路適合誰<a class="headerlink" href="#wasmedge" title="Permanent link">&para;</a></h2>
+<p>用 <a href="../sprint3-day0-wasm-concepts/#health-method">Day 0 的方法</a>查這兩個專案時（Day 9 整理成表），WasmEdge 本體很活躍：近 13 週有 291 個 commit，作者分布是本課查過的專案裡最平均的（最近 100 筆裡最多的單一作者占 35 筆，共 12 位）。但讓它接上 Kubernetes 的是 runwasi，情況不同：default branch 最近 8 週沒有任何 commit，最近 100 筆 commit 有一半是 dependabot 的相依套件升級，release notes 裡也還沒有 WASI 0.3。這是課程 2026-08 查核時的歷史活動紀錄。規劃部署時，還要重新確認 runwasi 與選用 shim 版本的維護情況。</p>
+<p>所以這條路適合用來學 RuntimeClass、handler、shim 這條執行鏈，每一步都要自己做，每一步的結果也都看得到。既有的程式是 core module、短期不打算改成 component 的話，WasmEdge 的相容性也是優點。若要用於正式環境，這份手動操作還不夠：節點的安裝、設定與移除都要自己寫腳本維護，每換一台節點就要重做一次。</p>
+<h2 id="_8">疑難排解<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h2>
+<h3 id="mine-1"><code>--help</code> 和 feature flag 都說 WasmWasi 還在<a class="headerlink" href="#mine-1" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：<code>az aks nodepool add --help</code> 把 <code>WasmWasi</code> 列在 <code>--workload-runtime</code> 的合法值裡，<code>az feature register</code> 註冊 <code>WasmNodePoolPreview</code> 也立刻回 <code>Registered</code>：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-33-1"><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>add<span class="w"> </span>--help
+</span><span id="__span-33-2"><a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="go">    --workload-runtime : Allowed values: KataCcIsolation, KataMshvVmIsolation,</span>
+</span><span id="__span-33-3"><a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="go">                         KataVmIsolation, OCIContainer, WasmWasi.</span>
+</span><span id="__span-33-4"><a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a>
+</span><span id="__span-33-5"><a id="__codelineno-33-5" name="__codelineno-33-5" href="#__codelineno-33-5"></a><span class="gp">$ </span>az<span class="w"> </span>feature<span class="w"> </span>register<span class="w"> </span>--namespace<span class="w"> </span>microsoft.ContainerService<span class="w"> </span>--name<span class="w"> </span>WasmNodePoolPreview
+</span><span id="__span-33-6"><a id="__codelineno-33-6" name="__codelineno-33-6" href="#__codelineno-33-6"></a><span class="go">{ &quot;properties&quot;: { &quot;state&quot;: &quot;Registered&quot; } }        ← 立刻就 Registered</span>
+</span></code></pre></div>
+<p>真正建立 node pool 時卻被拒絕：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-34-1"><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>add<span class="w"> </span>…<span class="w"> </span>--workload-runtime<span class="w"> </span>WasmWasi
+</span><span id="__span-34-2"><a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a><span class="go">ERROR: (InvalidWorkloadRuntimeSettingError) The agent pool wasi1 has a deprecated workload runtime</span>
+</span><span id="__span-34-3"><a id="__codelineno-34-3" name="__codelineno-34-3" href="#__codelineno-34-3"></a><span class="go">WasmWasi. WebAssembly System Interface (WASI) node pools (preview) are no longer supported on AKS.</span>
+</span><span id="__span-34-4"><a id="__codelineno-34-4" name="__codelineno-34-4" href="#__codelineno-34-4"></a><span class="go">                                     送出到回覆 8 秒,未產生任何資源</span>
+</span></code></pre></div>
+<p><strong>原因</strong>：這個功能已經退役，但退役只做在 Azure 處理請求的那一端。CLI 的參數清單和訂閱層的 feature flag 定義都沒有跟著拿掉。</p>
+<p><strong>修法</strong>：先查官方退役公告，不要把 <code>--help</code> 或 feature flag 的狀態當成服務仍可用的證明。本次建立請求被拒絕且沒有建立 node pool，這個結果不能推廣成所有預覽功能請求都不會產生資源。錯誤訊息建議改用 SpinKube，那是本 sprint Day 6–7 的另一條路，不是 WasmEdge 的替代方案。另外，註冊 feature flag 是訂閱層級的變更（Day 1 說明過為什麼不建議），確認用完要 <code>az feature unregister</code>。</p>
+<h3 id="mine-3">pod 停在 <code>parent snapshot … does not exist</code><a class="headerlink" href="#mine-3" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：shim 裝好、kubelet 也回報了 <code>wasmedge</code> handler，pod 卻是 <code>CreateContainerError</code>，訊息是 <code>parent snapshot sha256:… does not exist: not found</code>，而事件顯示映像拉成功了。</p>
+<p><strong>原因</strong>：映像的平台是 <code>wasip1/wasm</code>，containerd 預設的拉取路徑不會替非本機平台的映像解開 layer，見步驟 4。錯誤訊息完全沒提到平台。</p>
+<p><strong>修法</strong>：在 <code>[plugins."io.containerd.cri.v1.images"]</code> 加 <code>use_local_image_pull = true</code>，並加上 <code>runtime_platforms.wasmedge</code>，重啟 containerd、刪掉沒解開的映像再重建 pod。只加 <code>runtime_platforms</code> 沒有效果。追查順序：<code>ctr -n k8s.io images ls</code> 看 <code>PLATFORMS</code> 欄 → <code>ctr -n k8s.io snapshots ls | grep &lt;digest&gt;</code> 確認沒有解開 → <code>containerd config dump</code> 看 <code>use_local_image_pull</code>。</p>
+<h3 id="mine-4">同一個映像出現兩種不同的失敗<a class="headerlink" href="#mine-4" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：把 wasmCloud 的元件交給 WasmEdge，不寫 <code>command</code> 時是 <code>failed to generate spec: no command specified</code>；補上 <code>command</code> 之後，容器啟動了，log 卻是 <code>illegal opcode … Bytecode offset: 0x00000004</code>。</p>
+<p><strong>原因</strong>：第一種是打包層的問題，wasmCloud 映像的設定裡沒有 <code>Entrypoint</code> 也沒有 <code>Cmd</code>，CRI 產生不出容器規格。第二種才是根本原因：wasm 檔是 component，不是 core module。</p>
+<p><strong>修法</strong>：看到 <code>no command specified</code> 不要停在「參數沒給對」，補上 <code>command</code> 讓它往下走，才看得到真正的原因。<code>no command specified</code> 是打包層，<code>Bytecode offset: 0x00000004</code> 是格式層。</p>
+<h3 id="mine-5">runwasi 的 wasmedge shim 沒有開 component model<a class="headerlink" href="#mine-5" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：想讓 WasmEdge 載入 component，找不到任何 pod annotation、環境變數或 containerd <code>options</code> 可以打開。</p>
+<p><strong>原因</strong>：<code>containerd-shim-wasmedge</code> 用的是 <code>wasmedge_sdk</code> 的 <code>Module</code>、<code>Module::from_bytes</code> 這組載入 core module 的 API，設定物件在程式裡寫死成預設值，沒有任何開關。同一個 repo 裡搜尋 component model 相關的設定：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-35-1"><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a><span class="gp">$ </span>grep<span class="w"> </span>-rniE<span class="w"> </span><span class="s2">&quot;component_model|ComponentModel|enable_component&quot;</span><span class="w"> </span>crates/
+</span><span id="__span-35-2"><a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a><span class="go">containerd-shim-wasmtime/src/instance.rs:69:   config.wasm_component_model(true);</span>
+</span><span id="__span-35-3"><a id="__codelineno-35-3" name="__codelineno-35-3" href="#__codelineno-35-3"></a><span class="go">containerd-shim-wasmtime/src/instance.rs:141:  config.wasm_component_model(true);</span>
+</span><span id="__span-35-4"><a id="__codelineno-35-4" name="__codelineno-35-4" href="#__codelineno-35-4"></a><span class="go">containerd-shim-wasmtime/src/tests.rs:333:     config.wasm_component_model(true);</span>
+</span></code></pre></div>
+<p>三行全部在 wasmtime 的 shim 裡，wasmedge 的 shim 一行都沒有。</p>
+<p><strong>修法</strong>：WasmEdge 執行期支援 Component Model，不等於 runwasi 的 wasmedge shim 有打開它。runwasi 的 wasmtime shim 有相關實作，但仍要驗證目標映像的打包與匯入介面，本章沒有跑過這項替代方案。這和 Day 3 的<a href="../sprint3-day3-wasmcloud-distributed/#mine-1">「沒有可抽換的 capability provider」</a>是同一類問題：功能在原始碼裡，但你實際跑的那個執行檔沒有啟用它。判斷一個能力能不能用，要看你手上的執行檔，不是看 repo 的功能清單。</p>
+<h3 id="mine-6">wasmCloud 收到 core module 時沒有錯誤，只會一直重試<a class="headerlink" href="#mine-6" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：<code>WorkloadDeployment</code> 的 <code>READY</code> 停在 <code>Unknown</code>，<code>Workload</code> 的 <code>Sync</code> 是 <code>False</code>，訊息只有 <code>WORKLOAD_STATE_NOT_FOUND</code>。三顆 host 的 log 只有拉取映像的 WARN，沒有錯誤，也沒有 <code>Starting workload</code>，每 60 秒換一顆 host 重來一次。</p>
+<p><strong>原因</strong>：host 拉得到映像，但裡面不是它能載入的 component，而這條路徑不會回報任何錯誤。同一批 log 裡，<code>blobby</code>、<code>hello-world</code> 的 <code>Starting workload</code> 有出現，證明這行 log 沒有被過濾掉。</p>
+<p><strong>修法</strong>：把沒有 <code>Starting workload</code> 視為追查線索，再比對 Workload 狀態、映像格式與能正常啟動的對照元件；這一行缺席本身不能唯一定位原因。重試會每 60 秒重新拉一次映像，持續產生流量與 log，實驗完用 <code>kubectl -n wasmcloud delete workloaddeployment &lt;名稱&gt;</code> 刪掉。</p>
+<h2 id="_9">想一想<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h2>
+<ul>
+<li>同事在另一座 AKS 叢集照一篇部落格加了 WasmEdge 的 handler，重啟 containerd 之後，<code>kubectl get node -o jsonpath='{.items[0].status.runtimeHandlers}'</code> 裡還是沒有 <code>wasmedge</code>，pod 停在 <code>no runtime for "wasmedge" is configured</code>。在節點上你會先檢查哪兩件事？</li>
+<li>一顆 <code>runtimeClassName: wasmedge</code> 的 pod 停在 <code>CreateContainerError</code>，訊息是 <code>parent snapshot … does not exist</code>。另一顆換了映像的 pod 則是容器啟動後 <code>Error</code>，log 有 <code>Bytecode offset: 0x00000004</code>。這兩顆分別卡在哪一層？各自該怎麼處理？</li>
+<li>團隊想讓同一份 Rust 程式同時部署到 wasmCloud 和 WasmEdge，有人提議「編一次，打包成兩種映像就好」。依本章的結果，這個做法可行嗎？要怎麼改？</li>
+</ul>
+<h2 id="_10">小結<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h2>
+<p>WasmEdge 透過 runwasi 的 shim 接上 Kubernetes，要做三件事：把 shim 執行檔放上每一台節點、在 containerd 的 <code>config.toml</code> 用 2.x 路徑加一個 handler 並重啟 containerd、在叢集建一個 handler 名稱相同的 RuntimeClass。節點的行為從改設定那一步開始改變，放執行檔本身不會。設定寫錯路徑時 containerd 不會報錯，所以改節點前先在副本上看有效設定。之後遇到 WasmEdge 的 pod 起不來，依序問三個問題：kubelet 的 <code>runtimeHandlers</code> 裡有沒有這個 handler；映像的平台是不是 <code>wasip1/wasm</code>、layer 有沒有被解開；wasm 檔的第 5 個位元組是 core module 還是 component。</p>
+<h2 id="_11">延伸閱讀<a class="headerlink" href="#_11" title="Permanent link">&para;</a></h2>
+<p>想再深入，可以從這幾份開始：</p>
+<ul>
+<li><strong><a href="https://github.com/containerd/runwasi">containerd/runwasi</a></strong> —— 本章用的 shim。可以對照看 <code>docs/src/getting-started/quickstart.md</code>（containerd 2.x 路徑）與 <code>test/k8s/Dockerfile</code>（1.x 路徑），也就是步驟 2 那兩種寫法的出處。</li>
+<li><strong><a href="https://github.com/containerd/containerd/blob/main/docs/cri/config.md">containerd 的 CRI 設定文件</a></strong> —— <code>use_local_image_pull</code> 與 <code>runtime_platforms</code> 的說明都在這裡，對應步驟 4。</li>
+<li><strong><a href="https://wasmedge.org/docs/develop/deploy/cri-runtime/containerd">WasmEdge 的 containerd 整合頁</a></strong> —— WasmEdge 官方對 containerd 整合的說明，內容轉介到 runwasi。</li>
+</ul>
+<h2 id="_12">下一步<a class="headerlink" href="#_12" title="Permanent link">&para;</a></h2>
+<p>wasmCloud 和 WasmEdge 兩條路都走過了：wasmCloud 不改節點，WasmEdge 在每台節點加 8 行設定和一個 109 MiB 的 shim。這兩天都還沒量過啟動時間與記憶體，109 MiB 的 shim 跑起來佔多少資源也不知道。<a href="../sprint3-day5-cost-measurement/">Day 5</a> 先確認叢集停機再啟動、節點換成新 VM 之後，今天的節點改動是不是自動消失，再把兩條路的成本量出來。</p>
+<hr />
+<div class="admonition quote">
+<p>WasmEdge 標誌為 CNCF(Linux Foundation)官方資產,此處作社群教學用途。</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到頂端
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="頁腳" >
+        
+          
+          <a href="../sprint3-day3-wasmcloud-distributed/" class="md-footer__link md-footer__link--prev" aria-label="上一頁: Day 3 · wasmCloud 分散式模型">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                上一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 3 · wasmCloud 分散式模型
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../sprint3-day5-cost-measurement/" class="md-footer__link md-footer__link--next" aria-label="下一頁: Day 5 · 執行時間、記憶體與量測範圍">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                下一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 5 · 執行時間、記憶體與量測範圍
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      KAI Scheduler、HAMi、Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,作社群教學用途
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.code.annotate", "content.code.select", "content.tabs.link", "search.suggest", "search.highlight", "search.share"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u8907\u88fd", "clipboard.copy": "\u8907\u88fd", "search.result.more.one": "\u6b64\u9801\u5c1a\u6709 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.more.other": "\u6b64\u9801\u5c1a\u6709 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.none": "\u6c92\u6709\u7b26\u5408\u7684\u9805\u76ee", "search.result.one": "\u627e\u5230 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.other": "\u627e\u5230 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.placeholder": "\u6253\u5b57\u9032\u884c\u641c\u5c0b", "search.result.term.missing": "\u7f3a\u5c11\u5b57\u8a5e", "select.version": "\u9078\u64c7\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

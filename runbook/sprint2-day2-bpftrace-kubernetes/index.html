@@ -1,0 +1,4532 @@
+
+<!doctype html>
+<html lang="zh-TW" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="雲原生實作課程：GPU 排程、eBPF 與執行期安全、WebAssembly、服務網格與機密運算、遊戲伺服器平台">
+      
+      
+      
+        <link rel="canonical" href="https://deepwavelab.github.io/CloudNativePracticing/runbook/sprint2-day2-bpftrace-kubernetes/">
+      
+      
+        <link rel="prev" href="../sprint2-day1-bpftrace-basics/">
+      
+      
+        <link rel="next" href="../sprint2-day3-falco-basics/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Day 2 · 把核心事件接回 Kubernetes - Cloud Native Lab Course</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/terminal.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#day-2-kubernetes-cgroup-id-pod-pod" class="md-skip">
+          跳轉到
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="頁首">
+    <a href="../.." title="Cloud Native Lab Course" class="md-header__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Cloud Native Lab Course
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Day 2 · 把核心事件接回 Kubernetes
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換深色模式"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="切換深色模式" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換淺色模式"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="切換淺色模式" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜尋" placeholder="搜尋" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="搜尋">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="分享" aria-label="分享" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="清除" aria-label="清除" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜尋引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="標籤" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  首頁
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint1-day0-azure-aks-foundation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 1 · GPU 排程三部曲
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../sprint2-day0-ebpf-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 2 · eBPF 與執行期安全
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint3-day0-wasm-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 3 · WebAssembly
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint4-day0-mesh-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 4 · 服務網格與機密運算
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint5-day0-game-server-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 5 · 遊戲伺服器平台
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="導覽列" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Cloud Native Lab Course" class="md-nav__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Cloud Native Lab Course
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首頁
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    首頁
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 3 · WebAssembly 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 4 · 服務網格與機密運算 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint5/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 5 · 遊戲伺服器平台 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day0-azure-aks-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 環境建置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day1-kai-queue-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · KAI 安裝與 Queue 基礎
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day2-gang-scheduling-preemption/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Gang Scheduling 與搶占
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day3-hami-memory-isolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · HAMi 安裝與 VRAM 用量限制
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day4-hami-kai-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · HAMi 與 KAI 整合
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day5-hami-webui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · HAMi-WebUI 觀測介面
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day6-dra-simulated-devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · DRA 概念與模擬裝置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day7-dra-aks-real-gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · DRA 配置實體 GPU
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day8-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · Sprint 1 總結
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day0-ebpf-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · eBPF 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day1-bpftrace-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · bpftrace 三支經典工具
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · 把核心事件接回 Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · 把核心事件接回 Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        開始之前
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-nginx" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1：部署被觀察的 nginx
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一顆 pod 在節點上是幾層目錄
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2：從一個核心事件走到 pod 名字
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 2：從一個核心事件走到 pod 名字">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cgroup-id-inode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cgroup id 就是目錄的 inode
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#container-id-pod-uid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        從目錄名字讀出 container id 與 pod uid
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#crictl-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        用 crictl 換成 pod 名字
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        換成節點上本來就有的事件
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-pid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3：為什麼不用 pid 查身分
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4：只追蹤一顆 pod
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 4：只追蹤一顆 pod">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        過濾條件要綁在哪一層
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        本章的追蹤腳本
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5：過濾省下多少
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-nginx" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6：替 nginx 做一份啟動行為基線
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 6：替 nginx 做一份啟動行為基線">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        在容器建立之前就開始記錄
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        基線的內容
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 7：拿基線比對不尋常的動作
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 7：拿基線比對不尋常的動作">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#nsenter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        同一組動作改走 nsenter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        這套做法還缺什麼
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 8：收尾
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        疑難排解
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="疑難排解">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCR mirror 拉不到較新的 nginx
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        從節點 nsenter 進去的動作沒有被記錄
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        容器重啟後，過濾器不回報錯誤也不再輸出
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        加了 #define 之後認不得 struct task_struct
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        port 印出 20480、13568 這類數字
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一行裡出現兩次時間
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        kubectl exec 開的 shell 從紀錄裡消失
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        想一想
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        小結
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day3-falco-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Falco 安裝與預設規則
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day4-falco-custom-rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · 自訂規則、誤報調校與告警路由
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day5-tetragon-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Tetragon 與 TracingPolicy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day6-tetragon-enforcement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · 從偵測到攔截
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day7-cilium-kubeproxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Cilium 與 kube-proxy replacement
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day8-cilium-network-policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · CiliumNetworkPolicy（L3/L4 → L7）
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day9-hubble/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Hubble 可觀測性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 綜合：四套工具的分工
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 3 · WebAssembly
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 3 · WebAssembly
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day0-wasm-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · wasm 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day1-three-generations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · RuntimeClass 與節點執行路徑
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day2-wasmcloud/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · wasmCloud 與元件模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day3-wasmcloud-distributed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · wasmCloud 分散式模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day4-wasmedge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · WasmEdge 執行期
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day5-cost-measurement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · 執行時間、記憶體與量測範圍
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day6-spinkube-shim/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · SpinKube（上）：shim 佈建
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day7-spinkube-operator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · SpinKube（下）：operator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day8-reversibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · SpinKube 移除與節點殘留
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day9-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · 依工作負載選擇 Wasm 路線
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 4 · 服務網格與機密運算
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 4 · 服務網格與機密運算
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1" id="__nav_5_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part 1 · 服務網格（Day 0–4）
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part 1 · 服務網格（Day 0–4）
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day0-mesh-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 服務網格與入口閘道的三層地圖
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day1-envoy-gateway/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · Envoy Gateway 與 HTTP/3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day2-istio-ambient/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Istio ambient：服務間 mTLS 與連線限制
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day3-cilium-mesh/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Cilium mesh：WireGuard 加密與 L7
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day4-istio-vs-cilium/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · Istio 與 Cilium 比較
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part 2 · 機密運算（Day 5–9）
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part 2 · 機密運算（Day 5–9）
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day5-confidential-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · 機密運算的威脅模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day6-kata-sandboxing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · Kata Pod Sandboxing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day7-katacc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · kata-cc：SEV-SNP 機密硬體
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day8-attestation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 遠端證明：MAA、SKR 與金鑰釋放
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day9-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · 機密容器的需求與驗證範圍
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 5 · 遊戲伺服器平台
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 5 · 遊戲伺服器平台
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day0-game-server-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 遊戲伺服器平台概念
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day1-agones-first-gameserver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · Agones 第一顆 GameServer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day2-fleet-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Fleet 生命週期
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day3-allocation-autoscaler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Allocation 與 autoscaler
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day4-quilkin-udp-proxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · Quilkin UDP proxy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day5-nakama-postgres/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Nakama 與 PostgreSQL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day6-matchmaking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · Matchmaking 串接
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day7-python-client-e2e/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Python client 端到端
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day8-observability-resilience/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 觀測與韌性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day9-unity-client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Unity client 與 relay server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 遊戲伺服器平台總結
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        開始之前
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-nginx" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1：部署被觀察的 nginx
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一顆 pod 在節點上是幾層目錄
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2：從一個核心事件走到 pod 名字
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 2：從一個核心事件走到 pod 名字">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cgroup-id-inode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cgroup id 就是目錄的 inode
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#container-id-pod-uid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        從目錄名字讀出 container id 與 pod uid
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#crictl-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        用 crictl 換成 pod 名字
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        換成節點上本來就有的事件
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-pid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3：為什麼不用 pid 查身分
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4：只追蹤一顆 pod
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 4：只追蹤一顆 pod">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        過濾條件要綁在哪一層
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        本章的追蹤腳本
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5：過濾省下多少
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-nginx" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6：替 nginx 做一份啟動行為基線
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 6：替 nginx 做一份啟動行為基線">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        在容器建立之前就開始記錄
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        基線的內容
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 7：拿基線比對不尋常的動作
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 7：拿基線比對不尋常的動作">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#nsenter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        同一組動作改走 nsenter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        這套做法還缺什麼
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 8：收尾
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        疑難排解
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="疑難排解">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCR mirror 拉不到較新的 nginx
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        從節點 nsenter 進去的動作沒有被記錄
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        容器重啟後，過濾器不回報錯誤也不再輸出
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        加了 #define 之後認不得 struct task_struct
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        port 印出 20480、13568 這類數字
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一行裡出現兩次時間
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        kubectl exec 開的 shell 從紀錄裡消失
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        想一想
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        小結
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="day-2-kubernetes-cgroup-id-pod-pod">Day 2: 把核心事件接回 Kubernetes——用 cgroup id 查出 pod、只追蹤一顆 pod<a class="headerlink" href="#day-2-kubernetes-cgroup-id-pod-pod" title="Permanent link">&para;</a></h1>
+<p><img align="right" alt="Kubernetes 官方標誌" src="../../assets/logos/kubernetes-icon-color.svg" width="95" /></p>
+<p><a href="../sprint2-day1-bpftrace-basics/">Day 1</a> 的 <code>opensnoop</code> 能看到節點上的開檔事件。假設其中一行寫著某個 <code>cat</code> 開了 <code>/etc/shadow</code>：你看得到 PID、行程名稱和路徑，卻看不出是哪一顆 pod 做的。這台節點上同時跑著好幾顆 pod，還有 kubelet 這類節點自己的服務，而三支經典工具都沒有「pod」這個欄位。</p>
+<p>這一章把核心事件接回 Kubernetes，選用 cgroup id 對應容器。我們會從這個數字一路查到 pod 名字，全程只用節點上的檔案和工具，不呼叫 API server。查得到身分之後，再寫一支只追蹤一顆 pod 的 bpftrace 腳本，記下 nginx 啟動時執行了哪些程式、開了哪些檔案、連到哪裡，最後故意在 pod 裡做幾件不尋常的事，看這份紀錄抓不抓得到。</p>
+<p>讀完之後，看到一筆帶 cgroup id 的核心事件，你能查出它來自哪顆 pod 的哪個容器，或是節點自己的服務；要追蹤一顆 pod 時，你能判斷過濾條件該綁在哪一層，也知道這種追蹤看不見哪些動作。</p>
+<h2 id="_1">開始之前<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<p>這一章沿用 Day 1 的 AKS 叢集與 Ubuntu 24.04 一般 CPU 節點。<code>ebpf</code> 節點需使用 cgroup v2，kubelet 與 containerd 都使用 systemd cgroup driver，後面的 <code>.slice</code>、<code>.scope</code> 路徑才會符合本章寫法。先把 <code>ebpf</code> 節點池拉回 2 台：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>scale<span class="w"> </span>-g<span class="w"> </span>&lt;resource-group&gt;<span class="w"> </span>--cluster-name<span class="w"> </span>&lt;cluster&gt;<span class="w"> </span>-n<span class="w"> </span>ebpf<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">    </span>--subscription<span class="w"> </span>&lt;subscription-id&gt;<span class="w"> </span>--node-count<span class="w"> </span><span class="m">2</span>
+</span></code></pre></div>
+<p>再套用 Day 0 起使用的特權 DaemonSet <code>01-ebpf-lab-daemonset.yaml</code>（<code>privileged</code>、<code>hostPID: true</code>、掛載節點的 <code>/sys</code>），它會在每台 <code>ebpf</code> 節點上各放一顆追蹤 pod：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span><span class="m">01</span>-ebpf-lab-daemonset.yaml
+</span></code></pre></div>
+<p>接著在每顆追蹤 pod 裡安裝 bpftrace，內容跟 Day 0 的安裝腳本相同：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>apt-get<span class="w"> </span>update<span class="w"> </span>-qq
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nv">DEBIAN_FRONTEND</span><span class="o">=</span>noninteractive<span class="w"> </span>apt-get<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>-qq<span class="w"> </span>bpftrace
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>bpftrace<span class="w"> </span>--version
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">1</span><span class="w"> </span>-m<span class="w"> </span>--<span class="w"> </span>bpftool<span class="w"> </span>version
+</span></code></pre></div>
+<p>本章使用容器裡裝好的 bpftrace v0.20.2，執行前確認版本，避免誤用節點 <code>/usr/local/bin</code> 裡的舊版。<code>bpftool</code> 不另外裝，用 <code>nsenter -t 1 -m</code> 借用節點上內建的那支。</p>
+<p>本章用 <code>cat &gt; 檔名 &lt;&lt;'EOF'</code> 建立的檔案都在工作站上建立：YAML 用 <code>kubectl apply</code> 套用，<code>.sh</code> 和 <code>.bt</code> 要在追蹤 pod 裡執行，得自己複製進追蹤 pod（例如用 <code>kubectl cp</code>）。步驟 5 的腳本預設 <code>05-podtrace.bt</code> 放在追蹤 pod 的 <code>/tmp/podtrace.bt</code>，複製時直接用這個路徑最省事。</p>
+<p>叢集重新啟動後，若 <code>kubectl</code> 因 DNS 解析失敗而連不到 API server，處理方式見 Day 1 的<a href="../sprint2-day1-bpftrace-basics/#mine-1">「<code>az aks start</code> 之後 <code>kubectl</code> 回 <code>no such host</code>，<code>nslookup</code> 卻解得到」</a>。使用 <code>--server</code> 加 <code>--tls-server-name</code> 直接連 IP 前，先重新查詢 API server 的 IP，不要沿用停機前的位址。</p>
+<h2 id="1-nginx">步驟 1：部署被觀察的 nginx<a class="headerlink" href="#1-nginx" title="Permanent link">&para;</a></h2>
+<p>被觀察的對象選 nginx，原因有三個。第一，官方映像的 <code>/docker-entrypoint.sh</code> 在主程式啟動前會先跑一串 shell 腳本，啟動期間真的有事情可看。第二，它開的檔案不多，整理出來的清單一頁看得完；Python 應用光是 import 就可能開幾百個檔。第三，設定檔裡可以放一條 <code>proxy_pass</code>，讓 nginx 自己對外連線，連線那一欄才不會是空的。上游位址寫成 IP <code>1.1.1.1</code> 而不是網域，nginx 就不必先查 DNS，紀錄裡那筆連線的來源很單純。</p>
+<p>映像從 MCR（Microsoft Container Registry，微軟的公開映像倉庫）上的 Docker Hub mirror（<code>mcr.microsoft.com/mirror/docker/library/</code>）拉，課程用它避開 Docker Hub 的匿名拉取限制。這個 mirror 的 nginx 在本課驗證時只到 1.25，寫成較新的 tag 會拉不到，<code>describe</code> 看到的錯誤長這樣：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span>describe<span class="w"> </span>pod<span class="w"> </span>baseline-nginx<span class="w"> </span><span class="p">|</span><span class="w"> </span>tail<span class="w"> </span>-3
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">Failed to pull image &quot;mcr.microsoft.com/mirror/docker/library/nginx:1.27&quot;:</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="go">  failed to resolve image: … not found</span>
+</span></code></pre></div>
+<p>訊息跟 tag 打錯字一模一樣。怎麼查 mirror 實際有哪些 tag，見<a href="#mine-1">疑難排解：MCR mirror 拉不到較新的 nginx</a>。完整的定義如下，用的是 1.25：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span><span class="m">02</span>-nginx-baseline.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="s"># nginx is picked over a synthetic sleep-pod because its startup is genuinely</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="s"># non-trivial: /docker-entrypoint.sh execs a chain of shell helpers before the</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="s"># master process ever reads nginx.conf. The proxy_pass location gives the pod a</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="s"># real upstream dependency, so a warm-up request produces an outbound TCP</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="s"># connection inside the startup window.</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="s">#</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="s"># QoS is deliberately Burstable (requests only, no limits) so the pod lands in</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="s"># kubepods-burstable.slice; a Guaranteed pod sits one level higher in the cgroup</span>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="s"># tree and the level numbers quoted below would not match.</span>
+</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="s">kind: ConfigMap</span>
+</span><span id="__span-4-13"><a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="s">metadata:</span>
+</span><span id="__span-4-14"><a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="s">  name: nginx-baseline-conf</span>
+</span><span id="__span-4-15"><a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="s">  namespace: ebpf-lab</span>
+</span><span id="__span-4-16"><a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a><span class="s">data:</span>
+</span><span id="__span-4-17"><a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a><span class="s">  default.conf: |</span>
+</span><span id="__span-4-18"><a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a><span class="s">    server {</span>
+</span><span id="__span-4-19"><a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a><span class="s">        listen 8080;</span>
+</span><span id="__span-4-20"><a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a><span class="s">        server_name _;</span>
+</span><span id="__span-4-21"><a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a>
+</span><span id="__span-4-22"><a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a><span class="s">        location / {</span>
+</span><span id="__span-4-23"><a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a><span class="s">            return 200 &quot;day2 baseline subject\n&quot;;</span>
+</span><span id="__span-4-24"><a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a><span class="s">        }</span>
+</span><span id="__span-4-25"><a id="__codelineno-4-25" name="__codelineno-4-25" href="#__codelineno-4-25"></a>
+</span><span id="__span-4-26"><a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a><span class="s">        # real upstream dependency, literal IP so no resolver is needed</span>
+</span><span id="__span-4-27"><a id="__codelineno-4-27" name="__codelineno-4-27" href="#__codelineno-4-27"></a><span class="s">        location /up {</span>
+</span><span id="__span-4-28"><a id="__codelineno-4-28" name="__codelineno-4-28" href="#__codelineno-4-28"></a><span class="s">            proxy_pass http://1.1.1.1/;</span>
+</span><span id="__span-4-29"><a id="__codelineno-4-29" name="__codelineno-4-29" href="#__codelineno-4-29"></a><span class="s">            proxy_connect_timeout 3s;</span>
+</span><span id="__span-4-30"><a id="__codelineno-4-30" name="__codelineno-4-30" href="#__codelineno-4-30"></a><span class="s">        }</span>
+</span><span id="__span-4-31"><a id="__codelineno-4-31" name="__codelineno-4-31" href="#__codelineno-4-31"></a><span class="s">    }</span>
+</span><span id="__span-4-32"><a id="__codelineno-4-32" name="__codelineno-4-32" href="#__codelineno-4-32"></a><span class="s">---</span>
+</span><span id="__span-4-33"><a id="__codelineno-4-33" name="__codelineno-4-33" href="#__codelineno-4-33"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-4-34"><a id="__codelineno-4-34" name="__codelineno-4-34" href="#__codelineno-4-34"></a><span class="s">kind: Pod</span>
+</span><span id="__span-4-35"><a id="__codelineno-4-35" name="__codelineno-4-35" href="#__codelineno-4-35"></a><span class="s">metadata:</span>
+</span><span id="__span-4-36"><a id="__codelineno-4-36" name="__codelineno-4-36" href="#__codelineno-4-36"></a><span class="s">  name: baseline-nginx</span>
+</span><span id="__span-4-37"><a id="__codelineno-4-37" name="__codelineno-4-37" href="#__codelineno-4-37"></a><span class="s">  namespace: ebpf-lab</span>
+</span><span id="__span-4-38"><a id="__codelineno-4-38" name="__codelineno-4-38" href="#__codelineno-4-38"></a><span class="s">  labels:</span>
+</span><span id="__span-4-39"><a id="__codelineno-4-39" name="__codelineno-4-39" href="#__codelineno-4-39"></a><span class="s">    app: baseline-nginx</span>
+</span><span id="__span-4-40"><a id="__codelineno-4-40" name="__codelineno-4-40" href="#__codelineno-4-40"></a><span class="s">spec:</span>
+</span><span id="__span-4-41"><a id="__codelineno-4-41" name="__codelineno-4-41" href="#__codelineno-4-41"></a><span class="s">  nodeSelector:</span>
+</span><span id="__span-4-42"><a id="__codelineno-4-42" name="__codelineno-4-42" href="#__codelineno-4-42"></a><span class="s">    pool: ebpf</span>
+</span><span id="__span-4-43"><a id="__codelineno-4-43" name="__codelineno-4-43" href="#__codelineno-4-43"></a><span class="s">  tolerations:</span>
+</span><span id="__span-4-44"><a id="__codelineno-4-44" name="__codelineno-4-44" href="#__codelineno-4-44"></a><span class="s">  - key: kubernetes.azure.com/scalesetpriority</span>
+</span><span id="__span-4-45"><a id="__codelineno-4-45" name="__codelineno-4-45" href="#__codelineno-4-45"></a><span class="s">    operator: Equal</span>
+</span><span id="__span-4-46"><a id="__codelineno-4-46" name="__codelineno-4-46" href="#__codelineno-4-46"></a><span class="s">    value: spot</span>
+</span><span id="__span-4-47"><a id="__codelineno-4-47" name="__codelineno-4-47" href="#__codelineno-4-47"></a><span class="s">    effect: NoSchedule</span>
+</span><span id="__span-4-48"><a id="__codelineno-4-48" name="__codelineno-4-48" href="#__codelineno-4-48"></a><span class="s">  containers:</span>
+</span><span id="__span-4-49"><a id="__codelineno-4-49" name="__codelineno-4-49" href="#__codelineno-4-49"></a><span class="s">  - name: nginx</span>
+</span><span id="__span-4-50"><a id="__codelineno-4-50" name="__codelineno-4-50" href="#__codelineno-4-50"></a><span class="s">    image: mcr.microsoft.com/mirror/docker/library/nginx:1.25</span>
+</span><span id="__span-4-51"><a id="__codelineno-4-51" name="__codelineno-4-51" href="#__codelineno-4-51"></a><span class="s">    ports:</span>
+</span><span id="__span-4-52"><a id="__codelineno-4-52" name="__codelineno-4-52" href="#__codelineno-4-52"></a><span class="s">    - containerPort: 8080</span>
+</span><span id="__span-4-53"><a id="__codelineno-4-53" name="__codelineno-4-53" href="#__codelineno-4-53"></a><span class="s">    resources:</span>
+</span><span id="__span-4-54"><a id="__codelineno-4-54" name="__codelineno-4-54" href="#__codelineno-4-54"></a><span class="s">      requests:</span>
+</span><span id="__span-4-55"><a id="__codelineno-4-55" name="__codelineno-4-55" href="#__codelineno-4-55"></a><span class="s">        cpu: 50m</span>
+</span><span id="__span-4-56"><a id="__codelineno-4-56" name="__codelineno-4-56" href="#__codelineno-4-56"></a><span class="s">        memory: 64Mi</span>
+</span><span id="__span-4-57"><a id="__codelineno-4-57" name="__codelineno-4-57" href="#__codelineno-4-57"></a><span class="s">    volumeMounts:</span>
+</span><span id="__span-4-58"><a id="__codelineno-4-58" name="__codelineno-4-58" href="#__codelineno-4-58"></a><span class="s">    - name: conf</span>
+</span><span id="__span-4-59"><a id="__codelineno-4-59" name="__codelineno-4-59" href="#__codelineno-4-59"></a><span class="s">      mountPath: /etc/nginx/conf.d</span>
+</span><span id="__span-4-60"><a id="__codelineno-4-60" name="__codelineno-4-60" href="#__codelineno-4-60"></a><span class="s">  volumes:</span>
+</span><span id="__span-4-61"><a id="__codelineno-4-61" name="__codelineno-4-61" href="#__codelineno-4-61"></a><span class="s">  - name: conf</span>
+</span><span id="__span-4-62"><a id="__codelineno-4-62" name="__codelineno-4-62" href="#__codelineno-4-62"></a><span class="s">    configMap:</span>
+</span><span id="__span-4-63"><a id="__codelineno-4-63" name="__codelineno-4-63" href="#__codelineno-4-63"></a><span class="s">      name: nginx-baseline-conf</span>
+</span><span id="__span-4-64"><a id="__codelineno-4-64" name="__codelineno-4-64" href="#__codelineno-4-64"></a><span class="s">EOF</span>
+</span></code></pre></div>
+<p>註解提到 QoS 等級會影響 cgroup 的層數，下一節就會看到這一層。用 <code>kubectl apply -f 02-nginx-baseline.yaml</code> 套用之後，看 pod 落在哪一台節點：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-o<span class="w"> </span>wide
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="go">NAME             READY   STATUS    NODE</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="go">baseline-nginx   1/1     Running   aks-ebpf-80832270-vmss000005</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="go">ebpf-lab-dt5b9   1/1     Running   aks-ebpf-80832270-vmss000004</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="go">ebpf-lab-v6dtk   1/1     Running   aks-ebpf-80832270-vmss000005    ← 與 nginx 同節點</span>
+</span></code></pre></div>
+<p>eBPF 程式看到的是它所在那台節點的核心，所以追蹤要在跟 <code>baseline-nginx</code> 同一台節點的 DaemonSet pod 裡做。對照 <code>NODE</code> 欄找出那一顆（上面是 <code>ebpf-lab-v6dtk</code>，你的環境名字會不同），接下來的 bpftrace 指令都用 <code>kubectl exec</code> 進到它裡面執行。</p>
+<h2 id="pod">一顆 pod 在節點上是幾層目錄<a class="headerlink" href="#pod" title="Permanent link">&para;</a></h2>
+<p>要把事件對回 pod，得先知道節點怎麼記「這個行程屬於哪顆 pod」。答案是 <strong>cgroup</strong>（control group）：Linux 用它把行程分組，替每一組計算並限制 CPU、記憶體等資源。pod 寫的 limits 和 CPU requests，最後就是寫成 cgroup 的設定才生效。</p>
+<p>本課的節點用 cgroup v2。v2 只有一棵樹，掛在 <code>/sys/fs/cgroup</code>：每個 cgroup 就是一個目錄，建一個子目錄就多一個子 cgroup，每個行程恰好屬於其中一個。kubelet 替每顆 pod 開一層目錄，容器執行期（這裡是 containerd）再在底下替每個容器各開一層。把 <code>baseline-nginx</code> 所在的那一串目錄畫出來，由上往下是從根走到 nginx 容器：</p>
+<p><img alt="節點上的 cgroup 目錄樹：/sys/fs/cgroup 底下的 kubepods.slice 放所有 pod，往下依序是 QoS 等級的 kubepods-burstable.slice、每顆 pod 一層的 pod slice、每個容器一層的 container scope；kubelet.service 這類節點服務在另一個分支 system.slice 底下" src="../../assets/diagrams/s2d2-cgroup-tree.svg" /></p>
+<p>照著圖由上往下看：</p>
+<ol>
+<li>第二層是 QoS 等級。Kubernetes 依 requests 與 limits 的寫法把 pod 分成 Guaranteed、Burstable、BestEffort 三級；<code>baseline-nginx</code> 只寫 requests，屬於 Burstable。Guaranteed 的 pod 少這一層，直接放在 <code>kubepods.slice</code> 底下。</li>
+<li>第三層一顆 pod 一個目錄，名字以 <code>.slice</code> 結尾，本章叫它 <strong>pod slice</strong>；第四層一個容器一個目錄，以 <code>.scope</code> 結尾，叫 <strong>container scope</strong>。slice、scope 是 systemd 的命名方式：這台節點的 kubelet 和 containerd 透過 systemd 建立 cgroup（設定上叫 systemd cgroup driver），目錄名字就照 systemd 的規則取。</li>
+<li>kubelet 這類節點服務在右邊的 <code>system.slice</code> 底下，不屬於任何 pod。</li>
+</ol>
+<p>pod slice 和 container scope 的壽命不同，後面的步驟都會用到這個差別：pod slice 在 pod 建立時由 kubelet 開好，pod 刪除時才消失；container scope 跟著容器，容器重啟一次就換一個新目錄。</p>
+<h2 id="2-pod">步驟 2：從一個核心事件走到 pod 名字<a class="headerlink" href="#2-pod" title="Permanent link">&para;</a></h2>
+<p>先看核心那端給了什麼。在追蹤 pod 裡掛一支 execve 探針，然後用 <code>kubectl exec</code> 在 <code>baseline-nginx</code> 裡叫 bash 執行一個節點上不會有第二份的檔名，例如 <code>/tmp/d2m-140816</code>。這個檔案不必存在：<code>sys_enter_execve</code> 在核心尋找檔案之前就觸發，找不到檔案的 exec 一樣會被記下來（步驟 6 會再看到這件事）。探針輸出裡找那個檔名：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="gp">$ </span>bpftrace<span class="w"> </span>-e<span class="w"> </span><span class="err">&#39;</span>tracepoint:syscalls:sys_enter_execve<span class="w"> </span><span class="o">{</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="go">    printf(&quot;EXEC cgroup=%d pid=%d comm=%s file=%s\n&quot;, cgroup, pid, comm, str(args.filename)); }&#39;</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="go">…</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="go">EXEC cgroup=10431 pid=16585 comm=bash file=/tmp/d2m-140816</span>
+</span></code></pre></div>
+<p><code>cgroup</code> 是 bpftrace 的內建變數，背後是核心的 <code>bpf_get_current_cgroup_id()</code>，回傳目前這個行程所在 cgroup 的編號。bpftrace 也提供 <code>pid</code>、<code>tid</code>、<code>uid</code> 等身分欄位，定義見<a href="https://github.com/bpftrace/bpftrace/blob/v0.20.2/docs/reference_guide.md#variables">官方手冊的變數說明</a>。本章選用 cgroup id 對應容器；上面的事件沒有直接帶出 pod 名字或 Kubernetes namespace，要從 10431 這個編號繼續查。</p>
+<p>這個數字可以直接從核心的資料結構讀出來。核心用 <code>task_struct</code> 這個結構描述每一個行程，bpftrace 的 <code>curtask</code> 就是指向目前行程那份 <code>task_struct</code> 的指標。沿著指標往下走：<code>cgroups-&gt;dfl_cgrp</code> 是這個行程在 cgroup v2 樹上所屬的 cgroup，<code>kn</code> 是這個 cgroup 在 kernfs 裡對應的那一筆項目（kernfs 是什麼，下一小節說明），<code>id</code> 是那筆項目的編號。讀出來的值和 <code>cgroup</code> 相同：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="gp">$ </span>bpftrace<span class="w"> </span>-e<span class="w"> </span><span class="err">&#39;</span>tracepoint:syscalls:sys_enter_execve<span class="w"> </span><span class="o">{</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="go">    printf(&quot;leaf_builtin=%d leaf_curtask=%d\n&quot;, cgroup, curtask-&gt;cgroups-&gt;dfl_cgrp-&gt;kn-&gt;id); exit(); }&#39;</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="go">leaf_builtin=3670 leaf_curtask=3670</span>
+</span></code></pre></div>
+<p><code>exit()</code> 讓探針抓到第一筆就結束，那一筆剛好是別的行程，所以數字不是 10431；要看的是同一行的兩個值相等。</p>
+<h3 id="cgroup-id-inode">cgroup id 就是目錄的 inode<a class="headerlink" href="#cgroup-id-inode" title="Permanent link">&para;</a></h3>
+<p><code>/sys/fs/cgroup</code> 不是磁碟上的檔案系統，而是核心用 kernfs 在記憶體裡提供的虛擬檔案系統。kernfs 直接拿每筆項目的 <code>id</code> 當作檔案系統上的 inode 號碼。所以核心給的 cgroup id，可以直接用 <code>find -inum</code> 找出是哪個目錄，再用 <code>stat</code> 讀回 inode 對照：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="gp">$ </span>find<span class="w"> </span>/sys/fs/cgroup<span class="w"> </span>-xdev<span class="w"> </span>-inum<span class="w"> </span><span class="m">10431</span><span class="w"> </span>-print<span class="w"> </span>-quit
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="go">/sys/fs/cgroup/kubepods.slice/kubepods-burstable.slice/</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="go">  kubepods-burstable-podda6a37ba_5d51_4c09_ab10_229b628ad4e1.slice/</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="go">  cri-containerd-ceab0423d28c4fed5cf0ea2a41ba5fe4e6fe95b0a88d4081fe0a09833ffd4964.scope</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="gp">$ </span>stat<span class="w"> </span>-c<span class="w"> </span>%i<span class="w"> </span>&lt;上面那條路徑&gt;
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="go">10431                                        ← 對得起來</span>
+</span></code></pre></div>
+<p>找到的正是 nginx 容器那一層，inode 也是 10431。每一層目錄都有自己的 inode，也就是自己的 cgroup id。把整條路徑攤開：</p>
+<table>
+<thead>
+<tr>
+<th>層</th>
+<th>cgroup 目錄</th>
+<th>inode（＝cgroup id）</th>
+<th>這一層代表什麼</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td><code>/sys/fs/cgroup</code></td>
+<td>1</td>
+<td>根</td>
+</tr>
+<tr>
+<td>1</td>
+<td><code>kubepods.slice</code></td>
+<td>6780</td>
+<td>所有 pod</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>kubepods-burstable.slice</code></td>
+<td>7068</td>
+<td>該 QoS 等級的 pod</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>kubepods-burstable-podda6a…e1.slice</code></td>
+<td><strong>9916</strong></td>
+<td>pod slice，一個 pod 一個</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>cri-containerd-ceab0423….scope</code></td>
+<td><strong>10431</strong></td>
+<td>container scope，一個容器一個</td>
+</tr>
+</tbody>
+</table>
+<p>9916 是 <code>baseline-nginx</code> 的 pod slice，步驟 4 的過濾條件就綁在它上面。</p>
+<h3 id="container-id-pod-uid">從目錄名字讀出 container id 與 pod uid<a class="headerlink" href="#container-id-pod-uid" title="Permanent link">&para;</a></h3>
+<p><code>find</code> 印出的路徑已經帶著兩個 Kubernetes 的識別碼，因為 systemd cgroup driver 把它們編進了目錄名字：</p>
+<ul>
+<li>container scope <code>cri-containerd-&lt;64 個十六進位字元&gt;.scope</code> 的中段是 <strong>container id</strong>，這裡是 <code>ceab0423d28c…4964</code>。</li>
+<li>pod slice <code>kubepods-&lt;qos&gt;-pod&lt;uid&gt;.slice</code> 的中段是 <strong>pod uid</strong>，只是破折號換成了底線；換回來就是 <code>da6a37ba-…-229b628ad4e1</code>（中段省略）。</li>
+</ul>
+<h3 id="crictl-pod">用 crictl 換成 pod 名字<a class="headerlink" href="#crictl-pod" title="Permanent link">&para;</a></h3>
+<p>最後一步把 container id 換成 pod 名字。<strong>crictl</strong> 是節點上直接查詢容器執行期的命令列工具，它透過 CRI（kubelet 跟容器執行期溝通的介面）連到節點上的 containerd，不經過 API server。追蹤 pod 開了 <code>hostPID</code>，用 <code>nsenter -t 1 -m</code> 借節點的檔案系統，就能執行節點上的 <code>crictl</code>，Day 1 也是這樣執行節點上的程式：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="gp">$ </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">1</span><span class="w"> </span>-m<span class="w"> </span>--<span class="w"> </span>crictl<span class="w"> </span>inspect<span class="w"> </span>ceab0423d28c…4964<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>io.kubernetes
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="go">&quot;io.kubernetes.container.name&quot;: &quot;nginx&quot;,</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="go">&quot;io.kubernetes.pod.name&quot;: &quot;baseline-nginx&quot;,</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="go">&quot;io.kubernetes.pod.namespace&quot;: &quot;ebpf-lab&quot;,</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="go">&quot;io.kubernetes.pod.uid&quot;: &quot;da6a37ba-…-229b628ad4e1&quot;</span>
+</span></code></pre></div>
+<p>pod 名字、namespace、容器名字都有了。拿 API server 那邊的資料交叉驗證，container id 對得上；這一步只是確認，查詢本身用不到它：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span>get<span class="w"> </span>pod<span class="w"> </span>baseline-nginx<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">    </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.containerStatuses[*].containerID}&#39;</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="go">containerd://ceab0423d28c4fed5cf0ea2a41ba5fe4e6fe95b0a88d4081fe0a09833ffd4964</span>
+</span></code></pre></div>
+<p>把剛才幾個指令畫成一條查詢鏈，由上往下是查詢的順序：</p>
+<p><img alt="從核心事件到 pod 名字的查詢鏈：核心事件經 bpftrace 的 cgroup 變數得到 cgroup id，用 find -inum 找到 cgroup 目錄路徑，從目錄名字讀出 container id 與 pod uid，再用 crictl inspect 查出 pod 名字、namespace 與容器名字；整條鏈都在節點上完成，API server 只用來交叉驗證" src="../../assets/diagrams/s2d2-id-to-pod.svg" /></p>
+<p>照著箭頭往下走，每一步的輸入都是上一步的輸出，用到的只有核心事件、節點上的 <code>/sys/fs/cgroup</code> 和 <code>crictl</code>。對一直跑在節點上的偵測工具來說，這代表 API server 連不上的時候，節點上的身分查詢照樣能做。</p>
+<h3 id="_2">換成節點上本來就有的事件<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h3>
+<p>上面的事件是我們自己製造的。把整條鏈包成腳本 <code>04-cgroup-to-pod.sh</code>，拿節點上本來就在發生的事件再驗一次。腳本在追蹤 pod 裡執行：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span><span class="m">04</span>-cgroup-to-pod.sh<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="s">#!/bin/bash</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="s"># Turn a kernel-side cgroup id into a Kubernetes pod name.</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="s"># Run INSIDE the privileged ebpf-lab pod (needs hostPID and the node&#39;s /sys).</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="s">set -u</span>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="s">CGID=&quot;${1:?usage: cgroup-to-pod.sh &lt;cgroup-id&gt;}&quot;</span>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>
+</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="s">echo &quot;== 1. cgroup id -&gt; cgroup path (kernfs id == cgroupfs inode number)&quot;</span>
+</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="s">CGPATH=$(find /sys/fs/cgroup -xdev -inum &quot;$CGID&quot; -print -quit 2&gt;/dev/null)</span>
+</span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="s">[ -n &quot;$CGPATH&quot; ] || { echo &quot;no cgroup with inode $CGID on this node&quot;; exit 1; }</span>
+</span><span id="__span-11-11"><a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="s">echo &quot;$CGPATH&quot;</span>
+</span><span id="__span-11-12"><a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>
+</span><span id="__span-11-13"><a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a><span class="s">echo &quot;== 2. cgroup path -&gt; container id&quot;</span>
+</span><span id="__span-11-14"><a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a><span class="s">LEAF=$(basename &quot;$CGPATH&quot;)</span>
+</span><span id="__span-11-15"><a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a><span class="s">case &quot;$LEAF&quot; in</span>
+</span><span id="__span-11-16"><a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a><span class="s">  cri-containerd-*.scope) CID=${LEAF#cri-containerd-}; CID=${CID%.scope} ;;</span>
+</span><span id="__span-11-17"><a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a><span class="s">  docker-*.scope)         CID=${LEAF#docker-};         CID=${CID%.scope} ;;</span>
+</span><span id="__span-11-18"><a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a><span class="s">  *) CID=&quot;&quot; ;;</span>
+</span><span id="__span-11-19"><a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a><span class="s">esac</span>
+</span><span id="__span-11-20"><a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a><span class="s">echo &quot;leaf=$LEAF&quot;</span>
+</span><span id="__span-11-21"><a id="__codelineno-11-21" name="__codelineno-11-21" href="#__codelineno-11-21"></a><span class="s">echo &quot;container id=${CID:-&lt;none: this cgroup is not a container scope&gt;}&quot;</span>
+</span><span id="__span-11-22"><a id="__codelineno-11-22" name="__codelineno-11-22" href="#__codelineno-11-22"></a>
+</span><span id="__span-11-23"><a id="__codelineno-11-23" name="__codelineno-11-23" href="#__codelineno-11-23"></a><span class="s">echo &quot;== 3. cgroup path -&gt; pod uid (the systemd cgroup driver encodes it in the slice name)&quot;</span>
+</span><span id="__span-11-24"><a id="__codelineno-11-24" name="__codelineno-11-24" href="#__codelineno-11-24"></a><span class="s">POD_SLICE=$(dirname &quot;$CGPATH&quot;)</span>
+</span><span id="__span-11-25"><a id="__codelineno-11-25" name="__codelineno-11-25" href="#__codelineno-11-25"></a><span class="s">SLICE=$(basename &quot;$POD_SLICE&quot;)</span>
+</span><span id="__span-11-26"><a id="__codelineno-11-26" name="__codelineno-11-26" href="#__codelineno-11-26"></a><span class="s">UID_RAW=$(echo &quot;$SLICE&quot; | sed -n &#39;s/^kubepods-\(besteffort-\|burstable-\)\?pod\(.*\)\.slice$/\2/p&#39;)</span>
+</span><span id="__span-11-27"><a id="__codelineno-11-27" name="__codelineno-11-27" href="#__codelineno-11-27"></a><span class="s">POD_UID=$(echo &quot;$UID_RAW&quot; | tr &#39;_&#39; &#39;-&#39;)</span>
+</span><span id="__span-11-28"><a id="__codelineno-11-28" name="__codelineno-11-28" href="#__codelineno-11-28"></a><span class="s">echo &quot;pod slice=$SLICE&quot;</span>
+</span><span id="__span-11-29"><a id="__codelineno-11-29" name="__codelineno-11-29" href="#__codelineno-11-29"></a><span class="s">echo &quot;pod uid=${POD_UID:-&lt;none&gt;}&quot;</span>
+</span><span id="__span-11-30"><a id="__codelineno-11-30" name="__codelineno-11-30" href="#__codelineno-11-30"></a><span class="s">echo &quot;pod slice cgroup id=$(stat -c %i &quot;$POD_SLICE&quot;)&quot;</span>
+</span><span id="__span-11-31"><a id="__codelineno-11-31" name="__codelineno-11-31" href="#__codelineno-11-31"></a>
+</span><span id="__span-11-32"><a id="__codelineno-11-32" name="__codelineno-11-32" href="#__codelineno-11-32"></a><span class="s">echo &quot;== 4. container id -&gt; pod name/namespace, no API server (crictl on the node)&quot;</span>
+</span><span id="__span-11-33"><a id="__codelineno-11-33" name="__codelineno-11-33" href="#__codelineno-11-33"></a><span class="s">if [ -n &quot;$CID&quot; ]; then</span>
+</span><span id="__span-11-34"><a id="__codelineno-11-34" name="__codelineno-11-34" href="#__codelineno-11-34"></a><span class="s">  nsenter -t 1 -m -- crictl inspect &quot;$CID&quot; 2&gt;/dev/null \</span>
+</span><span id="__span-11-35"><a id="__codelineno-11-35" name="__codelineno-11-35" href="#__codelineno-11-35"></a><span class="s">    | grep -E &#39;&quot;io.kubernetes.pod.(name|namespace|uid)&quot;|&quot;io.kubernetes.container.name&quot;&#39; \</span>
+</span><span id="__span-11-36"><a id="__codelineno-11-36" name="__codelineno-11-36" href="#__codelineno-11-36"></a><span class="s">    | sed &#39;s/^ *//&#39;</span>
+</span><span id="__span-11-37"><a id="__codelineno-11-37" name="__codelineno-11-37" href="#__codelineno-11-37"></a><span class="s">fi</span>
+</span><span id="__span-11-38"><a id="__codelineno-11-38" name="__codelineno-11-38" href="#__codelineno-11-38"></a><span class="s">EOF</span>
+</span><span id="__span-11-39"><a id="__codelineno-11-39" name="__codelineno-11-39" href="#__codelineno-11-39"></a>chmod<span class="w"> </span>+x<span class="w"> </span><span class="m">04</span>-cgroup-to-pod.sh
+</span></code></pre></div>
+<p>先看 6 秒內的 execve 落在哪些 cgroup：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="gp">$ </span>bpftrace<span class="w"> </span>-e<span class="w"> </span><span class="err">&#39;</span>tracepoint:syscalls:sys_enter_execve<span class="w"> </span><span class="o">{</span><span class="w"> </span>@<span class="o">[</span>cgroup,<span class="w"> </span>comm<span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span>count<span class="o">()</span><span class="p">;</span><span class="w"> </span><span class="o">}</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="go">               interval:s:6 { exit(); }&#39;</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="go">@[3670, aznfswatchdogv4]: 8</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="go">@[6514, kubelet]: 2</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="go">@[9856, node-problem-de]: 14</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="go">…</span>
+</span></code></pre></div>
+<p>把三個 id 丟進腳本，結果都不是 pod：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="go">cgroup 9856 → /sys/fs/cgroup/system.slice/node-problem-detector.service</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="go">cgroup 6514 → /sys/fs/cgroup/system.slice/kubelet.service</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="go">cgroup 3670 → /sys/fs/cgroup/system.slice/aznfswatchdogv4.service</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="gp gp-VirtualEnv">(leaf 不是 cri-containerd-*.scope → 腳本回報「這個 cgroup 不是容器」)</span>
+</span></code></pre></div>
+<p>一台閒置節點上的 execve 大多來自節點常駐服務。它們在 <code>system.slice</code> 底下，目錄名字就是 systemd unit 的名字。同一條鏈也能回答「這不是 pod 做的」，這跟查出是哪顆 pod 一樣重要，否則節點自己的活動會被算到某顆 pod 頭上。</p>
+<p>再從 cgroup 樹上隨機挑一個容器：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="gp">$ </span>find<span class="w"> </span>/sys/fs/cgroup/kubepods.slice<span class="w"> </span>-name<span class="w"> </span><span class="s1">&#39;cri-containerd-*.scope&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>shuf<span class="w"> </span>-n<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>xargs<span class="w"> </span>stat<span class="w"> </span>-c<span class="w"> </span>%i
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="go">8465</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="gp">$ </span>./04-cgroup-to-pod.sh<span class="w"> </span><span class="m">8465</span>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="go">container id = e76bf071ce8d…a796</span>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="go">pod uid      = 21902a52-…-38647038fde4</span>
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="go">&quot;io.kubernetes.pod.name&quot;: &quot;csi-azuredisk-node-l8b5k&quot;</span>
+</span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="go">&quot;io.kubernetes.pod.namespace&quot;: &quot;kube-system&quot;</span>
+</span><span id="__span-14-8"><a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="go">&quot;io.kubernetes.container.name&quot;: &quot;liveness-probe&quot;</span>
+</span><span id="__span-14-9"><a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>
+</span><span id="__span-14-10"><a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>pod<span class="w"> </span>-A<span class="w"> </span>…<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>21902a52-
+</span><span id="__span-14-11"><a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a><span class="go">kube-system csi-azuredisk-node-l8b5k 21902a52-…-38647038fde4          ← 對上</span>
+</span><span id="__span-14-12"><a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>kube-system<span class="w"> </span>get<span class="w"> </span>pod<span class="w"> </span>csi-azuredisk-node-l8b5k<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-14-13"><a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a><span class="w">    </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.containerStatuses[*].name}&#39;</span>
+</span><span id="__span-14-14"><a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a><span class="go">azuredisk liveness-probe node-driver-registrar                        ← 三個容器,命中第二個</span>
+</span></code></pre></div>
+<p>一顆完全沒碰過的 kube-system pod，連是它三個容器裡的哪一個都查得出來。</p>
+<h2 id="3-pid">步驟 3：為什麼不用 pid 查身分<a class="headerlink" href="#3-pid" title="Permanent link">&para;</a></h2>
+<p>核心事件也帶著 <code>pid</code>，而 <code>/proc/&lt;pid&gt;/</code> 底下有這個行程的各種資訊，看起來也能用來查身分。這一步把這條路走一遍，看它卡在哪裡。</p>
+<p>先要知道容器裡的行程編號跟節點上的不一樣。Linux 用 <strong>namespace</strong> 讓一組行程看到自己的一份系統資源：PID namespace 有自己的一套行程編號，mount namespace 有自己的檔案系統，UTS namespace 有自己的 hostname，network namespace 有自己的網路。在 Kubernetes 裡，PID 和 mount namespace 是每個容器各一份；network、UTS（hostname）和 IPC（行程間通訊，Inter-Process Communication）則由同一顆 pod 裡的容器共用。追蹤 pod 開了 <code>hostPID: true</code>，所以它跟節點共用同一個 PID namespace，nginx 則有自己的。nginx 主行程在節點上的 pid，可以在追蹤 pod 裡用 <code>nsenter -t 1 -m -p -- pgrep -a nginx</code> 查，選 <code>nginx: master process</code> 那一行，這裡是 13581：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="go">host pid 1        : pid:[4026531836]</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="go">this lab shell    : pid:[4026531836]          ← 追蹤器與節點同一個 pidns</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="go">nginx master 13581: pid:[4026532393]          ← nginx 自己一個</span>
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="gp">$ </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s1">&#39;^NSpid|^NStgid&#39;</span><span class="w"> </span>/proc/13581/status
+</span><span id="__span-15-6"><a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="go">NStgid: 13581  1</span>
+</span><span id="__span-15-7"><a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="go">NSpid:  13581  1                              ← 節點看到 13581,容器裡自己是 1</span>
+</span></code></pre></div>
+<p>前三行是用 <code>readlink /proc/&lt;pid&gt;/ns/pid</code> 讀出的 PID namespace 編號：追蹤 pod 和節點的 1 號行程相同，nginx 不同。<code>NSpid</code> 列出同一個行程在每一層 PID namespace 裡的編號，節點上看到的 13581，在容器裡是 1 號。</p>
+<p><code>nsenter</code> 可以讓一個指令加入另一個行程的 namespace。<code>-t 13581</code> 指定目標行程，<code>-m -u -p</code> 分別是 mount、UTS、PID namespace：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="gp">$ </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">13581</span><span class="w"> </span>-m<span class="w"> </span>-u<span class="w"> </span>-p<span class="w"> </span>--<span class="w"> </span>sh<span class="w"> </span>-c<span class="w"> </span><span class="s1">&#39;hostname; ls /etc/nginx/conf.d&#39;</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="go">baseline-nginx</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="go">default.conf</span>
+</span></code></pre></div>
+<p>hostname 是 pod 名字（UTS namespace 由整顆 pod 共用，所以 hostname 就是 pod 名字），也看得到 ConfigMap 掛進去的設定檔，看起來確實「在容器裡」了。但一個行程「屬於哪個 cgroup」不是 namespace 決定的。比對追蹤 pod 自己和 <code>nsenter</code> 之後的 <code>/proc/self/cgroup</code>（行程所屬 cgroup 的路徑）：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="gp">$ </span>cat<span class="w"> </span>/proc/self/cgroup<span class="w">                       </span><span class="o">(</span>追蹤器<span class="w"> </span>pod<span class="w"> </span>自己<span class="o">)</span>
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="go">0::/kubepods.slice/…/kubepods-burstable-pod22e306e7_…_975bb8cee3a2.slice/cri-containerd-14acd5ee….scope</span>
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>
+</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="gp">$ </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">13581</span><span class="w"> </span>-m<span class="w"> </span>-u<span class="w"> </span>-p<span class="w"> </span>--<span class="w"> </span>cat<span class="w"> </span>/proc/self/cgroup
+</span><span id="__span-17-5"><a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="go">0::/kubepods.slice/…/kubepods-burstable-pod22e306e7_…_975bb8cee3a2.slice/cri-containerd-14acd5ee….scope</span>
+</span><span id="__span-17-6"><a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="go">                                              ↑ 還是追蹤器自己的,不是 nginx 的</span>
+</span><span id="__span-17-7"><a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a>
+</span><span id="__span-17-8"><a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="gp">$ </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">13581</span><span class="w"> </span>-m<span class="w"> </span>-u<span class="w"> </span>-p<span class="w"> </span>-C<span class="w"> </span>--<span class="w"> </span>cat<span class="w"> </span>/proc/self/cgroup
+</span><span id="__span-17-9"><a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="go">0::/../../kubepods-burstable-pod22e306e7_…slice/cri-containerd-14acd5ee….scope</span>
+</span><span id="__span-17-10"><a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a><span class="go">                                              ↑ 加 -C 只換視角,成員身分沒動</span>
+</span></code></pre></div>
+<p><code>nsenter</code> 之後印出的仍是追蹤 pod 自己的路徑。要分清楚兩件事：cgroup 是行程實際所屬的那一組；cgroup namespace 只決定行程看 cgroup 路徑時以哪一層當根。所以加上 <code>-C</code>（進入 nginx 的 cgroup namespace）只改了路徑的顯示方式，變成相對於 nginx 那層的 <code>/../../…</code>，行程還是待在原來的 cgroup。<code>nsenter</code> 沒有加入其他 cgroup 的選項，要真的換，得把 pid 寫進目標目錄的 <code>cgroup.procs</code>。步驟 7 會看到這件事對追蹤的影響。</p>
+<p>pid 這條路還有一個更直接的問題：時間差。用 pid 查身分要在使用者空間讀 <code>/proc/&lt;pid&gt;/cgroup</code>，可是很多行程活得比這次讀取還短。在 pod 裡跑 5 次 <code>/usr/bin/true</code>，bpftrace 收到每一筆事件後，立刻回頭檢查 <code>/proc/&lt;pid&gt;</code> 還在不在。本課沒有附這個實驗的腳本，它只用來說明時間差，跳過不影響後面的步驟：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="gp gp-VirtualEnv">(pod 內跑 5 次 /usr/bin/true,bpftrace 全部抓到;此處節錄頭尾)</span>
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="go">37651 bash /usr/bin/true</span>
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="go">…</span>
+</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="go">37655 bash /usr/bin/true</span>
+</span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>
+</span><span id="__span-18-6"><a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="gp gp-VirtualEnv">(收到事件之後立刻回頭查 /proc)</span>
+</span><span id="__span-18-7"><a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="go">pid 37651: /proc/37651 GONE</span>
+</span><span id="__span-18-8"><a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="go">…</span>
+</span><span id="__span-18-9"><a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a><span class="go">pid 37655: /proc/37655 GONE            ← 5/5 全部來不及</span>
+</span></code></pre></div>
+<p>5 次全部來不及，行程已經結束。兩條路擺在一起比：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>cgroup id</th>
+<th>pid → <code>/proc</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>取得位置</td>
+<td>核心裡（<code>bpf_get_current_cgroup_id()</code>）</td>
+<td>使用者空間</td>
+</tr>
+<tr>
+<td>能不能在核心裡過濾</td>
+<td>能，不符合的事件一個位元組都不送</td>
+<td>不能，一定要先撈出來</td>
+</tr>
+<tr>
+<td>短命行程</td>
+<td>不受影響</td>
+<td>本課 5/5 查無此 pid</td>
+</tr>
+<tr>
+<td>識別碼會不會重複使用</td>
+<td>不會</td>
+<td>會</td>
+</tr>
+<tr>
+<td>看得見 <code>nsenter</code> 進來的動作</td>
+<td>看不見</td>
+<td>看得見</td>
+</tr>
+<tr>
+<td>解析成本</td>
+<td>一次 <code>find -inum</code>，之後可快取</td>
+<td>每個事件一次 <code>open()</code> ＋ <code>read()</code></td>
+</tr>
+</tbody>
+</table>
+<p>前四列讓每台節點跑一份的追蹤器（例如本課的 DaemonSet）只能拿 cgroup id 當主要的身分，pid 只當輔助欄位。第五列是選 cgroup 的代價，要靠節點層的存取控制補，追蹤器本身補不了。</p>
+<h2 id="4-pod">步驟 4：只追蹤一顆 pod<a class="headerlink" href="#4-pod" title="Permanent link">&para;</a></h2>
+<h3 id="_3">過濾條件要綁在哪一層<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h3>
+<p>每個事件都帶著 cgroup id，bpftrace 的 filter（Day 1 介紹過，寫在探針與動作區塊之間、在核心裡求值的判斷式）就能只留一顆 pod 的事件。最直覺的寫法是 <code>/cgroup == &lt;container scope id&gt;/</code>，容器正在跑的時候，這樣寫沒有問題。</p>
+<p>問題出在容器重啟。讓 nginx 主行程（容器裡的 1 號行程）結束，kubelet 會在同一顆 pod 裡重建容器：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>ebpf-lab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>baseline-nginx<span class="w"> </span>--<span class="w"> </span><span class="nb">kill</span><span class="w"> </span>-TERM<span class="w"> </span><span class="m">1</span>
+</span></code></pre></div>
+<p>重啟前後各用步驟 2 的方法查一次：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="gp gp-VirtualEnv">(第一次)</span>  <span class="go">container id ceab0423…4964   leaf cgroup id 10431</span>
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="gp gp-VirtualEnv">(重啟後)</span>  <span class="go">container id 2572577c…2ed3   leaf cgroup id 11149</span>
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="go">          pod slice cgroup id           9916  ← 兩次都一樣</span>
+</span></code></pre></div>
+<p>container id 和 container scope 的 cgroup id 都換了，pod slice 的 9916 沒變。把這件事放到時間軸上：</p>
+<p><img alt="時間軸上的容器重啟：pod slice 的 cgroup id 9916 從頭到尾不變；container scope 在重啟前是 10431，重啟後換成 11149。綁在 10431 的過濾器重啟後沒有輸出也沒有錯誤；綁在 pod slice 9916 的過濾器重啟前後都收得到事件，包括新容器的啟動過程" src="../../assets/diagrams/s2d2-restart-filter.svg" /></p>
+<p>圖上有兩件事要注意：</p>
+<ol>
+<li>綁在 10431 的過濾器，容器重啟後就再也收不到事件，而且不會回報錯誤。</li>
+<li>想看容器啟動時做了什麼，綁在容器那一層本來就來不及：那個 cgroup 要等容器建立才存在，等你查到號碼、掛好探針，啟動早就跑完了。</li>
+</ol>
+<p>綁在 pod slice 上就沒有這兩個問題，可以先掛好探針，再讓容器重啟。在 filter 裡拿到 pod slice 的 id，只要從容器那一層再往上走一步，取 <code>parent</code>：</p>
+<div class="language-awk highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="nx">curtask</span><span class="o">-&gt;</span><span class="nx">cgroups</span><span class="o">-&gt;</span><span class="nx">dfl_cgrp</span><span class="o">-&gt;</span><span class="nx">kn</span><span class="o">-&gt;</span><span class="nx">parent</span><span class="o">-&gt;</span><span class="nx">id</span>     <span class="err">←</span> <span class="err">這個</span> <span class="nx">task</span> <span class="err">所屬</span> <span class="nx">pod</span> <span class="err">的</span> <span class="nx">slice</span> <span class="nx">id</span>
+</span></code></pre></div>
+<p>這個寫法剛好只往上一層。如果容器裡自己再開 cgroup，例如容器裡跑 systemd，或在容器裡再跑容器，行程會落在 pod slice 底下第二層以後，這個過濾條件就漏掉它們。</p>
+<h3 id="_4">本章的追蹤腳本<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
+<p><code>05-podtrace.bt</code> 追三類事件：執行程式（EXEC）、開檔（OPEN）、對外連線（CONN），每一類都在核心裡用 pod slice id 過濾，<code>$1</code> 是從命令列傳進來的 id：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span><span class="m">05</span>-podtrace.bt<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="s">#!/usr/bin/env bpftrace</span>
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="s">/*</span>
+</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="s"> * podtrace.bt - everything one pod does, and nothing else.</span>
+</span><span id="__span-22-5"><a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="s"> *</span>
+</span><span id="__span-22-6"><a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="s"> *   bpftrace podtrace.bt &lt;pod-slice-cgroup-id&gt;</span>
+</span><span id="__span-22-7"><a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="s"> *</span>
+</span><span id="__span-22-8"><a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="s"> * The filter is written out four times instead of hiding behind a #define on</span>
+</span><span id="__span-22-9"><a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a><span class="s"> * purpose: one #define anywhere in this file makes bpftrace 0.20.2 lose</span>
+</span><span id="__span-22-10"><a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a><span class="s"> * `struct task_struct` and refuse to compile.</span>
+</span><span id="__span-22-11"><a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a><span class="s"> *</span>
+</span><span id="__span-22-12"><a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a><span class="s"> * Known limits: exactly one level up, so a workload running its own cgroup</span>
+</span><span id="__span-22-13"><a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a><span class="s"> * manager sits too deep to match; and this is cgroup membership, not namespace</span>
+</span><span id="__span-22-14"><a id="__codelineno-22-14" name="__codelineno-22-14" href="#__codelineno-22-14"></a><span class="s"> * membership, so work done through `nsenter -t &lt;pid&gt;` from the node stays in</span>
+</span><span id="__span-22-15"><a id="__codelineno-22-15" name="__codelineno-22-15" href="#__codelineno-22-15"></a><span class="s"> * the caller&#39;s cgroup and is invisible here.</span>
+</span><span id="__span-22-16"><a id="__codelineno-22-16" name="__codelineno-22-16" href="#__codelineno-22-16"></a><span class="s"> */</span>
+</span><span id="__span-22-17"><a id="__codelineno-22-17" name="__codelineno-22-17" href="#__codelineno-22-17"></a>
+</span><span id="__span-22-18"><a id="__codelineno-22-18" name="__codelineno-22-18" href="#__codelineno-22-18"></a><span class="s">BEGIN</span>
+</span><span id="__span-22-19"><a id="__codelineno-22-19" name="__codelineno-22-19" href="#__codelineno-22-19"></a><span class="s">{</span>
+</span><span id="__span-22-20"><a id="__codelineno-22-20" name="__codelineno-22-20" href="#__codelineno-22-20"></a><span class="s">    printf(&quot;# podtrace: pod slice cgroup id = %d\n&quot;, $1);</span>
+</span><span id="__span-22-21"><a id="__codelineno-22-21" name="__codelineno-22-21" href="#__codelineno-22-21"></a><span class="s">    printf(&quot;# CLASS TIME PID COMM DETAIL\n&quot;);</span>
+</span><span id="__span-22-22"><a id="__codelineno-22-22" name="__codelineno-22-22" href="#__codelineno-22-22"></a><span class="s">}</span>
+</span><span id="__span-22-23"><a id="__codelineno-22-23" name="__codelineno-22-23" href="#__codelineno-22-23"></a>
+</span><span id="__span-22-24"><a id="__codelineno-22-24" name="__codelineno-22-24" href="#__codelineno-22-24"></a><span class="s">tracepoint:syscalls:sys_enter_execve</span>
+</span><span id="__span-22-25"><a id="__codelineno-22-25" name="__codelineno-22-25" href="#__codelineno-22-25"></a><span class="s">/curtask-&gt;cgroups-&gt;dfl_cgrp-&gt;kn-&gt;parent-&gt;id == $1/</span>
+</span><span id="__span-22-26"><a id="__codelineno-22-26" name="__codelineno-22-26" href="#__codelineno-22-26"></a><span class="s">{</span>
+</span><span id="__span-22-27"><a id="__codelineno-22-27" name="__codelineno-22-27" href="#__codelineno-22-27"></a><span class="s">    printf(&quot;EXEC %s %-7d %-16s %s\n&quot;, strftime(&quot;%H:%M:%S&quot;, nsecs), pid, comm,</span>
+</span><span id="__span-22-28"><a id="__codelineno-22-28" name="__codelineno-22-28" href="#__codelineno-22-28"></a><span class="s">        str(args.filename));</span>
+</span><span id="__span-22-29"><a id="__codelineno-22-29" name="__codelineno-22-29" href="#__codelineno-22-29"></a><span class="s">}</span>
+</span><span id="__span-22-30"><a id="__codelineno-22-30" name="__codelineno-22-30" href="#__codelineno-22-30"></a>
+</span><span id="__span-22-31"><a id="__codelineno-22-31" name="__codelineno-22-31" href="#__codelineno-22-31"></a><span class="s">tracepoint:syscalls:sys_enter_openat</span>
+</span><span id="__span-22-32"><a id="__codelineno-22-32" name="__codelineno-22-32" href="#__codelineno-22-32"></a><span class="s">/curtask-&gt;cgroups-&gt;dfl_cgrp-&gt;kn-&gt;parent-&gt;id == $1/</span>
+</span><span id="__span-22-33"><a id="__codelineno-22-33" name="__codelineno-22-33" href="#__codelineno-22-33"></a><span class="s">{</span>
+</span><span id="__span-22-34"><a id="__codelineno-22-34" name="__codelineno-22-34" href="#__codelineno-22-34"></a><span class="s">    @fn[tid] = args.filename;</span>
+</span><span id="__span-22-35"><a id="__codelineno-22-35" name="__codelineno-22-35" href="#__codelineno-22-35"></a><span class="s">}</span>
+</span><span id="__span-22-36"><a id="__codelineno-22-36" name="__codelineno-22-36" href="#__codelineno-22-36"></a>
+</span><span id="__span-22-37"><a id="__codelineno-22-37" name="__codelineno-22-37" href="#__codelineno-22-37"></a><span class="s">tracepoint:syscalls:sys_exit_openat</span>
+</span><span id="__span-22-38"><a id="__codelineno-22-38" name="__codelineno-22-38" href="#__codelineno-22-38"></a><span class="s">/@fn[tid]/</span>
+</span><span id="__span-22-39"><a id="__codelineno-22-39" name="__codelineno-22-39" href="#__codelineno-22-39"></a><span class="s">{</span>
+</span><span id="__span-22-40"><a id="__codelineno-22-40" name="__codelineno-22-40" href="#__codelineno-22-40"></a><span class="s">    $ret = args.ret;</span>
+</span><span id="__span-22-41"><a id="__codelineno-22-41" name="__codelineno-22-41" href="#__codelineno-22-41"></a><span class="s">    printf(&quot;OPEN %s %-7d %-16s %-4d %s\n&quot;, strftime(&quot;%H:%M:%S&quot;, nsecs), pid,</span>
+</span><span id="__span-22-42"><a id="__codelineno-22-42" name="__codelineno-22-42" href="#__codelineno-22-42"></a><span class="s">        comm, $ret &gt;= 0 ? 0 : - $ret, str(@fn[tid]));</span>
+</span><span id="__span-22-43"><a id="__codelineno-22-43" name="__codelineno-22-43" href="#__codelineno-22-43"></a><span class="s">    delete(@fn[tid]);</span>
+</span><span id="__span-22-44"><a id="__codelineno-22-44" name="__codelineno-22-44" href="#__codelineno-22-44"></a><span class="s">}</span>
+</span><span id="__span-22-45"><a id="__codelineno-22-45" name="__codelineno-22-45" href="#__codelineno-22-45"></a>
+</span><span id="__span-22-46"><a id="__codelineno-22-46" name="__codelineno-22-46" href="#__codelineno-22-46"></a><span class="s">kfunc:vmlinux:tcp_connect</span>
+</span><span id="__span-22-47"><a id="__codelineno-22-47" name="__codelineno-22-47" href="#__codelineno-22-47"></a><span class="s">/curtask-&gt;cgroups-&gt;dfl_cgrp-&gt;kn-&gt;parent-&gt;id == $1/</span>
+</span><span id="__span-22-48"><a id="__codelineno-22-48" name="__codelineno-22-48" href="#__codelineno-22-48"></a><span class="s">{</span>
+</span><span id="__span-22-49"><a id="__codelineno-22-49" name="__codelineno-22-49" href="#__codelineno-22-49"></a><span class="s">    $sk = args.sk;</span>
+</span><span id="__span-22-50"><a id="__codelineno-22-50" name="__codelineno-22-50" href="#__codelineno-22-50"></a><span class="s">    $dport = bswap($sk-&gt;__sk_common.skc_dport);</span>
+</span><span id="__span-22-51"><a id="__codelineno-22-51" name="__codelineno-22-51" href="#__codelineno-22-51"></a><span class="s">    printf(&quot;CONN %s %-7d %-16s tcp %s:%d\n&quot;, strftime(&quot;%H:%M:%S&quot;, nsecs), pid,</span>
+</span><span id="__span-22-52"><a id="__codelineno-22-52" name="__codelineno-22-52" href="#__codelineno-22-52"></a><span class="s">        comm, ntop($sk-&gt;__sk_common.skc_daddr), $dport);</span>
+</span><span id="__span-22-53"><a id="__codelineno-22-53" name="__codelineno-22-53" href="#__codelineno-22-53"></a><span class="s">}</span>
+</span><span id="__span-22-54"><a id="__codelineno-22-54" name="__codelineno-22-54" href="#__codelineno-22-54"></a>
+</span><span id="__span-22-55"><a id="__codelineno-22-55" name="__codelineno-22-55" href="#__codelineno-22-55"></a><span class="s">kfunc:vmlinux:udp_sendmsg</span>
+</span><span id="__span-22-56"><a id="__codelineno-22-56" name="__codelineno-22-56" href="#__codelineno-22-56"></a><span class="s">/curtask-&gt;cgroups-&gt;dfl_cgrp-&gt;kn-&gt;parent-&gt;id == $1 &amp;&amp; args.sk-&gt;__sk_common.skc_daddr != 0/</span>
+</span><span id="__span-22-57"><a id="__codelineno-22-57" name="__codelineno-22-57" href="#__codelineno-22-57"></a><span class="s">{</span>
+</span><span id="__span-22-58"><a id="__codelineno-22-58" name="__codelineno-22-58" href="#__codelineno-22-58"></a><span class="s">    $sk = args.sk;</span>
+</span><span id="__span-22-59"><a id="__codelineno-22-59" name="__codelineno-22-59" href="#__codelineno-22-59"></a><span class="s">    $dport = bswap($sk-&gt;__sk_common.skc_dport);</span>
+</span><span id="__span-22-60"><a id="__codelineno-22-60" name="__codelineno-22-60" href="#__codelineno-22-60"></a><span class="s">    printf(&quot;CONN %s %-7d %-16s udp %s:%d\n&quot;, strftime(&quot;%H:%M:%S&quot;, nsecs), pid,</span>
+</span><span id="__span-22-61"><a id="__codelineno-22-61" name="__codelineno-22-61" href="#__codelineno-22-61"></a><span class="s">        comm, ntop($sk-&gt;__sk_common.skc_daddr), $dport);</span>
+</span><span id="__span-22-62"><a id="__codelineno-22-62" name="__codelineno-22-62" href="#__codelineno-22-62"></a><span class="s">}</span>
+</span><span id="__span-22-63"><a id="__codelineno-22-63" name="__codelineno-22-63" href="#__codelineno-22-63"></a>
+</span><span id="__span-22-64"><a id="__codelineno-22-64" name="__codelineno-22-64" href="#__codelineno-22-64"></a><span class="s">END</span>
+</span><span id="__span-22-65"><a id="__codelineno-22-65" name="__codelineno-22-65" href="#__codelineno-22-65"></a><span class="s">{</span>
+</span><span id="__span-22-66"><a id="__codelineno-22-66" name="__codelineno-22-66" href="#__codelineno-22-66"></a><span class="s">    clear(@fn);</span>
+</span><span id="__span-22-67"><a id="__codelineno-22-67" name="__codelineno-22-67" href="#__codelineno-22-67"></a><span class="s">}</span>
+</span><span id="__span-22-68"><a id="__codelineno-22-68" name="__codelineno-22-68" href="#__codelineno-22-68"></a><span class="s">EOF</span>
+</span></code></pre></div>
+<p><code>OPEN</code> 沿用 Day 1 拆解過的 enter／exit 配對：進入 <code>openat</code> 時把檔名存進 <code>@fn[tid]</code>，離開時取出來，連同錯誤碼一起印。連線掛了 <code>tcp_connect</code> 和 <code>udp_sendmsg</code> 兩支 <code>kfunc</code>（Day 0 介紹過，帶型別的核心函式探針）。UDP 是刻意加的：Day 1 量到 <code>tcpconnect.bt</code> 對 DNS 查詢是 0 筆，因為 DNS 走 UDP，只追 TCP 會漏掉 pod 查過哪些名字。</p>
+<p>腳本裡有三處寫法看起來繞路，各自避開一個常見的錯誤：</p>
+<ul>
+<li>同一個過濾條件寫了四次，沒有用 <code>#define</code> 收成一個名字。在 bpftrace 0.20.2，<code>.bt</code> 檔裡只要有 <code>#define</code>，用到 <code>curtask</code> 的地方就編不過，見<a href="#mine-4">疑難排解：加了 <code>#define</code> 之後認不得 <code>struct task_struct</code></a>。</li>
+<li>port 用 <code>bswap()</code> 轉換位元組順序，沒有用網路上常見的手寫位移。手寫位移指派回同一個變數時什麼都沒做，見<a href="#mine-5">疑難排解：port 印出 20480、13568 這類數字</a>。</li>
+<li>時間用 <code>strftime()</code> 放進同一個 <code>printf</code>，沒有像官方工具那樣先呼叫 <code>time()</code>。分成兩次輸出的話，多顆 CPU 同時命中探針時會交錯，見<a href="#mine-6">疑難排解：一行裡出現兩次時間</a>。</li>
+</ul>
+<h2 id="5">步驟 5：過濾省下多少<a class="headerlink" href="#5" title="Permanent link">&para;</a></h2>
+<p>要知道過濾的效果，得在同一段時間、同一台節點上，同時跑過濾和不過濾兩份。<code>06-noise-compare.sh</code> 用 sed 刪掉 <code>05-podtrace.bt</code> 裡的過濾條件，產生不過濾的版本，兩份腳本除了過濾條件之外完全相同，再同時掛上、同時停止。腳本讀的是追蹤 pod 裡的 <code>/tmp/podtrace.bt</code>，也就是複製進去的 <code>05-podtrace.bt</code>；兩個參數是 pod slice 的 id 和要記錄幾秒：</p>
+<details class="note">
+<summary>完整腳本：06-noise-compare.sh</summary>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span><span class="m">06</span>-noise-compare.sh<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="s">#!/bin/bash</span>
+</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="s"># noise-compare.sh - how much does the cgroup filter actually buy?</span>
+</span><span id="__span-23-4"><a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="s">#</span>
+</span><span id="__span-23-5"><a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="s"># Run INSIDE the privileged ebpf-lab pod, with /tmp/podtrace.bt already there.</span>
+</span><span id="__span-23-6"><a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="s">#   noise-compare.sh &lt;pod-slice-cgroup-id&gt; &lt;seconds&gt;</span>
+</span><span id="__span-23-7"><a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="s">#</span>
+</span><span id="__span-23-8"><a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a><span class="s"># Both tracers attach the same probes over the same window on the same node.</span>
+</span><span id="__span-23-9"><a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a><span class="s"># The unfiltered variant is generated from podtrace.bt by deleting the predicate</span>
+</span><span id="__span-23-10"><a id="__codelineno-23-10" name="__codelineno-23-10" href="#__codelineno-23-10"></a><span class="s"># lines, so &quot;same script minus the filter&quot; is literally true and nobody has to</span>
+</span><span id="__span-23-11"><a id="__codelineno-23-11" name="__codelineno-23-11" href="#__codelineno-23-11"></a><span class="s"># trust two hand-written files to be equivalent.</span>
+</span><span id="__span-23-12"><a id="__codelineno-23-12" name="__codelineno-23-12" href="#__codelineno-23-12"></a><span class="s">set -u</span>
+</span><span id="__span-23-13"><a id="__codelineno-23-13" name="__codelineno-23-13" href="#__codelineno-23-13"></a><span class="s">CGID=&quot;${1:?usage: noise-compare.sh &lt;pod-slice-cgroup-id&gt; &lt;seconds&gt;}&quot;</span>
+</span><span id="__span-23-14"><a id="__codelineno-23-14" name="__codelineno-23-14" href="#__codelineno-23-14"></a><span class="s">SECS=&quot;${2:-30}&quot;</span>
+</span><span id="__span-23-15"><a id="__codelineno-23-15" name="__codelineno-23-15" href="#__codelineno-23-15"></a>
+</span><span id="__span-23-16"><a id="__codelineno-23-16" name="__codelineno-23-16" href="#__codelineno-23-16"></a><span class="s">sed -e &#39;/^\/curtask-&gt;cgroups-&gt;dfl_cgrp-&gt;kn-&gt;parent-&gt;id == \$1\/$/d&#39; \</span>
+</span><span id="__span-23-17"><a id="__codelineno-23-17" name="__codelineno-23-17" href="#__codelineno-23-17"></a><span class="s">    -e &#39;s#^/curtask-&gt;cgroups-&gt;dfl_cgrp-&gt;kn-&gt;parent-&gt;id == \$1 &amp;&amp; \(.*\)/$#/\1/#&#39; \</span>
+</span><span id="__span-23-18"><a id="__codelineno-23-18" name="__codelineno-23-18" href="#__codelineno-23-18"></a><span class="s">    /tmp/podtrace.bt &gt; /tmp/alltrace.bt</span>
+</span><span id="__span-23-19"><a id="__codelineno-23-19" name="__codelineno-23-19" href="#__codelineno-23-19"></a><span class="s">echo &quot;predicates left in unfiltered variant: $(grep -c &quot;^/curtask&quot; /tmp/alltrace.bt)&quot;</span>
+</span><span id="__span-23-20"><a id="__codelineno-23-20" name="__codelineno-23-20" href="#__codelineno-23-20"></a>
+</span><span id="__span-23-21"><a id="__codelineno-23-21" name="__codelineno-23-21" href="#__codelineno-23-21"></a><span class="s">bpftrace /tmp/alltrace.bt &quot;$CGID&quot; &gt; /tmp/all.out 2&gt;/tmp/all.err &amp;</span>
+</span><span id="__span-23-22"><a id="__codelineno-23-22" name="__codelineno-23-22" href="#__codelineno-23-22"></a><span class="s">ALL=$!</span>
+</span><span id="__span-23-23"><a id="__codelineno-23-23" name="__codelineno-23-23" href="#__codelineno-23-23"></a><span class="s">bpftrace /tmp/podtrace.bt &quot;$CGID&quot; &gt; /tmp/one.out 2&gt;/tmp/one.err &amp;</span>
+</span><span id="__span-23-24"><a id="__codelineno-23-24" name="__codelineno-23-24" href="#__codelineno-23-24"></a><span class="s">ONE=$!</span>
+</span><span id="__span-23-25"><a id="__codelineno-23-25" name="__codelineno-23-25" href="#__codelineno-23-25"></a>
+</span><span id="__span-23-26"><a id="__codelineno-23-26" name="__codelineno-23-26" href="#__codelineno-23-26"></a><span class="s"># both need to be attached before the workload starts, or the window is unfair</span>
+</span><span id="__span-23-27"><a id="__codelineno-23-27" name="__codelineno-23-27" href="#__codelineno-23-27"></a><span class="s">sleep 8</span>
+</span><span id="__span-23-28"><a id="__codelineno-23-28" name="__codelineno-23-28" href="#__codelineno-23-28"></a><span class="s">echo &quot;ARMED $(date +%T)&quot;</span>
+</span><span id="__span-23-29"><a id="__codelineno-23-29" name="__codelineno-23-29" href="#__codelineno-23-29"></a><span class="s">sleep &quot;$SECS&quot;</span>
+</span><span id="__span-23-30"><a id="__codelineno-23-30" name="__codelineno-23-30" href="#__codelineno-23-30"></a><span class="s">kill -INT $ALL $ONE 2&gt;/dev/null</span>
+</span><span id="__span-23-31"><a id="__codelineno-23-31" name="__codelineno-23-31" href="#__codelineno-23-31"></a><span class="s">wait $ALL $ONE 2&gt;/dev/null</span>
+</span><span id="__span-23-32"><a id="__codelineno-23-32" name="__codelineno-23-32" href="#__codelineno-23-32"></a><span class="s">echo &quot;STOPPED $(date +%T)&quot;</span>
+</span><span id="__span-23-33"><a id="__codelineno-23-33" name="__codelineno-23-33" href="#__codelineno-23-33"></a>
+</span><span id="__span-23-34"><a id="__codelineno-23-34" name="__codelineno-23-34" href="#__codelineno-23-34"></a><span class="s">for f in all one; do</span>
+</span><span id="__span-23-35"><a id="__codelineno-23-35" name="__codelineno-23-35" href="#__codelineno-23-35"></a><span class="s">  o=/tmp/$f.out</span>
+</span><span id="__span-23-36"><a id="__codelineno-23-36" name="__codelineno-23-36" href="#__codelineno-23-36"></a><span class="s">  printf &#39;%-10s total=%-7s EXEC=%-6s OPEN=%-7s CONN=%-5s distinct-comm=%s\n&#39; \</span>
+</span><span id="__span-23-37"><a id="__codelineno-23-37" name="__codelineno-23-37" href="#__codelineno-23-37"></a><span class="s">    &quot;$f&quot; \</span>
+</span><span id="__span-23-38"><a id="__codelineno-23-38" name="__codelineno-23-38" href="#__codelineno-23-38"></a><span class="s">    &quot;$(grep -cE &#39;^(EXEC|OPEN|CONN)&#39; $o)&quot; \</span>
+</span><span id="__span-23-39"><a id="__codelineno-23-39" name="__codelineno-23-39" href="#__codelineno-23-39"></a><span class="s">    &quot;$(grep -c &#39;^EXEC&#39; $o)&quot; &quot;$(grep -c &#39;^OPEN&#39; $o)&quot; &quot;$(grep -c &#39;^CONN&#39; $o)&quot; \</span>
+</span><span id="__span-23-40"><a id="__codelineno-23-40" name="__codelineno-23-40" href="#__codelineno-23-40"></a><span class="s">    &quot;$(awk &#39;/^(EXEC|OPEN|CONN)/{print $4}&#39; $o | sort -u | wc -l)&quot;</span>
+</span><span id="__span-23-41"><a id="__codelineno-23-41" name="__codelineno-23-41" href="#__codelineno-23-41"></a><span class="s">done</span>
+</span><span id="__span-23-42"><a id="__codelineno-23-42" name="__codelineno-23-42" href="#__codelineno-23-42"></a><span class="s">EOF</span>
+</span></code></pre></div>
+</details>
+<p>腳本掛好探針後印出 <code>ARMED</code>，接著記錄指定的秒數。在這段時間裡，nginx pod 要跑一段固定的工作負載：本課是 20 輪讀設定檔、查 DNS、對外 TCP 連線，以及打自己的 <code>/up</code> 讓 nginx 去 proxy。這段工作負載本課沒有附腳本，換成你自己的幾個動作也可以，只是數字會不同。</p>
+<p>新建的腳本不一定有執行權限，請用 <code>bash 06-noise-compare.sh &lt;pod-slice-cgroup-id&gt; 30</code> 執行，將 <code>&lt;pod-slice-cgroup-id&gt;</code> 換成步驟 2 的 <code>04-cgroup-to-pod.sh</code> 輸出中 <code>pod slice cgroup id=</code> 後面的數字；該值是用 <code>stat -c %i "$POD_SLICE"</code> 取得的 inode，不要填 container scope 的 id。修正後的寫法本課沒有實跑。下方保留原始執行紀錄，9916 是當時的 pod slice id。</p>
+<p>輸出最後兩行，<code>all</code> 是不過濾，<code>one</code> 是只看 pod slice 9916：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="gp">$ </span>./06-noise-compare.sh<span class="w"> </span><span class="m">9916</span><span class="w"> </span><span class="m">30</span>
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="go">predicates left in unfiltered variant: 0</span>
+</span><span id="__span-24-3"><a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="go">ARMED 06:15:01</span>
+</span><span id="__span-24-4"><a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="go">STOPPED 06:15:32</span>
+</span><span id="__span-24-5"><a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="go">all   total=50334  EXEC=971  OPEN=48966  CONN=397  distinct-comm=99</span>
+</span><span id="__span-24-6"><a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a><span class="go">one   total=1036   EXEC=124  OPEN=652    CONN=260  distinct-comm=12</span>
+</span></code></pre></div>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>未過濾</th>
+<th>pod slice 過濾</th>
+<th>倍數</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>事件總數</td>
+<td>50,334</td>
+<td>1,036</td>
+<td>48.6×</td>
+</tr>
+<tr>
+<td>EXEC</td>
+<td>971</td>
+<td>124</td>
+<td>7.8×</td>
+</tr>
+<tr>
+<td>OPEN</td>
+<td>48,966</td>
+<td>652</td>
+<td>75.1×</td>
+</tr>
+<tr>
+<td>CONN</td>
+<td>397</td>
+<td>260</td>
+<td>1.5×</td>
+</tr>
+<tr>
+<td>不同 comm</td>
+<td>99</td>
+<td>12</td>
+<td>8.3×</td>
+</tr>
+<tr>
+<td>輸出位元組</td>
+<td>4,556,335</td>
+<td>62,385</td>
+<td>73.0×</td>
+</tr>
+</tbody>
+</table>
+<p>OPEN 差了 75 倍，節點上的開檔幾乎都是別人的。CONN 只差 1.5 倍，因為這段時間裡會對外連線的，主要就是這段工作負載本身。不過濾那份裡，次數最多的行程名稱是：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="go">14613 containerd-shim      5579 awk       4731 jq        3997 curl</span>
+</span><span id="__span-25-2"><a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="go"> 2493 containerd           2096 kubelet   1860 cat       1791 sed</span>
+</span><span id="__span-25-3"><a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="go"> 1516 check_scheduled       887 bash       807 check_spot_evic</span>
+</span></code></pre></div>
+<p>這些都不是 nginx pod 裡的程式：containerd-shim 和 containerd 是容器執行期，kubelet 是節點服務，<code>check_scheduled</code>、<code>check_spot_evic</code> 是 node-problem-detector（AKS 在每台節點上跑的服務，定期執行檢查腳本，回報節點的健康狀況）的檢查腳本，awk、jq、curl 也不在過濾後的清單裡。過濾後剩下的 12 個行程名稱，每一個都說得出來源：<code>bash</code>、<code>getent</code>、<code>cat</code>、<code>sleep</code>、<code>head</code>、<code>nginx</code>、<code>seq</code>、<code>date</code> 是工作負載本身，<code>runc:[…]</code>、<code>6</code>、<code>runc</code> 是 <code>kubectl exec</code> 進 pod 時容器執行期留下的。連線目標短到可以直接讀：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="go">200  udp 10.0.0.10:53        ← kube-dns</span>
+</span><span id="__span-26-2"><a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="go"> 40  tcp 1.1.1.1:80          ← 20 次自己連 ＋ 20 次 nginx proxy</span>
+</span><span id="__span-26-3"><a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="go"> 20  tcp 127.0.0.1:8080      ← 打自己</span>
+</span></code></pre></div>
+<p>Day 1 的結論是追蹤只能臨時開，因為 22 秒就印出 24,350 行。只看一顆 pod 時，同一段時間的輸出量降到原來的五十分之一左右。本課沒有測過長時間開著的情況，但至少輸出量不再是只能臨時開的理由。</p>
+<h2 id="6-nginx">步驟 6：替 nginx 做一份啟動行為基線<a class="headerlink" href="#6-nginx" title="Permanent link">&para;</a></h2>
+<p><strong>行為基線</strong>是一份清單，記下一個工作負載正常情況下會做什麼：執行哪些程式、開哪些檔案、連到哪些位址。有了它，要判斷一件事正不正常，不必先想好規則，只要看它在不在清單上。這一步記下 nginx 從容器啟動到服務第一個請求為止的行為。</p>
+<h3 id="_5">在容器建立之前就開始記錄<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h3>
+<p>要記下啟動，探針得在容器啟動之前就掛好，這正是步驟 4 把過濾綁在 pod slice 上的原因。做法如下：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a>1. 先讓 pod 跑起來(pod slice 誕生,id = 9916)
+</span><span id="__span-27-2"><a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a>2. 拿 pod slice id 架好 05-podtrace.bt        ← 容器還是舊的那個
+</span><span id="__span-27-3"><a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a>3. kubectl exec -- kill -TERM 1               ← nginx master 結束,容器跟著結束
+</span><span id="__span-27-4"><a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a>4. kubelet 在同一個 pod slice 裡重建容器       ← 全新的 container scope,全新的啟動
+</span><span id="__span-27-5"><a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a>5. 從另一顆 pod 打一次暖機請求(不走 kubectl exec,避免把 runc 的雜訊算進來)
+</span><span id="__span-27-6"><a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a>6. 收工
+</span></code></pre></div>
+<p><code>05-podtrace.bt</code> 的用法是 <code>bpftrace podtrace.bt &lt;pod-slice-cgroup-id&gt;</code>，最後一個參數填步驟 2 查到的 pod slice id。背景擷取與存檔的寫法可對照步驟 5 的 <code>06-noise-compare.sh</code>：它用 <code>bpftrace /tmp/podtrace.bt "$CGID" &gt; /tmp/one.out 2&gt;/tmp/one.err &amp;</code> 啟動追蹤，把事件寫入 <code>/tmp/one.out</code>、錯誤訊息寫入 <code>/tmp/one.err</code>，再用 <code>ONE=$!</code> 保存追蹤器的行程編號。腳本最後用 <code>kill -INT $ALL $ONE 2&gt;/dev/null</code> 停止兩份追蹤，並以 <code>wait $ALL $ONE 2&gt;/dev/null</code> 等待結束。這是步驟 5 已有的擷取方式；上述重啟與暖機流程的完整操作指令，以及擷取檔取回工作站的指令，驗證素材沒有保存。</p>
+<p>第 5 步的暖機請求，是從叢集裡另一顆 pod 對 <code>baseline-nginx</code> 的 8080 port 發一個 HTTP 請求到 <code>/up</code>。不在 <code>baseline-nginx</code> 裡用 <code>kubectl exec</code> 發，是因為那樣容器執行期進入 pod 的事件也會被記進去。發請求的那顆 pod 要有 HTTP 客戶端：DaemonSet 用的 ubuntu 映像預設沒有 <code>curl</code>，要自己裝，或另外準備一顆帶 <code>curl</code> 的 pod。記錄的結果：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-28-1"><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="go">14:18:10 armed</span>
+</span><span id="__span-28-2"><a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="go">14:18:11 TERM sent</span>
+</span><span id="__span-28-3"><a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="go">14:18:2x RESTARTS=2  containerID=containerd://012ac94da423…b667</span>
+</span><span id="__span-28-4"><a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a><span class="go">14:18:27 warm-up: HTTP/1.1 301 Moved Permanently        ← 1.1.1.1 回的,證明 proxy 真的連出去了</span>
+</span><span id="__span-28-5"><a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a><span class="go">         lines=204  (198 筆事件,0 行畸形)</span>
+</span></code></pre></div>
+<p>容器換了新的 container id，pod slice 沒變，紀錄一路沒斷。暖機請求拿到 <code>301</code>，是 1.1.1.1 回的，代表 nginx 的 proxy 真的連出去了；整份輸出沒有格式錯亂的行。</p>
+<p>原始紀錄還不是基線。204 行裡有 106 筆是 runc 和 containerd 建立容器時的動作，每一顆 pod 都一樣。<code>07-baseline-build.sh</code> 在工作站上處理擷取下來的檔案：從 entrypoint 開始執行的那一筆起算，並把屬於容器執行期的事件分出去丟掉，最後留下 87 筆，輸出成 <code>08-nginx-startup-baseline.md</code>。第一個參數是要讀取的擷取檔，接著依序是 pod 名字、映像、container id 和 pod slice id，後四項只用來填表頭：</p>
+<details class="note">
+<summary>完整腳本：07-baseline-build.sh</summary>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-29-1"><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span><span class="m">07</span>-baseline-build.sh<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-29-2"><a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="s">#!/bin/bash</span>
+</span><span id="__span-29-3"><a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="s"># baseline-build.sh - turn one podtrace capture into a readable behaviour baseline.</span>
+</span><span id="__span-29-4"><a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a><span class="s">#</span>
+</span><span id="__span-29-5"><a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a><span class="s">#   baseline-build.sh &lt;podtrace-output&gt; &lt;pod&gt; &lt;image&gt; &lt;container-id&gt; &lt;cgid&gt; [start-regex]</span>
+</span><span id="__span-29-6"><a id="__codelineno-29-6" name="__codelineno-29-6" href="#__codelineno-29-6"></a><span class="s">#</span>
+</span><span id="__span-29-7"><a id="__codelineno-29-7" name="__codelineno-29-7" href="#__codelineno-29-7"></a><span class="s"># Runs on the workstation against a captured file. Three tiers, because a raw</span>
+</span><span id="__span-29-8"><a id="__codelineno-29-8" name="__codelineno-29-8" href="#__codelineno-29-8"></a><span class="s"># capture is not a baseline:</span>
+</span><span id="__span-29-9"><a id="__codelineno-29-9" name="__codelineno-29-9" href="#__codelineno-29-9"></a><span class="s">#</span>
+</span><span id="__span-29-10"><a id="__codelineno-29-10" name="__codelineno-29-10" href="#__codelineno-29-10"></a><span class="s">#   1. runtime tier  - runc / containerd doing container setup. Identical for</span>
+</span><span id="__span-29-11"><a id="__codelineno-29-11" name="__codelineno-29-11" href="#__codelineno-29-11"></a><span class="s">#                      every pod on the cluster, so it is counted and dropped.</span>
+</span><span id="__span-29-12"><a id="__codelineno-29-12" name="__codelineno-29-12" href="#__codelineno-29-12"></a><span class="s">#   2. app tier      - what the workload itself did. This is the baseline.</span>
+</span><span id="__span-29-13"><a id="__codelineno-29-13" name="__codelineno-29-13" href="#__codelineno-29-13"></a><span class="s">#   3. summary       - distinct binaries executed, distinct files opened,</span>
+</span><span id="__span-29-14"><a id="__codelineno-29-14" name="__codelineno-29-14" href="#__codelineno-29-14"></a><span class="s">#                      distinct outbound peers.</span>
+</span><span id="__span-29-15"><a id="__codelineno-29-15" name="__codelineno-29-15" href="#__codelineno-29-15"></a><span class="s">#</span>
+</span><span id="__span-29-16"><a id="__codelineno-29-16" name="__codelineno-29-16" href="#__codelineno-29-16"></a><span class="s"># Anything a human is expected to read lives in tier 2 and 3.</span>
+</span><span id="__span-29-17"><a id="__codelineno-29-17" name="__codelineno-29-17" href="#__codelineno-29-17"></a><span class="s">set -u</span>
+</span><span id="__span-29-18"><a id="__codelineno-29-18" name="__codelineno-29-18" href="#__codelineno-29-18"></a><span class="s">CAP0=&quot;${1:?usage: baseline-build.sh &lt;capture&gt; &lt;pod&gt; &lt;image&gt; &lt;container-id&gt; &lt;cgid&gt; [start-regex]}&quot;</span>
+</span><span id="__span-29-19"><a id="__codelineno-29-19" name="__codelineno-29-19" href="#__codelineno-29-19"></a><span class="s">POD=&quot;${2:-?}&quot;; IMG=&quot;${3:-?}&quot;; CID=&quot;${4:-?}&quot;; CGID=&quot;${5:-?}&quot;</span>
+</span><span id="__span-29-20"><a id="__codelineno-29-20" name="__codelineno-29-20" href="#__codelineno-29-20"></a><span class="s"># The capture starts when the tracer attaches, the baseline starts when the</span>
+</span><span id="__span-29-21"><a id="__codelineno-29-21" name="__codelineno-29-21" href="#__codelineno-29-21"></a><span class="s"># container&#39;s entrypoint runs. Everything in between belongs to whatever</span>
+</span><span id="__span-29-22"><a id="__codelineno-29-22" name="__codelineno-29-22" href="#__codelineno-29-22"></a><span class="s"># triggered the restart, not to the workload.</span>
+</span><span id="__span-29-23"><a id="__codelineno-29-23" name="__codelineno-29-23" href="#__codelineno-29-23"></a><span class="s">START=&quot;${6:-EXEC .*docker-entrypoint\\.sh}&quot;</span>
+</span><span id="__span-29-24"><a id="__codelineno-29-24" name="__codelineno-29-24" href="#__codelineno-29-24"></a><span class="s">CAP=$(mktemp)</span>
+</span><span id="__span-29-25"><a id="__codelineno-29-25" name="__codelineno-29-25" href="#__codelineno-29-25"></a><span class="s">awk -v re=&quot;$START&quot; &#39;f || $0 ~ re {f=1; print}&#39; &quot;$CAP0&quot; &gt; &quot;$CAP&quot;</span>
+</span><span id="__span-29-26"><a id="__codelineno-29-26" name="__codelineno-29-26" href="#__codelineno-29-26"></a><span class="s">trap &#39;rm -f &quot;$CAP&quot;&#39; EXIT</span>
+</span><span id="__span-29-27"><a id="__codelineno-29-27" name="__codelineno-29-27" href="#__codelineno-29-27"></a>
+</span><span id="__span-29-28"><a id="__codelineno-29-28" name="__codelineno-29-28" href="#__codelineno-29-28"></a><span class="s"># Classifying an event as &quot;container runtime&quot; cannot be done on comm alone.</span>
+</span><span id="__span-29-29"><a id="__codelineno-29-29" name="__codelineno-29-29" href="#__codelineno-29-29"></a><span class="s"># execve keeps the OLD comm until the new image is loaded, so the shell that</span>
+</span><span id="__span-29-30"><a id="__codelineno-29-30" name="__codelineno-29-30" href="#__codelineno-29-30"></a><span class="s"># `kubectl exec` starts is reported with comm=runc:[2:INIT] -- the single event</span>
+</span><span id="__span-29-31"><a id="__codelineno-29-31" name="__codelineno-29-31" href="#__codelineno-29-31"></a><span class="s"># an intrusion baseline cares about most would be filtered away as plumbing.</span>
+</span><span id="__span-29-32"><a id="__codelineno-29-32" name="__codelineno-29-32" href="#__codelineno-29-32"></a><span class="s"># EXEC is therefore classified on the binary being executed, everything else on</span>
+</span><span id="__span-29-33"><a id="__codelineno-29-33" name="__codelineno-29-33" href="#__codelineno-29-33"></a><span class="s"># comm.</span>
+</span><span id="__span-29-34"><a id="__codelineno-29-34" name="__codelineno-29-34" href="#__codelineno-29-34"></a><span class="s">is_runtime=&#39;$1 == &quot;EXEC&quot; ? $5 ~ /^\/proc\/self\/fd\// : ($4 ~ /^runc/ || $4 == &quot;6&quot; || $4 ~ /^containerd/)&#39;</span>
+</span><span id="__span-29-35"><a id="__codelineno-29-35" name="__codelineno-29-35" href="#__codelineno-29-35"></a>
+</span><span id="__span-29-36"><a id="__codelineno-29-36" name="__codelineno-29-36" href="#__codelineno-29-36"></a><span class="s">tot=$(grep -cE &#39;^(EXEC|OPEN|CONN)&#39; &quot;$CAP&quot;)</span>
+</span><span id="__span-29-37"><a id="__codelineno-29-37" name="__codelineno-29-37" href="#__codelineno-29-37"></a><span class="s">rt=$(awk &quot;/^(EXEC|OPEN|CONN)/ &amp;&amp; ($is_runtime)&quot; &quot;$CAP&quot; | wc -l | tr -d &#39; &#39;)</span>
+</span><span id="__span-29-38"><a id="__codelineno-29-38" name="__codelineno-29-38" href="#__codelineno-29-38"></a><span class="s">app=$((tot - rt))</span>
+</span><span id="__span-29-39"><a id="__codelineno-29-39" name="__codelineno-29-39" href="#__codelineno-29-39"></a>
+</span><span id="__span-29-40"><a id="__codelineno-29-40" name="__codelineno-29-40" href="#__codelineno-29-40"></a><span class="s">echo &quot;# Behaviour baseline — \`$POD\`&quot;</span>
+</span><span id="__span-29-41"><a id="__codelineno-29-41" name="__codelineno-29-41" href="#__codelineno-29-41"></a><span class="s">echo</span>
+</span><span id="__span-29-42"><a id="__codelineno-29-42" name="__codelineno-29-42" href="#__codelineno-29-42"></a><span class="s">echo &quot;| field | value |&quot;</span>
+</span><span id="__span-29-43"><a id="__codelineno-29-43" name="__codelineno-29-43" href="#__codelineno-29-43"></a><span class="s">echo &quot;|---|---|&quot;</span>
+</span><span id="__span-29-44"><a id="__codelineno-29-44" name="__codelineno-29-44" href="#__codelineno-29-44"></a><span class="s">echo &quot;| image | \`$IMG\` |&quot;</span>
+</span><span id="__span-29-45"><a id="__codelineno-29-45" name="__codelineno-29-45" href="#__codelineno-29-45"></a><span class="s">echo &quot;| container id | \`${CID:0:16}…\` |&quot;</span>
+</span><span id="__span-29-46"><a id="__codelineno-29-46" name="__codelineno-29-46" href="#__codelineno-29-46"></a><span class="s">echo &quot;| pod slice cgroup id | \`$CGID\` |&quot;</span>
+</span><span id="__span-29-47"><a id="__codelineno-29-47" name="__codelineno-29-47" href="#__codelineno-29-47"></a><span class="s">echo &quot;| window | entrypoint exec → first request served |&quot;</span>
+</span><span id="__span-29-48"><a id="__codelineno-29-48" name="__codelineno-29-48" href="#__codelineno-29-48"></a><span class="s">echo &quot;| raw events | $tot |&quot;</span>
+</span><span id="__span-29-49"><a id="__codelineno-29-49" name="__codelineno-29-49" href="#__codelineno-29-49"></a><span class="s">echo &quot;| container-runtime events (dropped) | $rt |&quot;</span>
+</span><span id="__span-29-50"><a id="__codelineno-29-50" name="__codelineno-29-50" href="#__codelineno-29-50"></a><span class="s">echo &quot;| workload events (the baseline) | $app |&quot;</span>
+</span><span id="__span-29-51"><a id="__codelineno-29-51" name="__codelineno-29-51" href="#__codelineno-29-51"></a><span class="s">echo</span>
+</span><span id="__span-29-52"><a id="__codelineno-29-52" name="__codelineno-29-52" href="#__codelineno-29-52"></a><span class="s">echo &quot;## Executed binaries&quot;</span>
+</span><span id="__span-29-53"><a id="__codelineno-29-53" name="__codelineno-29-53" href="#__codelineno-29-53"></a><span class="s">echo</span>
+</span><span id="__span-29-54"><a id="__codelineno-29-54" name="__codelineno-29-54" href="#__codelineno-29-54"></a><span class="s">echo &quot;| # | binary | executed by |&quot;</span>
+</span><span id="__span-29-55"><a id="__codelineno-29-55" name="__codelineno-29-55" href="#__codelineno-29-55"></a><span class="s">echo &quot;|---|---|---|&quot;</span>
+</span><span id="__span-29-56"><a id="__codelineno-29-56" name="__codelineno-29-56" href="#__codelineno-29-56"></a><span class="s">awk &quot;/^EXEC/ &amp;&amp; !($is_runtime) {print \$5, \$4}&quot; &quot;$CAP&quot; | awk &#39;{c[$1&quot; &quot;$2]++} END {for (k in c) print c[k], k}&#39; \</span>
+</span><span id="__span-29-57"><a id="__codelineno-29-57" name="__codelineno-29-57" href="#__codelineno-29-57"></a><span class="s">  | sort -k2 | awk &#39;{printf &quot;| %s | `%s` | `%s` |\n&quot;, $1, $2, $3}&#39;</span>
+</span><span id="__span-29-58"><a id="__codelineno-29-58" name="__codelineno-29-58" href="#__codelineno-29-58"></a><span class="s">echo</span>
+</span><span id="__span-29-59"><a id="__codelineno-29-59" name="__codelineno-29-59" href="#__codelineno-29-59"></a><span class="s">echo &quot;## Files opened&quot;</span>
+</span><span id="__span-29-60"><a id="__codelineno-29-60" name="__codelineno-29-60" href="#__codelineno-29-60"></a><span class="s">echo</span>
+</span><span id="__span-29-61"><a id="__codelineno-29-61" name="__codelineno-29-61" href="#__codelineno-29-61"></a><span class="s">echo &quot;| path | errno | opened by |&quot;</span>
+</span><span id="__span-29-62"><a id="__codelineno-29-62" name="__codelineno-29-62" href="#__codelineno-29-62"></a><span class="s">echo &quot;|---|---|---|&quot;</span>
+</span><span id="__span-29-63"><a id="__codelineno-29-63" name="__codelineno-29-63" href="#__codelineno-29-63"></a><span class="s">awk &quot;/^OPEN/ &amp;&amp; !($is_runtime) {print \$6, \$5, \$4}&quot; &quot;$CAP&quot; | sort -u \</span>
+</span><span id="__span-29-64"><a id="__codelineno-29-64" name="__codelineno-29-64" href="#__codelineno-29-64"></a><span class="s">  | awk &#39;{printf &quot;| `%s` | %s | `%s` |\n&quot;, $1, $2, $3}&#39;</span>
+</span><span id="__span-29-65"><a id="__codelineno-29-65" name="__codelineno-29-65" href="#__codelineno-29-65"></a><span class="s">echo</span>
+</span><span id="__span-29-66"><a id="__codelineno-29-66" name="__codelineno-29-66" href="#__codelineno-29-66"></a><span class="s">echo &quot;## Outbound connections&quot;</span>
+</span><span id="__span-29-67"><a id="__codelineno-29-67" name="__codelineno-29-67" href="#__codelineno-29-67"></a><span class="s">echo</span>
+</span><span id="__span-29-68"><a id="__codelineno-29-68" name="__codelineno-29-68" href="#__codelineno-29-68"></a><span class="s">echo &quot;| proto | peer | by |&quot;</span>
+</span><span id="__span-29-69"><a id="__codelineno-29-69" name="__codelineno-29-69" href="#__codelineno-29-69"></a><span class="s">echo &quot;|---|---|---|&quot;</span>
+</span><span id="__span-29-70"><a id="__codelineno-29-70" name="__codelineno-29-70" href="#__codelineno-29-70"></a><span class="s">awk &quot;/^CONN/ &amp;&amp; !($is_runtime) {print \$5, \$6, \$4}&quot; &quot;$CAP&quot; | sort -u \</span>
+</span><span id="__span-29-71"><a id="__codelineno-29-71" name="__codelineno-29-71" href="#__codelineno-29-71"></a><span class="s">  | awk &#39;{printf &quot;| %s | %s | `%s` |\n&quot;, $1, $2, $3}&#39;</span>
+</span><span id="__span-29-72"><a id="__codelineno-29-72" name="__codelineno-29-72" href="#__codelineno-29-72"></a><span class="s">echo</span>
+</span><span id="__span-29-73"><a id="__codelineno-29-73" name="__codelineno-29-73" href="#__codelineno-29-73"></a><span class="s">echo &quot;## Summary the gate is judged on&quot;</span>
+</span><span id="__span-29-74"><a id="__codelineno-29-74" name="__codelineno-29-74" href="#__codelineno-29-74"></a><span class="s">echo</span>
+</span><span id="__span-29-75"><a id="__codelineno-29-75" name="__codelineno-29-75" href="#__codelineno-29-75"></a><span class="s">echo &quot;| metric | count |&quot;</span>
+</span><span id="__span-29-76"><a id="__codelineno-29-76" name="__codelineno-29-76" href="#__codelineno-29-76"></a><span class="s">echo &quot;|---|---|&quot;</span>
+</span><span id="__span-29-77"><a id="__codelineno-29-77" name="__codelineno-29-77" href="#__codelineno-29-77"></a><span class="s">printf &#39;| distinct binaries | %s |\n&#39; &quot;$(awk &quot;/^EXEC/ &amp;&amp; !($is_runtime) {print \$5}&quot; &quot;$CAP&quot; | sort -u | wc -l | tr -d &#39; &#39;)&quot;</span>
+</span><span id="__span-29-78"><a id="__codelineno-29-78" name="__codelineno-29-78" href="#__codelineno-29-78"></a><span class="s">printf &#39;| distinct files | %s |\n&#39; &quot;$(awk &quot;/^OPEN/ &amp;&amp; !($is_runtime) {print \$6}&quot; &quot;$CAP&quot; | sort -u | wc -l | tr -d &#39; &#39;)&quot;</span>
+</span><span id="__span-29-79"><a id="__codelineno-29-79" name="__codelineno-29-79" href="#__codelineno-29-79"></a><span class="s">printf &#39;| distinct outbound peers | %s |\n&#39; &quot;$(awk &quot;/^CONN/ &amp;&amp; !($is_runtime) {print \$5\&quot; \&quot;\$6}&quot; &quot;$CAP&quot; | sort -u | wc -l | tr -d &#39; &#39;)&quot;</span>
+</span><span id="__span-29-80"><a id="__codelineno-29-80" name="__codelineno-29-80" href="#__codelineno-29-80"></a><span class="s">EOF</span>
+</span></code></pre></div>
+</details>
+<p>若要先做離線整理，驗證素材目錄 <code>docs/plans/verify-logs/sprint2-day2-manifests/</code> 已有 <code>10-baseline-capture.txt</code> 和 <code>11-deviation-capture.txt</code>。取得這兩份檔案後，與本章的 <code>07-baseline-build.sh</code>、<code>09-deviation-check.sh</code> 放在工作站的同一個目錄，以下路徑都以該目錄為準。</p>
+<p>用 <code>bash</code> 執行 <code>07-baseline-build.sh</code>，第一個參數填 <code>10-baseline-capture.txt</code>；後四項填這份擷取對應的 pod 名字、映像、container id 和 pod slice id，可對照素材中的 <code>08-nginx-startup-baseline.md</code> 表頭。腳本將 Markdown 寫到標準輸出，需在呼叫時加上 <code>&gt; 08-nginx-startup-baseline.md</code>，基線檔才會儲存在工作站目前目錄。第六個參數可省略，腳本預設從符合 <code>EXEC .*docker-entrypoint\.sh</code> 的第一筆事件開始整理。</p>
+<p>丟掉容器執行期這一層是取捨：丟了清單才讀得完，但也就看不到有人在 runc 那一層動手腳。分類時不能只看行程名稱，原因見<a href="#mine-7">疑難排解：kubectl exec 開的 shell 從紀錄裡消失</a>。</p>
+<h3 id="_6">基線的內容<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
+<p>執行過的程式共 12 支，依呼叫關係排起來：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-30-1"><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>/docker-entrypoint.sh                                    ← runc 執行的第一支
+</span><span id="__span-30-2"><a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>  ├─ /usr/bin/find ×2  /usr/bin/sort                     ← 列出 /docker-entrypoint.d/
+</span><span id="__span-30-3"><a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a>  ├─ 10-listen-on-ipv6-by-default.sh → basename, touch
+</span><span id="__span-30-4"><a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a>  ├─ 20-envsubst-on-templates.sh     → basename, awk
+</span><span id="__span-30-5"><a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a>  ├─ 30-tune-worker-processes.sh     → basename
+</span><span id="__span-30-6"><a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a>  └─ /usr/local/sbin/nginx → /usr/local/bin/nginx → /usr/sbin/nginx
+</span></code></pre></div>
+<p>最後一行的三個 nginx 是同一支程式。<code>exec nginx</code> 照 PATH 依序試三個目錄，前兩次找不到檔案（ENOENT），第三次才成功。EXEC 事件掛在 <code>sys_enter_execve</code>，進入時還不知道會不會成功，所以三次都被記下來，這就是 Day 1 講過的<a href="../sprint2-day1-bpftrace-basics/#mine-2">「兩個 execsnoop 對失敗的 exec 一個有一個沒有」</a>。只看 EXEC 會以為容器裡啟動了三個 nginx。</p>
+<p>開過的檔案共 32 個不同路徑，挑幾個來看：</p>
+<table>
+<thead>
+<tr>
+<th>路徑</th>
+<th>errno</th>
+<th>開檔者</th>
+<th>為什麼值得看</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/etc/nginx/nginx.conf</code></td>
+<td>0</td>
+<td><code>nginx</code></td>
+<td>主設定檔</td>
+</tr>
+<tr>
+<td><code>/etc/nginx/conf.d/default.conf</code></td>
+<td>0</td>
+<td><code>nginx</code></td>
+<td>掛進去的 ConfigMap</td>
+</tr>
+<tr>
+<td><code>/etc/nginx/conf.d/default.conf</code></td>
+<td>30</td>
+<td><code>touch</code></td>
+<td>errno 30 ＝ EROFS</td>
+</tr>
+<tr>
+<td><code>/docker-entrypoint.d/15-local-resolvers.envsh</code></td>
+<td>0</td>
+<td><code>docker-entrypoi</code></td>
+<td>被讀了，但沒有出現在 exec 清單裡</td>
+</tr>
+<tr>
+<td><code>/etc/localtime</code>、<code>/etc/nsswitch.conf</code>、<code>/etc/passwd</code>、<code>/etc/group</code></td>
+<td>0</td>
+<td><code>nginx</code></td>
+<td>一般程式啟動時都會讀的系統檔</td>
+</tr>
+<tr>
+<td><code>/var/log/nginx/{access,error}.log</code>、<code>/var/run/nginx.pid</code></td>
+<td>0</td>
+<td><code>nginx</code></td>
+<td>唯一會被寫的三個檔</td>
+</tr>
+<tr>
+<td><code>/usr/lib/ssl/openssl.cnf</code></td>
+<td>0</td>
+<td><code>nginx</code></td>
+<td>即使沒設定 TLS 也會讀</td>
+</tr>
+<tr>
+<td><code>/sys/devices/system/cpu/online</code></td>
+<td>0</td>
+<td><code>nginx</code></td>
+<td>worker 數量是這樣決定的</td>
+</tr>
+</tbody>
+</table>
+<p>第三、四列是基線順帶抓到的兩件事。<code>10-listen-on-ipv6-by-default.sh</code> 想 <code>touch</code> 設定檔，但 ConfigMap 掛載是唯讀的，於是拿到 errno 30（EROFS，唯讀檔案系統）。entrypoint 預期到這種情況，只在 log 印一行 info 就繼續，容器照常啟動，<code>kubectl get pod</code> 也一切正常；從 syscall 這一層看，才知道失敗的是哪個檔案、錯誤碼是什麼。<code>15-local-resolvers.envsh</code> 被讀了，卻沒出現在執行清單裡，因為 entrypoint 對 <code>.envsh</code> 檔是用 <code>.</code> 載入到自己的 shell 裡（source），不是另外執行一支程式，所以只有開檔、沒有 execve。這件事要把開檔清單和執行清單並排才看得出來。</p>
+<p>對外連線只有一筆：<code>tcp 1.1.1.1:80</code>，由 nginx 發出。沒有 DNS 查詢，因為設定檔寫的是 IP。基線最後的統計是 12 支執行檔、32 個檔案、1 個對外連線，給一個 pod 名字 <code>baseline-nginx</code>，就列得出它啟動期間的行為，一頁看得完。</p>
+<h2 id="7">步驟 7：拿基線比對不尋常的動作<a class="headerlink" href="#7" title="Permanent link">&para;</a></h2>
+<p>在同一顆 pod 裡，用 <code>kubectl exec</code> 開一個 shell，故意做三件基線裡沒有的事：讀一個 nginx 從來不碰的檔案、連一個基線裡沒有的位址、執行 <code>id</code>：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-31-1"><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a>wc<span class="w"> </span>-l<span class="w"> </span>&lt;<span class="w"> </span>/etc/shadow<span class="w">                        </span><span class="c1"># a file nginx never opens</span>
+</span><span id="__span-31-2"><a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="nb">exec</span><span class="w"> </span><span class="m">3</span>&lt;&gt;/dev/tcp/&lt;public-dns-a&gt;/53<span class="w">         </span><span class="c1"># a peer not in the baseline</span>
+</span><span id="__span-31-3"><a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a>id
+</span></code></pre></div>
+<p><code>&lt;public-dns-a&gt;</code> 和後面的 <code>&lt;public-dns-b&gt;</code> 是兩個公共 DNS 服務的位址，自己挑兩個即可；它們只要不在基線清單上，兩次用不同的位址，是為了分辨事件來自哪一次。這段期間同樣用 <code>05-podtrace.bt</code> 記錄。<code>09-deviation-check.sh</code> 在工作站上執行，兩個參數依序是基線的原始擷取和這次的擷取；它把兩份逐類比對，用三次 <code>comm -13</code> 列出只出現在這次擷取裡的項目。離線比對時，用 <code>bash</code> 執行這支腳本，第一個參數填同目錄的 <code>10-baseline-capture.txt</code>，第二個填 <code>11-deviation-capture.txt</code>，第三個參數省略即可沿用步驟 6 的起點。第一個輸入必須是原始擷取，不能填整理後的 <code>08-nginx-startup-baseline.md</code>：</p>
+<details class="note">
+<summary>完整腳本：09-deviation-check.sh</summary>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-32-1"><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span><span class="m">09</span>-deviation-check.sh<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-32-2"><a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="s">#!/bin/bash</span>
+</span><span id="__span-32-3"><a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a><span class="s"># deviation-check.sh - diff a live podtrace capture against the startup baseline.</span>
+</span><span id="__span-32-4"><a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a><span class="s">#</span>
+</span><span id="__span-32-5"><a id="__codelineno-32-5" name="__codelineno-32-5" href="#__codelineno-32-5"></a><span class="s">#   deviation-check.sh &lt;baseline-capture&gt; &lt;live-capture&gt; [baseline-start-regex]</span>
+</span><span id="__span-32-6"><a id="__codelineno-32-6" name="__codelineno-32-6" href="#__codelineno-32-6"></a><span class="s">#</span>
+</span><span id="__span-32-7"><a id="__codelineno-32-7" name="__codelineno-32-7" href="#__codelineno-32-7"></a><span class="s"># This is the whole &quot;rule engine&quot; of Day 2: three `comm -13` calls. It is</span>
+</span><span id="__span-32-8"><a id="__codelineno-32-8" name="__codelineno-32-8" href="#__codelineno-32-8"></a><span class="s"># deliberately this small, because the point is what the small</span>
+</span><span id="__span-32-9"><a id="__codelineno-32-9" name="__codelineno-32-9" href="#__codelineno-32-9"></a><span class="s"># version can and cannot do.</span>
+</span><span id="__span-32-10"><a id="__codelineno-32-10" name="__codelineno-32-10" href="#__codelineno-32-10"></a><span class="s">set -u</span>
+</span><span id="__span-32-11"><a id="__codelineno-32-11" name="__codelineno-32-11" href="#__codelineno-32-11"></a><span class="s">BASE0=&quot;${1:?usage: deviation-check.sh &lt;baseline-capture&gt; &lt;live-capture&gt; [start-regex]}&quot;</span>
+</span><span id="__span-32-12"><a id="__codelineno-32-12" name="__codelineno-32-12" href="#__codelineno-32-12"></a><span class="s">LIVE=&quot;${2:?usage: deviation-check.sh &lt;baseline-capture&gt; &lt;live-capture&gt; [start-regex]}&quot;</span>
+</span><span id="__span-32-13"><a id="__codelineno-32-13" name="__codelineno-32-13" href="#__codelineno-32-13"></a><span class="s"># Same window trim as baseline-build.sh. Without it the baseline silently</span>
+</span><span id="__span-32-14"><a id="__codelineno-32-14" name="__codelineno-32-14" href="#__codelineno-32-14"></a><span class="s"># absorbs whatever ran before the container did -- including, in this lab, the</span>
+</span><span id="__span-32-15"><a id="__codelineno-32-15" name="__codelineno-32-15" href="#__codelineno-32-15"></a><span class="s"># shell that triggered the restart, which is exactly what step 5 wants to catch.</span>
+</span><span id="__span-32-16"><a id="__codelineno-32-16" name="__codelineno-32-16" href="#__codelineno-32-16"></a><span class="s">START=&quot;${3:-EXEC .*docker-entrypoint\\.sh}&quot;</span>
+</span><span id="__span-32-17"><a id="__codelineno-32-17" name="__codelineno-32-17" href="#__codelineno-32-17"></a><span class="s">BASE=$(mktemp)</span>
+</span><span id="__span-32-18"><a id="__codelineno-32-18" name="__codelineno-32-18" href="#__codelineno-32-18"></a><span class="s">awk -v re=&quot;$START&quot; &#39;f || $0 ~ re {f=1; print}&#39; &quot;$BASE0&quot; &gt; &quot;$BASE&quot;</span>
+</span><span id="__span-32-19"><a id="__codelineno-32-19" name="__codelineno-32-19" href="#__codelineno-32-19"></a><span class="s">trap &#39;rm -f &quot;$BASE&quot;&#39; EXIT</span>
+</span><span id="__span-32-20"><a id="__codelineno-32-20" name="__codelineno-32-20" href="#__codelineno-32-20"></a>
+</span><span id="__span-32-21"><a id="__codelineno-32-21" name="__codelineno-32-21" href="#__codelineno-32-21"></a><span class="s"># Classifying an event as &quot;container runtime&quot; cannot be done on comm alone.</span>
+</span><span id="__span-32-22"><a id="__codelineno-32-22" name="__codelineno-32-22" href="#__codelineno-32-22"></a><span class="s"># execve keeps the OLD comm until the new image is loaded, so the shell that</span>
+</span><span id="__span-32-23"><a id="__codelineno-32-23" name="__codelineno-32-23" href="#__codelineno-32-23"></a><span class="s"># `kubectl exec` starts is reported with comm=runc:[2:INIT] -- the single event</span>
+</span><span id="__span-32-24"><a id="__codelineno-32-24" name="__codelineno-32-24" href="#__codelineno-32-24"></a><span class="s"># an intrusion baseline cares about most would be filtered away as plumbing.</span>
+</span><span id="__span-32-25"><a id="__codelineno-32-25" name="__codelineno-32-25" href="#__codelineno-32-25"></a><span class="s"># EXEC is therefore classified on the binary being executed, everything else on</span>
+</span><span id="__span-32-26"><a id="__codelineno-32-26" name="__codelineno-32-26" href="#__codelineno-32-26"></a><span class="s"># comm.</span>
+</span><span id="__span-32-27"><a id="__codelineno-32-27" name="__codelineno-32-27" href="#__codelineno-32-27"></a><span class="s">is_runtime=&#39;$1 == &quot;EXEC&quot; ? $5 ~ /^\/proc\/self\/fd\// : ($4 ~ /^runc/ || $4 == &quot;6&quot; || $4 ~ /^containerd/)&#39;</span>
+</span><span id="__span-32-28"><a id="__codelineno-32-28" name="__codelineno-32-28" href="#__codelineno-32-28"></a>
+</span><span id="__span-32-29"><a id="__codelineno-32-29" name="__codelineno-32-29" href="#__codelineno-32-29"></a><span class="s">field() { awk &quot;/^$1/ &amp;&amp; !($is_runtime) {print $2}&quot; &quot;$3&quot; | sort -u; }</span>
+</span><span id="__span-32-30"><a id="__codelineno-32-30" name="__codelineno-32-30" href="#__codelineno-32-30"></a>
+</span><span id="__span-32-31"><a id="__codelineno-32-31" name="__codelineno-32-31" href="#__codelineno-32-31"></a><span class="s">for class in EXEC:&#39;$5&#39;:binaries OPEN:&#39;$6&#39;:files CONN:&#39;$5&quot; &quot;$6&#39;:peers; do</span>
+</span><span id="__span-32-32"><a id="__codelineno-32-32" name="__codelineno-32-32" href="#__codelineno-32-32"></a><span class="s">  cls=${class%%:*}; rest=${class#*:}; col=${rest%%:*}; label=${rest##*:}</span>
+</span><span id="__span-32-33"><a id="__codelineno-32-33" name="__codelineno-32-33" href="#__codelineno-32-33"></a><span class="s">  echo &quot;== new ${label} (in live, not in baseline) ==&quot;</span>
+</span><span id="__span-32-34"><a id="__codelineno-32-34" name="__codelineno-32-34" href="#__codelineno-32-34"></a><span class="s">  comm -13 &lt;(field &quot;$cls&quot; &quot;$col&quot; &quot;$BASE&quot;) &lt;(field &quot;$cls&quot; &quot;$col&quot; &quot;$LIVE&quot;) \</span>
+</span><span id="__span-32-35"><a id="__codelineno-32-35" name="__codelineno-32-35" href="#__codelineno-32-35"></a><span class="s">    | sed &#39;s/^/  /&#39;</span>
+</span><span id="__span-32-36"><a id="__codelineno-32-36" name="__codelineno-32-36" href="#__codelineno-32-36"></a><span class="s">  echo</span>
+</span><span id="__span-32-37"><a id="__codelineno-32-37" name="__codelineno-32-37" href="#__codelineno-32-37"></a><span class="s">done</span>
+</span><span id="__span-32-38"><a id="__codelineno-32-38" name="__codelineno-32-38" href="#__codelineno-32-38"></a><span class="s">EOF</span>
+</span></code></pre></div>
+</details>
+<p>輸出：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-33-1"><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="go">== new binaries (in live, not in baseline) ==</span>
+</span><span id="__span-33-2"><a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="go">  /usr/bin/bash</span>
+</span><span id="__span-33-3"><a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="go">  /usr/bin/id</span>
+</span><span id="__span-33-4"><a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a><span class="go">  /usr/bin/wc</span>
+</span><span id="__span-33-5"><a id="__codelineno-33-5" name="__codelineno-33-5" href="#__codelineno-33-5"></a>
+</span><span id="__span-33-6"><a id="__codelineno-33-6" name="__codelineno-33-6" href="#__codelineno-33-6"></a><span class="go">== new files (in live, not in baseline) ==</span>
+</span><span id="__span-33-7"><a id="__codelineno-33-7" name="__codelineno-33-7" href="#__codelineno-33-7"></a><span class="go">  /dev/tty</span>
+</span><span id="__span-33-8"><a id="__codelineno-33-8" name="__codelineno-33-8" href="#__codelineno-33-8"></a><span class="go">  /etc/shadow</span>
+</span><span id="__span-33-9"><a id="__codelineno-33-9" name="__codelineno-33-9" href="#__codelineno-33-9"></a><span class="go">  /lib/x86_64-linux-gnu/libtinfo.so.6</span>
+</span><span id="__span-33-10"><a id="__codelineno-33-10" name="__codelineno-33-10" href="#__codelineno-33-10"></a>
+</span><span id="__span-33-11"><a id="__codelineno-33-11" name="__codelineno-33-11" href="#__codelineno-33-11"></a><span class="go">== new peers (in live, not in baseline) ==</span>
+</span><span id="__span-33-12"><a id="__codelineno-33-12" name="__codelineno-33-12" href="#__codelineno-33-12"></a><span class="go">  tcp &lt;public-dns-a&gt;:53</span>
+</span></code></pre></div>
+<p>三件事都出現了，另外還多了兩個沒有刻意做的：<code>/dev/tty</code> 和 <code>libtinfo.so.6</code>。bash 以互動模式啟動時會打開終端機、載入終端機控制函式庫，只跑 nginx 的容器不會碰這兩個檔。沒有人寫過「有人開了 shell」的規則，它還是被抓出來，因為它不在清單上。</p>
+<p>分類事件時有個陷阱：<code>kubectl exec</code> 開的那個 bash，在 EXEC 事件裡的行程名稱是 <code>runc:[2:INIT]</code>。如果用行程名稱過濾容器執行期的事件，剛好會把這一筆刪掉，見<a href="#mine-7">疑難排解：kubectl exec 開的 shell 從紀錄裡消失</a>。</p>
+<h3 id="nsenter">同一組動作改走 nsenter<a class="headerlink" href="#nsenter" title="Permanent link">&para;</a></h3>
+<p>再做一次同樣的事，這次不經過 <code>kubectl exec</code>，改從節點上的追蹤 pod 用 <code>nsenter</code> 進入 nginx 的 namespace，多加 <code>-n</code> 連網路 namespace 一起進去。<code>&lt;nginx master pid&gt;</code> 是 nginx 主行程在節點上的 pid，查法同步驟 3 的 <code>pgrep</code>（容器重啟過，pid 會跟當時不同）：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-34-1"><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a><span class="gp">$ </span>nsenter<span class="w"> </span>-t<span class="w"> </span>&lt;nginx<span class="w"> </span>master<span class="w"> </span>pid&gt;<span class="w"> </span>-m<span class="w"> </span>-u<span class="w"> </span>-p<span class="w"> </span>-n<span class="w"> </span>--<span class="w"> </span>bash<span class="w"> </span>-c<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-34-2"><a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a><span class="w">    </span><span class="s1">&#39;wc -l &lt; /etc/shadow; exec 3&lt;&gt;/dev/tcp/&lt;public-dns-b&gt;/53 &amp;&amp; echo connected-&lt;public-dns-b&gt;-via-nsenter&#39;</span>
+</span><span id="__span-34-3"><a id="__codelineno-34-3" name="__codelineno-34-3" href="#__codelineno-34-3"></a><span class="go">19</span>
+</span><span id="__span-34-4"><a id="__codelineno-34-4" name="__codelineno-34-4" href="#__codelineno-34-4"></a><span class="go">connected-&lt;public-dns-b&gt;-via-nsenter                        ← 動作確實成功了</span>
+</span></code></pre></div>
+<p>讀檔和連線都成功了。同一份紀錄裡：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-35-1"><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a><span class="go">&lt;public-dns-b&gt; 的筆數 : 0</span>
+</span><span id="__span-35-2"><a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a><span class="go">/etc/shadow 的筆數    : 1        ← 只有 kubectl exec 那一筆</span>
+</span></code></pre></div>
+<p><code>/etc/shadow</code> 只有 <code>kubectl exec</code> 那一次，<code>&lt;public-dns-b&gt;</code> 一筆都沒有。原因在步驟 3：<code>nsenter</code> 換了 namespace，行程卻還在追蹤 pod 自己的 cgroup，綁在 pod slice 9916 的過濾條件看不到它。拿得到節點 root 權限的人，都能用這個方式避開以 cgroup 為範圍的追蹤，見<a href="#mine-2">疑難排解：從節點 nsenter 進去的動作沒有被記錄</a>。</p>
+<h3 id="_7">這套做法還缺什麼<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h3>
+<p>這一章的做法能用，但離常駐的執行期偵測還差不少：</p>
+<table>
+<thead>
+<tr>
+<th>缺什麼</th>
+<th>今天的實況</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>沒有持久化</td>
+<td>輸出是某顆 pod 的 <code>/tmp/*.out</code>；pod 被重排、節點被 spot 回收，證據就不見了</td>
+</tr>
+<tr>
+<td>沒有告警</td>
+<td>偏離要有人執行 <code>09-deviation-check.sh</code> 才會被看到，沒有 webhook、沒有分級、沒有去重</td>
+</tr>
+<tr>
+<td>沒有規則引擎</td>
+<td>「規則」是三個 <code>comm -13</code>，寫不出「連到私有網段以外才算」「一分鐘內超過 N 次才算」「這個 namespace 例外」</td>
+</tr>
+<tr>
+<td>必須剛好在看</td>
+<td>探針要先掛好，掛上去之前發生的事完全不存在；為了抓啟動還得刻意讓容器重啟一次</td>
+</tr>
+<tr>
+<td>一次一顆 pod</td>
+<td>過濾器是單一 cgroup id，要監控整個 namespace 得自己維護「pod → cgroup id」並在 pod 生滅時更新</td>
+</tr>
+<tr>
+<td>基線是一張快照</td>
+<td>沒有「允許但罕見」這個概念；暖機請求沒去 DNS，於是任何一次 DNS 查詢都會被判成偏離</td>
+</tr>
+<tr>
+<td>看不見 <code>nsenter</code></td>
+<td>見上一節</td>
+</tr>
+</tbody>
+</table>
+<p>前四列是常駐的偵測工具要解決的：保存紀錄、送出告警、規則語言、開機就掛好探針。第五列是容器身分應該由容器執行期提供，不必自己算。第六列是規則調校。第七列前面的工具都解決不了，要靠節點層的存取控制。Day 3 之後的幾章，會拿這張表逐項對照。</p>
+<h2 id="8">步驟 8：收尾<a class="headerlink" href="#8" title="Permanent link">&para;</a></h2>
+<p>刪除之前，先確認 BPF 程式沒有殘留。在追蹤 pod 裡用節點上的 <code>bpftool</code> 列出核心裡的 BPF 程式，挑出 tracepoint 和 tracing 兩類，在 bpftrace 還掛著時和按 Ctrl-C（<code>SIGINT</code>）之後各看一次：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-36-1"><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a><span class="gp">$ </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">1</span><span class="w"> </span>-m<span class="w"> </span>--<span class="w"> </span>bpftool<span class="w"> </span>prog<span class="w"> </span>list<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s1">&#39;^[0-9]+: (tracepoint|tracing)&#39;</span>
+</span></code></pre></div>
+<p>Day 1 看過，核心裡的程式總數會隨其他元件增減，要看的是自己掛的那幾支有沒有歸零：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-37-1"><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a><span class="go">--- WHILE ATTACHED ---</span>
+</span><span id="__span-37-2"><a id="__codelineno-37-2" name="__codelineno-37-2" href="#__codelineno-37-2"></a><span class="go">prog total=58</span>
+</span><span id="__span-37-3"><a id="__codelineno-37-3" name="__codelineno-37-3" href="#__codelineno-37-3"></a><span class="go">  558: tracepoint  name tracepoint_syscalls_sys_enter_execve    tag 5e916e4355a4d258</span>
+</span><span id="__span-37-4"><a id="__codelineno-37-4" name="__codelineno-37-4" href="#__codelineno-37-4"></a><span class="go">  559: tracepoint  name tracepoint_syscalls_sys_enter_openat    tag 694a0f58b7ffa490</span>
+</span><span id="__span-37-5"><a id="__codelineno-37-5" name="__codelineno-37-5" href="#__codelineno-37-5"></a><span class="go">  560: tracepoint  name tracepoint_syscalls_sys_exit_openat     tag db7ad05e995636f3</span>
+</span><span id="__span-37-6"><a id="__codelineno-37-6" name="__codelineno-37-6" href="#__codelineno-37-6"></a><span class="go">  561: tracing     name udp_sendmsg                             tag ca8c55774b92e4cd</span>
+</span><span id="__span-37-7"><a id="__codelineno-37-7" name="__codelineno-37-7" href="#__codelineno-37-7"></a><span class="go">  562: tracing     name tcp_connect                             tag 06e1380de587f59b</span>
+</span><span id="__span-37-8"><a id="__codelineno-37-8" name="__codelineno-37-8" href="#__codelineno-37-8"></a><span class="go">--- AFTER SIGINT ---</span>
+</span><span id="__span-37-9"><a id="__codelineno-37-9" name="__codelineno-37-9" href="#__codelineno-37-9"></a><span class="go">prog total=53</span>
+</span><span id="__span-37-10"><a id="__codelineno-37-10" name="__codelineno-37-10" href="#__codelineno-37-10"></a><span class="go">  2:   tracing     name hid_tail_call                          tag 7cc47bbf07148bfe</span>
+</span><span id="__span-37-11"><a id="__codelineno-37-11" name="__codelineno-37-11" href="#__codelineno-37-11"></a><span class="go">bpftrace procs=0</span>
+</span></code></pre></div>
+<p>掛著時有 5 支是 <code>05-podtrace.bt</code> 的（3 支 tracepoint、2 支 tracing），<code>SIGINT</code> 之後全部收回。總數停在 53，比掛探針前多一支，多出來的是一支 <code>cgroup_device</code> 類型的程式。這類程式掛在 cgroup 上、管控容器能存取哪些裝置，Day 0 看過節點上有幾十支，會隨容器建立、刪除而增減，所以總數不能拿來判斷有沒有殘留。清單裡剩下的那支 <code>tracing</code> 是核心自帶的 <code>hid_tail_call</code>，Day 1 看過同一個 tag。兩台節點都要各查一次。</p>
+<p>接著刪掉 <code>ebpf-lab</code> namespace，把 <code>ebpf</code> 節點池縮回 0：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-38-1"><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>delete<span class="w"> </span>namespace<span class="w"> </span>ebpf-lab
+</span><span id="__span-38-2"><a id="__codelineno-38-2" name="__codelineno-38-2" href="#__codelineno-38-2"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>scale<span class="w"> </span>-g<span class="w"> </span>&lt;resource-group&gt;<span class="w"> </span>--cluster-name<span class="w"> </span>&lt;cluster&gt;<span class="w"> </span>-n<span class="w"> </span>ebpf<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-38-3"><a id="__codelineno-38-3" name="__codelineno-38-3" href="#__codelineno-38-3"></a><span class="w">    </span>--subscription<span class="w"> </span>&lt;subscription-id&gt;<span class="w"> </span>--node-count<span class="w"> </span><span class="m">0</span>
+</span></code></pre></div>
+<p>縮完用 <code>az aks nodepool show</code> 確認 <code>count</code> 是 0。節點池的設定都保留，Day 3 繼續用。今天不再使用叢集的話，可以把整座叢集停機，下次用 <code>az aks start</code> 開回來：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-39-1"><a id="__codelineno-39-1" name="__codelineno-39-1" href="#__codelineno-39-1"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>stop<span class="w"> </span>-g<span class="w"> </span>&lt;resource-group&gt;<span class="w"> </span>-n<span class="w"> </span>&lt;cluster&gt;<span class="w"> </span>--subscription<span class="w"> </span>&lt;subscription-id&gt;
+</span></code></pre></div>
+<h2 id="_8">疑難排解<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h2>
+<h3 id="mine-1">MCR mirror 拉不到較新的 nginx<a class="headerlink" href="#mine-1" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：<code>mcr.microsoft.com/mirror/docker/library/nginx:&lt;tag&gt;</code> 拉不到，<code>describe pod</code> 的訊息是 <code>failed to resolve image: … not found</code>，跟 tag 打錯字一模一樣（步驟 1）。</p>
+<p><strong>原因</strong>：MCR 的 Docker Hub mirror 不是整體同步的，每個 repo 停在各自的版本。本課驗證時，<code>ubuntu</code> 已經有 2026 年的版本，nginx 卻只到 1.25。錯誤訊息跟拼錯 tag、沒有權限長得一樣，很難想到是 mirror 沒有這個 tag。</p>
+<p><strong>修法</strong>：部署前先查 mirror 實際有哪些 tag：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-40-1"><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a><span class="gp">$ </span>curl<span class="w"> </span>-s<span class="w"> </span>https://mcr.microsoft.com/v2/mirror/docker/library/nginx/tags/list
+</span><span id="__span-40-2"><a id="__codelineno-40-2" name="__codelineno-40-2" href="#__codelineno-40-2"></a><span class="go">{&quot;tags&quot;:[&quot;1.20&quot;,&quot;1.20-alpine&quot;,&quot;1.21&quot;,&quot;1.21-alpine&quot;,&quot;1.22&quot;,&quot;1.23&quot;,&quot;1.24&quot;,&quot;1.25&quot;]}</span>
+</span></code></pre></div>
+<p>用 mirror 避開速率限制，映像版本也就停在 mirror 最後一次同步的時候。需要上游較新的版本時，要改從其他來源拉。</p>
+<h3 id="mine-2">從節點 nsenter 進去的動作沒有被記錄<a class="headerlink" href="#mine-2" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：從節點用 <code>nsenter -t &lt;pid&gt; -m -u -p -n</code> 進到容器裡，hostname、檔案系統、網路都是那個容器的，但以 cgroup 為範圍的追蹤一筆都沒記到（步驟 7）。另一個相關現象：在 <code>nsenter</code> 裡跑的 CPU 與記憶體算在呼叫端 pod 的 limit 上，拿它做壓力測試會壓到錯的 pod。</p>
+<p><strong>原因</strong>：<code>nsenter</code> 只換 namespace，不換 cgroup，加 <code>-C</code> 也只改路徑的顯示方式（步驟 3）。</p>
+<p><strong>修法</strong>：追蹤器這一層沒有修法。要守住這個缺口，得限制誰能拿到節點的 root 權限；要讓資源算在目標容器上，得把 pid 寫進目標 cgroup 的 <code>cgroup.procs</code>。</p>
+<h3 id="mine-3">容器重啟後，過濾器不回報錯誤也不再輸出<a class="headerlink" href="#mine-3" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：用 <code>/cgroup == &lt;container scope id&gt;/</code> 追一個容器，抓不到它的啟動；容器重啟之後，再也沒有任何輸出。</p>
+<p><strong>原因</strong>：container scope 的 cgroup id 每次重啟都會換，只有 pod slice 的 id 跟 pod 活得一樣久（步驟 4）。</p>
+<p><strong>修法</strong>：過濾條件改用 pod slice 的 id，寫法見步驟 4。</p>
+<h3 id="mine-4">加了 <code>#define</code> 之後認不得 <code>struct task_struct</code><a class="headerlink" href="#mine-4" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：把過濾條件那條指標鏈包成 <code>#define PODCG …</code>，整支腳本編不過，錯誤訊息指著用到它的那一行：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-41-1"><a id="__codelineno-41-1" name="__codelineno-41-1" href="#__codelineno-41-1"></a><span class="go">/tmp/podtrace.bt:45:1-23: ERROR: Unknown struct/union: &#39;struct task_struct&#39;</span>
+</span><span id="__span-41-2"><a id="__codelineno-41-2" name="__codelineno-41-2" href="#__codelineno-41-2"></a><span class="go">/PODCG == $1/</span>
+</span></code></pre></div>
+<p>同樣的運算式，寫成 one-liner 或在 <code>.bt</code> 檔裡展開成原文都能掛上，只有加了 <code>#define</code> 的版本失敗：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-42-1"><a id="__codelineno-42-1" name="__codelineno-42-1" href="#__codelineno-42-1"></a><span class="go">T1  one-liner,filter 裡用 curtask                     → Attaching 1 probe...  ✅</span>
+</span><span id="__span-42-2"><a id="__codelineno-42-2" name="__codelineno-42-2" href="#__codelineno-42-2"></a><span class="go">T2  .bt 檔,有 #define                                 → Unknown struct/union  ❌</span>
+</span><span id="__span-42-3"><a id="__codelineno-42-3" name="__codelineno-42-3" href="#__codelineno-42-3"></a><span class="go">T3  .bt 檔,把 #define 展開成原文                       → Attaching 1 probe...  ✅</span>
+</span></code></pre></div>
+<p><strong>原因</strong>：bpftrace 只有在程式含 <code>#include</code> 或 <code>#define</code> 時才會啟動 C 前處理器；一旦啟動，型別解析改由 Clang 處理，而核心 BTF 裡的 <code>struct task_struct</code> 不會被自動帶進去。<a href="../sprint2-day1-bpftrace-basics/">Day 1</a> 的 <code>whowrites.bt</code> 也有 <code>#define</code> 卻沒事，因為它只用到 <code>kfunc</code> 的 <code>args.file</code>，型別來自探針本身的 BTF 資訊，不必查 <code>struct task_struct</code>。</p>
+<p>用 <code>#include</code> 補上型別也不行，<code>/usr/include/linux/sched.h</code> 是給使用者程式用的標頭，裡面沒有核心內部的 <code>task_struct</code>：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-43-1"><a id="__codelineno-43-1" name="__codelineno-43-1" href="#__codelineno-43-1"></a><span class="gp">#</span>include<span class="w"> </span>&lt;linux/sched.h&gt;<span class="w">   </span>→<span class="w">  </span>/usr/include/linux/sched.h:93:<span class="w"> </span>error:<span class="w"> </span>unknown<span class="w"> </span><span class="nb">type</span><span class="w"> </span>name<span class="w"> </span><span class="s1">&#39;__aligned_u64&#39;</span>
+</span></code></pre></div>
+<p><strong>修法</strong>：用到 <code>curtask</code> 的腳本不要用 <code>#define</code>，把運算式原文寫出來，<code>05-podtrace.bt</code> 就是這樣寫的。</p>
+<h3 id="mine-5">port 印出 20480、13568 這類數字<a class="headerlink" href="#mine-5" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：連線的 port 印出來全是不對的數字，例如 <code>10.0.0.10:13568</code>、<code>1.1.1.1:20480</code>。13568 是 0x3500，正是 53 沒有交換位元組順序的樣子。腳本裡用的是網路教學常見的寫法：</p>
+<div class="language-awk highlight"><pre><span></span><code><span id="__span-44-1"><a id="__codelineno-44-1" name="__codelineno-44-1" href="#__codelineno-44-1"></a><span class="o">$</span><span class="nx">dport</span> <span class="o">=</span> <span class="o">$</span><span class="nx">sk</span><span class="o">-&gt;</span><span class="nx">__sk_common</span><span class="p">.</span><span class="nx">skc_dport</span><span class="p">;</span>
+</span><span id="__span-44-2"><a id="__codelineno-44-2" name="__codelineno-44-2" href="#__codelineno-44-2"></a><span class="o">$</span><span class="nx">dport</span> <span class="o">=</span> <span class="p">(</span><span class="o">$</span><span class="nx">dport</span> <span class="o">&gt;&gt;</span> <span class="mi">8</span><span class="p">)</span> <span class="o">|</span> <span class="p">((</span><span class="o">$</span><span class="nx">dport</span> <span class="o">&lt;&lt;</span> <span class="mi">8</span><span class="p">)</span> <span class="err">&amp;</span> <span class="mh">0xff00</span><span class="p">);</span>     <span class="err">←</span> <span class="err">這一行什麼都沒做</span>
+</span></code></pre></div>
+<p><strong>原因</strong>：在 bpftrace 0.20.2，當變數的型別來自結構體的 16-bit 欄位（例如 <code>skc_dport</code>），把手寫位移的結果指派回同一個變數，值不會改變，也沒有警告。連到 <code>1.1.1.1:80</code> 時把四種寫法並排印出來：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-45-1"><a id="__codelineno-45-1" name="__codelineno-45-1" href="#__codelineno-45-1"></a><span class="go">raw=20480  newvar_shift=80  selfassign_shift=20480  selfassign_bswap=80</span>
+</span></code></pre></div>
+<p>指派給新變數或改用 <code>bswap()</code> 都得到 80，只有手寫位移指派回原變數時還是 20480。一般整數的自我指派（例如 <code>$x = $x + 1</code>）沒有這個問題。</p>
+<p><strong>修法</strong>：一律用 <code>bswap()</code>，Ubuntu 內建的 <code>/usr/sbin/tcpconnect.bt</code> 也是這樣寫。錯的數字都在合法 port 範圍內，不會回報錯誤，從網路上抄來的片段要特別檢查這一行。</p>
+<h3 id="mine-6">一行裡出現兩次時間<a class="headerlink" href="#mine-6" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：紀錄裡偶爾出現一行欄位錯位的資料，197 行裡有 1 行長這樣：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-46-1"><a id="__codelineno-46-1" name="__codelineno-46-1" href="#__codelineno-46-1"></a><span class="go">OPEN 06:16:19 OPEN 06:16:19 29710   sort             0    /etc/ld.so.cache</span>
+</span></code></pre></div>
+<p><strong>原因</strong>：<code>time("OPEN %H:%M:%S ")</code> 後面接 <code>printf(…)</code> 是官方工具的常見寫法（<code>opensnoop.bt</code>、<code>tcpconnect.bt</code> 都這樣寫），但那是兩次獨立的輸出。兩顆 CPU 同時命中探針時，一邊的 <code>time()</code> 會落在另一邊的 <code>time()</code> 和 <code>printf()</code> 之間。</p>
+<p><strong>修法</strong>：把時間放進同一個 <code>printf</code>：<code>printf("OPEN %s …", strftime("%H:%M:%S", nsecs), …)</code>，<code>05-podtrace.bt</code> 就是這樣寫的，每一行 OPEN 都會是完整的 6 個欄位。這種錯位很少見，肉眼不容易發現，但逐行解析的程式會多出一筆欄位錯位的資料，拿去和基線比對時就會出錯。</p>
+<h3 id="mine-7">kubectl exec 開的 shell 從紀錄裡消失<a class="headerlink" href="#mine-7" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：用行程名稱區分工作負載和容器執行期的事件（<code>comm ~ /^runc/</code> 就丟掉），結果 <code>kubectl exec</code> 開的那個 shell 整筆不見。</p>
+<p><strong>原因</strong>：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-47-1"><a id="__codelineno-47-1" name="__codelineno-47-1" href="#__codelineno-47-1"></a><span class="go">EXEC 06:20:09 35665   runc:[2:INIT]    /usr/bin/bash</span>
+</span></code></pre></div>
+<p><code>execve</code> 的進入點觸發時，新的程式還沒載入，<code>comm</code> 仍是舊行程的名字 <code>runc:[2:INIT]</code>。所以「丟掉 runc 的事件」這條看起來合理的規則，剛好刪掉了「有人在這個容器裡開了 shell」這一筆。</p>
+<p><strong>修法</strong>：EXEC 事件看被執行的檔案（只有 <code>/proc/self/fd/*</code> 這種 runc 重新執行自己的情況算容器執行期），其他事件才看 <code>comm</code>。<code>07-baseline-build.sh</code> 和 <code>09-deviation-check.sh</code> 都照這個規則分類，所以 <code>/usr/bin/bash</code> 會出現在步驟 7 偏離清單的第一行。</p>
+<h2 id="_9">想一想<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h2>
+<ul>
+<li>你在節點上看到 <code>cgroup</code> 為某個數字的 execve 執行了 <code>/usr/bin/curl</code>，用 <code>04-cgroup-to-pod.sh</code> 查出路徑在 <code>/sys/fs/cgroup/system.slice/</code> 底下的某個 <code>.service</code>，腳本回報「不是容器」。這筆事件該算在哪一顆 pod 頭上？它跟節點上的什麼有關？</li>
+<li>同事想看一個反覆 CrashLoopBackOff 的容器每次啟動時做了什麼，用 <code>crictl</code> 查到目前的 container id，再算出它的 cgroup id，寫成 <code>/cgroup == &lt;那個 id&gt;/</code>。幾分鐘後輸出完全停了，也沒有錯誤訊息。為什麼？要怎麼改？</li>
+<li>基線比對的結果是什麼偏離都沒有，但節點的登入紀錄顯示有人拿到節點 root 權限、進過這顆 pod 所在的節點。「沒有偏離」能不能當作這顆 pod 沒被動過的證據？為什麼？</li>
+</ul>
+<h2 id="_10">小結<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h2>
+<p>本章選用核心事件中的 cgroup id 對應容器，這個數字就是 <code>/sys/fs/cgroup</code> 底下某個目錄的 inode。順著它找到目錄，目錄名字裡有 container id 和 pod uid，再用 <code>crictl</code> 換成 pod 名字，整條查詢都在節點上完成；查到 <code>system.slice</code> 底下，就代表事件來自節點服務而不是 pod。要追蹤一顆 pod，過濾條件要綁在 pod slice 上，因為容器那一層的 id 每次重啟都會換。有了只屬於一顆 pod 的紀錄，就能做出行為基線，抓出不在清單上的動作。之後看到一筆不知來源的核心事件，或是一個追蹤突然沒了輸出，就回頭想這條查詢鏈和那兩層目錄的壽命；也要記得，這種以 cgroup 為範圍的追蹤，看不見從節點 <code>nsenter</code> 進來的動作。</p>
+<h2 id="_11">延伸閱讀<a class="headerlink" href="#_11" title="Permanent link">&para;</a></h2>
+<p>想再深入，可以從這幾份開始：</p>
+<ul>
+<li><strong><a href="https://docs.kernel.org/admin-guide/cgroup-v2.html">Linux 核心文件：cgroup v2</a></strong> —— 統一階層的定義：每個 cgroup 是一個目錄、子 cgroup 用建目錄產生、每個行程恰好屬於一個 cgroup，以及 <code>cgroup.procs</code> 這個成員清單檔案。本章「要真的加入某個 cgroup 得把 pid 寫進 <code>cgroup.procs</code>」這句話的出處。</li>
+<li><strong><a href="https://kubernetes.io/docs/concepts/architecture/cgroups/">Kubernetes 官方文件：About cgroup v2</a></strong> —— kubelet 與容器執行期都要設成 systemd cgroup driver 這項前提就列在這一頁，同時說明 kubelet 會自行偵測節點跑的是不是 v2、不需要額外設定。本章那棵 <code>kubepods*.slice</code> 目錄樹的成因。</li>
+<li><strong><a href="https://github.com/kubernetes-sigs/cri-tools/blob/master/docs/crictl.md">crictl 使用說明（cri-tools）</a></strong> —— <code>crictl</code> 走 CRI API、連的是節點上的 <code>unix:///run/containerd/containerd.sock</code>，<code>inspect</code> 的定位寫成「顯示一或多個容器的狀態」。本章最後一步不必經過 API server，原因就在這個連線目標。</li>
+<li><strong><a href="https://github.com/bpftrace/bpftrace/blob/v0.20.2/docs/reference_guide.md">bpftrace v0.20.2 參考手冊</a></strong> —— 本課版本自帶的定義：<code>cgroup</code>（目前行程的 cgroup id）與 <code>curtask</code> 在變數那一節，疑難排解用到的 <code>bswap()</code> 與 <code>strftime()</code> 在函式那一節。</li>
+</ul>
+<h2 id="_12">下一步<a class="headerlink" href="#_12" title="Permanent link">&para;</a></h2>
+<p>這一章的過濾器要人架、要人看、要人比對，而且一次只認一顆 pod。步驟 7 那張表的前四列，沒有持久化、沒有告警、沒有規則語言、必須剛好在看，正是常駐偵測工具要解決的事。<a href="../sprint2-day3-falco-basics/">Day 3</a> 換上 Falco：同樣看 syscall 這一層的事件，但容器身分由執行期提供，規則寫成檔案，輸出送得出節點。可以留意的是，從只看一顆 pod 換成整座叢集的規則之後，輸出量會變成什麼樣子。</p>
+<hr />
+<div class="admonition quote">
+<p>Kubernetes 標誌為 CNCF 之官方資產，此處作社群教學用途。</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到頂端
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="頁腳" >
+        
+          
+          <a href="../sprint2-day1-bpftrace-basics/" class="md-footer__link md-footer__link--prev" aria-label="上一頁: Day 1 · bpftrace 三支經典工具">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                上一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 1 · bpftrace 三支經典工具
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../sprint2-day3-falco-basics/" class="md-footer__link md-footer__link--next" aria-label="下一頁: Day 3 · Falco 安裝與預設規則">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                下一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 3 · Falco 安裝與預設規則
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      KAI Scheduler、HAMi、Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,作社群教學用途
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.code.annotate", "content.code.select", "content.tabs.link", "search.suggest", "search.highlight", "search.share"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u8907\u88fd", "clipboard.copy": "\u8907\u88fd", "search.result.more.one": "\u6b64\u9801\u5c1a\u6709 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.more.other": "\u6b64\u9801\u5c1a\u6709 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.none": "\u6c92\u6709\u7b26\u5408\u7684\u9805\u76ee", "search.result.one": "\u627e\u5230 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.other": "\u627e\u5230 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.placeholder": "\u6253\u5b57\u9032\u884c\u641c\u5c0b", "search.result.term.missing": "\u7f3a\u5c11\u5b57\u8a5e", "select.version": "\u9078\u64c7\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

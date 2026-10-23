@@ -1,0 +1,4085 @@
+
+<!doctype html>
+<html lang="zh-TW" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="雲原生實作課程：GPU 排程、eBPF 與執行期安全、WebAssembly、服務網格與機密運算、遊戲伺服器平台">
+      
+      
+      
+        <link rel="canonical" href="https://deepwavelab.github.io/CloudNativePracticing/runbook/sprint1-day7-dra-aks-real-gpu/">
+      
+      
+        <link rel="prev" href="../sprint1-day6-dra-simulated-devices/">
+      
+      
+        <link rel="next" href="../sprint1-day8-decision-matrix/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Day 7 · DRA 配置實體 GPU - Cloud Native Lab Course</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/terminal.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#day-7-tesla-t4-dradriver-cdi" class="md-skip">
+          跳轉到
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="頁首">
+    <a href="../.." title="Cloud Native Lab Course" class="md-header__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Cloud Native Lab Course
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Day 7 · DRA 配置實體 GPU
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換深色模式"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="切換深色模式" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換淺色模式"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="切換淺色模式" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜尋" placeholder="搜尋" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="搜尋">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="分享" aria-label="分享" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="清除" aria-label="清除" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜尋引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="標籤" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  首頁
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../sprint1-day0-azure-aks-foundation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 1 · GPU 排程三部曲
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint2-day0-ebpf-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 2 · eBPF 與執行期安全
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint3-day0-wasm-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 3 · WebAssembly
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint4-day0-mesh-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 4 · 服務網格與機密運算
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint5-day0-game-server-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 5 · 遊戲伺服器平台
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="導覽列" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Cloud Native Lab Course" class="md-nav__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Cloud Native Lab Course
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首頁
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    首頁
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 3 · WebAssembly 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 4 · 服務網格與機密運算 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint5/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 5 · 遊戲伺服器平台 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day0-azure-aks-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 環境建置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day1-kai-queue-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · KAI 安裝與 Queue 基礎
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day2-gang-scheduling-preemption/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Gang Scheduling 與搶占
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day3-hami-memory-isolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · HAMi 安裝與 VRAM 用量限制
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day4-hami-kai-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · HAMi 與 KAI 整合
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day5-hami-webui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · HAMi-WebUI 觀測介面
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day6-dra-simulated-devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · DRA 概念與模擬裝置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · DRA 配置實體 GPU
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · DRA 配置實體 GPU
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#driver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        真的 driver 要多做什麼
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-gpu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1:開一個專用的 GPU 節點池
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 1:開一個專用的 GPU 節點池">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#day-35-gpu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        為什麼不能沿用 Day 3–5 的 GPU 節點
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        開池，驗四項隔離
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-driver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2:安裝 driver
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 2:安裝 driver">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        讀 chart：三件事決定值檔怎麼寫
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        安裝並確認 kubelet plugin 狀態
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-resourceslice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3:讀 ResourceSlice，看真卡宣告了什麼
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-nvidiacomgpu-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4:送出一顆沒寫 nvidia.com/gpu 的 pod
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 4:送出一顆沒寫 nvidia.com/gpu 的 pod">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cdi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        卡是怎麼進到容器的：CDI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-cel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5:用真屬性寫 CEL，一個能滿足、一個不能
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 5:用真屬性寫 CEL，一個能滿足、一個不能">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#describe-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        從 describe node 看不到這張卡
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-claim-pod-t4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6:一個 claim、兩顆 pod、同一張 T4
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7claim" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 7:claim 的生命週期
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#opaque-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        選讀：用 opaque config 指定共享策略
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 8:舊寫法的相容設定在 AKS 上不存在
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 9:卸載與刪池
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        疑難排解
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="疑難排解">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Job 跑完之後查不到它用過哪張卡
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        想一想
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        小結
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="延伸閱讀">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PCIe 拓樸屬性為什麼缺少
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        參考文件
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day8-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · Sprint 1 總結
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day0-ebpf-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · eBPF 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day1-bpftrace-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · bpftrace 三支經典工具
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day2-bpftrace-kubernetes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · 把核心事件接回 Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day3-falco-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Falco 安裝與預設規則
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day4-falco-custom-rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · 自訂規則、誤報調校與告警路由
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day5-tetragon-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Tetragon 與 TracingPolicy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day6-tetragon-enforcement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · 從偵測到攔截
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day7-cilium-kubeproxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Cilium 與 kube-proxy replacement
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day8-cilium-network-policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · CiliumNetworkPolicy（L3/L4 → L7）
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day9-hubble/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Hubble 可觀測性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 綜合：四套工具的分工
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 3 · WebAssembly
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 3 · WebAssembly
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day0-wasm-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · wasm 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day1-three-generations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · RuntimeClass 與節點執行路徑
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day2-wasmcloud/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · wasmCloud 與元件模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day3-wasmcloud-distributed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · wasmCloud 分散式模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day4-wasmedge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · WasmEdge 執行期
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day5-cost-measurement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · 執行時間、記憶體與量測範圍
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day6-spinkube-shim/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · SpinKube（上）：shim 佈建
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day7-spinkube-operator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · SpinKube（下）：operator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day8-reversibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · SpinKube 移除與節點殘留
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day9-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · 依工作負載選擇 Wasm 路線
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 4 · 服務網格與機密運算
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 4 · 服務網格與機密運算
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1" id="__nav_5_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part 1 · 服務網格（Day 0–4）
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part 1 · 服務網格（Day 0–4）
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day0-mesh-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 服務網格與入口閘道的三層地圖
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day1-envoy-gateway/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · Envoy Gateway 與 HTTP/3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day2-istio-ambient/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Istio ambient：服務間 mTLS 與連線限制
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day3-cilium-mesh/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Cilium mesh：WireGuard 加密與 L7
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day4-istio-vs-cilium/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · Istio 與 Cilium 比較
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part 2 · 機密運算（Day 5–9）
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part 2 · 機密運算（Day 5–9）
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day5-confidential-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · 機密運算的威脅模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day6-kata-sandboxing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · Kata Pod Sandboxing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day7-katacc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · kata-cc：SEV-SNP 機密硬體
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day8-attestation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 遠端證明：MAA、SKR 與金鑰釋放
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day9-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · 機密容器的需求與驗證範圍
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 5 · 遊戲伺服器平台
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 5 · 遊戲伺服器平台
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day0-game-server-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 遊戲伺服器平台概念
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day1-agones-first-gameserver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · Agones 第一顆 GameServer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day2-fleet-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Fleet 生命週期
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day3-allocation-autoscaler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Allocation 與 autoscaler
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day4-quilkin-udp-proxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · Quilkin UDP proxy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day5-nakama-postgres/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Nakama 與 PostgreSQL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day6-matchmaking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · Matchmaking 串接
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day7-python-client-e2e/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Python client 端到端
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day8-observability-resilience/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 觀測與韌性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day9-unity-client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Unity client 與 relay server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 遊戲伺服器平台總結
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#driver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        真的 driver 要多做什麼
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-gpu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1:開一個專用的 GPU 節點池
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 1:開一個專用的 GPU 節點池">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#day-35-gpu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        為什麼不能沿用 Day 3–5 的 GPU 節點
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        開池，驗四項隔離
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-driver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2:安裝 driver
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 2:安裝 driver">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        讀 chart：三件事決定值檔怎麼寫
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        安裝並確認 kubelet plugin 狀態
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-resourceslice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3:讀 ResourceSlice，看真卡宣告了什麼
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-nvidiacomgpu-pod" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4:送出一顆沒寫 nvidia.com/gpu 的 pod
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 4:送出一顆沒寫 nvidia.com/gpu 的 pod">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cdi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        卡是怎麼進到容器的：CDI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-cel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5:用真屬性寫 CEL，一個能滿足、一個不能
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 5:用真屬性寫 CEL，一個能滿足、一個不能">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#describe-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        從 describe node 看不到這張卡
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-claim-pod-t4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6:一個 claim、兩顆 pod、同一張 T4
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7claim" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 7:claim 的生命週期
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#opaque-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        選讀：用 opaque config 指定共享策略
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 8:舊寫法的相容設定在 AKS 上不存在
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 9:卸載與刪池
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        疑難排解
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="疑難排解">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Job 跑完之後查不到它用過哪張卡
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        想一想
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        小結
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="延伸閱讀">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PCIe 拓樸屬性為什麼缺少
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        參考文件
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="day-7-tesla-t4-dradriver-cdi">Day 7: 在 Tesla T4 上跑 DRA——driver 部署、CDI 注入與共用一張卡<a class="headerlink" href="#day-7-tesla-t4-dradriver-cdi" title="Permanent link">&para;</a></h1>
+<p><img align="right" alt="Kubernetes 官方標誌" src="../../assets/logos/kubernetes-icon-color.svg" width="95" /></p>
+<p>一台節點上插著一張 Tesla T4。你送出一顆 pod，它的 spec 裡完全沒有寫 <code>nvidia.com/gpu</code>，只掛了一個 ResourceClaim。這顆 pod 起來之後，在容器裡跑 <code>nvidia-smi</code>，看得到那張卡嗎？</p>
+<p>Day 6 用模擬裝置走過一遍 DRA 的物件：DeviceClass、ResourceSlice、ResourceClaim 和 CEL 選擇器。那時候的「裝置」只是 driver 記在記憶體裡的數字，claim 配置成功後，模擬 driver 注入容器的只有幾個環境變數，沒有真的裝置檔。至於既沒寫 <code>nvidia.com/gpu</code>、也沒有 claim 的容器，本來就看不到任何 GPU。這一章換成 NVIDIA 官方的 driver <code>dra-driver-nvidia-gpu</code> v0.4.1，把一張真的 T4 交到容器手上，並且一路看清楚：driver 怎麼把卡寫進 ResourceSlice、配好的卡怎麼進到容器、為什麼這個 driver 不能跟 Day 3–5 用的 device plugin 放在同一台節點上。</p>
+<p>讀完之後，DRA 要卡失敗時，你能分辨問題出在哪一段：driver 根本沒部署到節點上（DaemonSet 的 <code>DESIRED</code> 是 0）、claim 的條件沒有裝置符合（claim 停在 <code>pending</code>），還是卡已經配好、但容器注入那一段沒接上。</p>
+<h2 id="driver">真的 driver 要多做什麼<a class="headerlink" href="#driver" title="Permanent link">&para;</a></h2>
+<p>DRA 的物件格式是 Kubernetes 定的，driver 只負責兩件事：把節點上有哪些裝置寫成 ResourceSlice，以及在 pod 啟動前把配到的裝置準備好。Day 6 的模擬 driver 和今天的 NVIDIA driver 都做這兩件事，差別在做得多真：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th><code>dra-example-driver</code> v0.4.0（Day 6）</th>
+<th><code>dra-driver-nvidia-gpu</code> v0.4.1（本章）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>裝置從哪來</td>
+<td>值檔裡的 <code>numDevices</code> 說幾顆就幾顆</td>
+<td>透過 NVML（NVIDIA Management Library，NVIDIA 提供的查詢顯示卡資訊的函式庫）列出節點上實際插著的卡</td>
+</tr>
+<tr>
+<td>屬性怎麼填</td>
+<td>driver 自己編的固定字串</td>
+<td><code>productName</code>、<code>architecture</code>、<code>capacity.memory</code> 這些都向硬體查</td>
+</tr>
+<tr>
+<td>容器裡拿到什麼</td>
+<td>只有 driver 注入的環境變數，沒有裝置檔</td>
+<td>裝置檔和函式庫都放進容器，<code>nvidia-smi</code> 看得到卡</td>
+</tr>
+</tbody>
+</table>
+<p>第三列就是開場那個問題。接下來九個步驟依序是：開節點池、裝 driver、讀 ResourceSlice、送出第一顆要卡的 pod、用真屬性寫 CEL 並從 <code>describe node</code> 看 DRA 的卡、兩顆 pod 共用一張卡、claim 的生命週期、舊寫法的相容設定、卸載與刪池。步驟 7 之後另有一段選讀，示範用 claim 指定共享策略。</p>
+<h2 id="1-gpu">步驟 1:開一個專用的 GPU 節點池<a class="headerlink" href="#1-gpu" title="Permanent link">&para;</a></h2>
+<h3 id="day-35-gpu">為什麼不能沿用 Day 3–5 的 GPU 節點<a class="headerlink" href="#day-35-gpu" title="Permanent link">&para;</a></h3>
+<p>Day 3–5 的 GPU 節點上跑著 HAMi 的 device plugin。device plugin 是 Kubernetes 舊有的裝置機制：它把節點上的卡回報成 <code>nvidia.com/gpu</code> 這種整數資源，pod 寫 <code>nvidia.com/gpu: 1</code> 就分到一張。DRA 的 driver 在每台 GPU 節點上也要跑一個元件，叫 kubelet plugin，負責回報 ResourceSlice 和準備裝置。兩者都會動同一組 <code>/dev/nvidia*</code>，而且各自記帳、互相不知道對方：device plugin 把卡算進節點的 <code>nvidia.com/gpu</code>，DRA 把同一張卡寫進 ResourceSlice，兩本帳分開記，彼此不會同步。下面這段 chart 的錯誤訊息只寫了「可能衝突」（collisions），沒有說明會怎麼衝突，本課也沒有把兩者放在同一台節點上試過。所以 NVIDIA 對這個 driver 的部署位置有一條硬性規定：<strong>device plugin 和 DRA 的 kubelet plugin 不能放在同一台節點上</strong>。</p>
+<p>這條規定不用自己去文件裡找，chart 在安裝前就會擋下來。不加任何設定直接 <code>helm template</code>，得到的是一段錯誤：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">$ </span>helm<span class="w"> </span>template<span class="w"> </span>dra-driver-nvidia-gpu<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">    </span>oci://registry.k8s.io/dra-driver-nvidia/charts/dra-driver-nvidia-gpu<span class="w"> </span>--version<span class="w"> </span><span class="m">0</span>.4.1
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="go">Error: execution error at (dra-driver-nvidia-gpu/templates/validation.yaml:42:4):</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="go">… when &#39;resources.gpus.enabled=true&#39; this DRA driver cannot be deployed alongside the standard</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="go">GPU device plugin on the same node. To avoid potential collisions between these two components,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="go">we will not allow this default to take effect until KEP 5004 has reached GA in upstream Kubernetes.</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="go">… you must also:    --set &#39;gpuResourcesEnabledOverride=true&#39;</span>
+</span></code></pre></div>
+<p>錯誤訊息裡提到的 KEP 是 Kubernetes 的功能提案，5004 號提案要讓 DRA driver 也能接住 <code>nvidia.com/gpu</code> 這種舊寫法。在它正式發布之前，chart 不讓你在沒確認過的情況下打開 GPU 功能，要你自己加 <code>gpuResourcesEnabledOverride=true</code>，意思是由你自己確認這台節點上沒有 device plugin，chart 才放行。</p>
+<p>所以這一章另外開一個節點池 <code>gpudra</code>，只貼一個標籤 <code>pool=gpudra</code>：</p>
+<p><img alt="兩個 GPU 節點池並排：gpuspot 貼著 pool=gpu 和 gpu=on，上面跑 HAMi device plugin、HAMi-WebUI 的 dcgm-exporter 與映像預熱 DaemonSet；gpudra 只貼 pool=gpudra，上面只跑 DRA kubelet plugin。兩種 plugin 都會動同一組 /dev/nvidia*，所以分開放" src="../../assets/diagrams/s1d7-pools.svg" /></p>
+<p>我們可以從圖上看到，隔離靠的是標籤。HAMi 的 device plugin 和 HAMi-WebUI 的 dcgm-exporter 只去有 <code>gpu=on</code> 的節點，Day 3 加上的<a href="../sprint1-day3-hami-memory-isolation/">映像預熱 DaemonSet（prepuller）</a>只去有 <code>pool=gpu</code> 的節點。<code>gpudra</code> 刻意不貼這兩個，也不貼 <code>nvidia.com/gpu.present</code>，既有元件的 selector 一個都對不上，自然不會跑到這台機器上。KAI 和 HAMi 的排程元件跑在 system 節點池，不受影響。</p>
+<h3 id="_1">開池，驗四項隔離<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h3>
+<p>你需要一座 AKS 叢集，以及一個沒有 device plugin 的專用 GPU 節點池。<code>dra-driver-nvidia-gpu</code> v0.4.1 要求 Kubernetes ≥ 1.34.2、開啟 <code>DynamicResourceAllocation</code> 功能、NVIDIA driver ≥ 565，以及 container runtime 啟用 CDI。CDI（Container Device Interface）是一種讓 container runtime 照宣告檔把裝置放進容器的格式，步驟 4 會實際看到。官方文件還要求有元件替 GPU 節點貼上識別標籤；本章改用 <code>pool=gpudra</code>，步驟 2 會設定對應的 selector。</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>add<span class="w"> </span>-g<span class="w"> </span>&lt;resource-group&gt;<span class="w"> </span>--cluster-name<span class="w"> </span>&lt;cluster&gt;<span class="w"> </span>-n<span class="w"> </span>gpudra<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span>--subscription<span class="w"> </span>&lt;subscription-id&gt;<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>--node-count<span class="w"> </span><span class="m">1</span><span class="w"> </span>--node-vm-size<span class="w"> </span>Standard_NC4as_T4_v3<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span>--priority<span class="w"> </span>Spot<span class="w"> </span>--eviction-policy<span class="w"> </span>Delete<span class="w"> </span>--spot-max-price<span class="w"> </span>-1<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span>--labels<span class="w"> </span><span class="nv">pool</span><span class="o">=</span>gpudra<span class="w"> </span>--no-wait
+</span></code></pre></div>
+<p><code>--priority Spot</code> 跟 Day 0 的 <code>gpuspot</code> 一樣，用的是 Azure 的 Spot VM：用剩餘容量計價、比較便宜，但 Azure 需要容量時可以隨時收回，AKS 也因此會在節點上加 <code>kubernetes.azure.com/scalesetpriority=spot</code> 這個 taint。</p>
+<p>用 <code>kubectl get nodes</code> 查看節點的 Kubernetes 版本。以下輸出的實測版本是 Kubernetes 1.35.6、containerd 2.3.2、NVIDIA driver 580.159.04，供比對參考，不是最低版本要求。runtime 是否啟用 CDI，還要確認生效設定，見步驟 4。</p>
+<p>GPU 節點開機比一般 CPU 節點慢幾分鐘，多出來的時間花在 driver 安裝和裝置初始化。節點 <code>Ready</code> 之後，先驗四件事，全部成立才往下走。</p>
+<p>下面指令裡的 <code>&lt;gpudra-node&gt;</code> 換成你的節點名稱，用 <code>kubectl get nodes -l pool=gpudra</code> 查得到；本章輸出裡的 <code>aks-gpudra-34911544-vmss000000</code> 是課程當時那台節點的名稱。</p>
+<p><strong>第一，標籤</strong>。這一項也決定了步驟 2 的值檔怎麼寫：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>node<span class="w"> </span>&lt;gpudra-node&gt;<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>.metadata.labels
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">accelerator=nvidia                         ← AKS 自己貼的</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="go">kubernetes.azure.com/accelerator=nvidia    ← AKS 自己貼的</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="go">kubernetes.azure.com/scalesetpriority=spot</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="go">pool=gpudra                                ← 我們貼的,唯一一個</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="gp gp-VirtualEnv">(沒有 nvidia.com/gpu.present;也沒有任何 feature.node.kubernetes.io/* ——叢集沒裝 NFD)</span>
+</span></code></pre></div>
+<p><code>accelerator=nvidia</code> 和 <code>kubernetes.azure.com/accelerator=nvidia</code> 是 AKS 自己貼的，我們只貼了 <code>pool=gpudra</code>。最後一行先記著：這台節點沒有 <code>nvidia.com/gpu.present</code>，也沒有任何 <code>feature.node.kubernetes.io/*</code> 標籤。後者是 NFD（Node Feature Discovery）貼的，NFD 是一個會偵測節點硬體、自動貼上對應標籤的元件，這座叢集沒有裝，步驟 2 會再提到它。</p>
+<p><strong>第二，taint</strong>：只有 <code>kubernetes.azure.com/scalesetpriority=spot:NoSchedule</code> 一個，AKS 不會替 GPU 節點池自動加 <code>nvidia.com/gpu</code> taint。</p>
+<p><strong>第三，節點上沒有 device plugin</strong>：<code>kubectl get pods -A -o wide | grep aks-gpudra</code> 只列出 AKS 自己的六個系統 DaemonSet（兩個網路元件、節點管理、兩個 CSI 儲存、kube-proxy）。HAMi 的 <code>hami-device-plugin</code> 和映像預熱 DaemonSet 在這台機器上的 <code>DESIRED</code> 都是 0。</p>
+<p><strong>第四，節點的資源帳</strong>。這是後面步驟 5 的對照基準：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>node<span class="w"> </span>&lt;gpudra-node&gt;<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.status.allocatable}&#39;</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">{&quot;cpu&quot;:&quot;3860m&quot;,&quot;ephemeral-storage&quot;:&quot;133788111446&quot;,&quot;hugepages-1Gi&quot;:&quot;0&quot;,</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="go"> &quot;hugepages-2Mi&quot;:&quot;0&quot;,&quot;memory&quot;:&quot;23467240Ki&quot;,&quot;pods&quot;:&quot;250&quot;}</span>
+</span></code></pre></div>
+<p>一台插著實體 T4 的機器，<code>allocatable</code> 裡沒有 <code>nvidia.com/gpu</code>，因為這台節點上沒有 device plugin 回報它。用 DRA 時，卡會出現在 ResourceSlice 裡，不會出現在這裡。</p>
+<h2 id="2-driver">步驟 2:安裝 driver<a class="headerlink" href="#2-driver" title="Permanent link">&para;</a></h2>
+<h3 id="mine-2">讀 chart：三件事決定值檔怎麼寫<a class="headerlink" href="#mine-2" title="Permanent link">&para;</a></h3>
+<p><strong>第一，GPU 功能的總開關</strong>。<code>values.yaml</code> 裡 <code>resources.gpus.enabled</code> 預設就是 <code>true</code>，但被 <code>gpuResourcesEnabledOverride: false</code> 壓著。真正要打開的是後者，也就是步驟 1 那段錯誤訊息要你加的值。</p>
+<p><strong>第二，關掉 ComputeDomain</strong>。ComputeDomain 是給多台機器用 NVLink 把 GPU 互連起來的功能（值檔註解裡的 MNNVL 就是指這種跨機器的 NVLink），T4 用不到。關掉之後也少了一個 controller Deployment，整套 driver 只剩一個落在 <code>gpudra</code> 上的 DaemonSet。</p>
+<p><strong>第三，kubelet plugin 會去哪些節點</strong>。chart 裡 kubelet plugin 的 DaemonSet 寫死了一組 nodeAffinity（依節點標籤決定 pod 能去哪些節點的條件）。它用的是 <code>requiredDuringScheduling</code>，也就是硬性條件：不符合的節點，pod 一定不會被排上去，不是「盡量避開」。</p>
+<p>條件有五種，節點只要有其中一種標籤就符合：</p>
+<ul>
+<li><code>feature.node.kubernetes.io/pci-10de.present</code></li>
+<li><code>feature.node.kubernetes.io/pci-0302_10de.present</code></li>
+<li><code>feature.node.kubernetes.io/pci-0300_10de.present</code></li>
+<li><code>feature.node.kubernetes.io/cpu-model.vendor_id</code></li>
+<li><code>nvidia.com/gpu.present</code></li>
+</ul>
+<p>前四種是 NFD 貼的。NFD 在每台機器上偵測 PCI 裝置、CPU 指令集這類硬體特徵，把結果寫成 <code>feature.node.kubernetes.io/*</code> 標籤，讓其他元件用 selector 挑節點；<code>10de</code> 是 NVIDIA 的 PCI 廠商代碼。最後一種是 NVIDIA GPU Operator 貼的。</p>
+<p>driver 的標準安裝路徑假設叢集裡已經有 NFD 或 GPU Operator。步驟 1 看到 AKS 兩種都沒有，AKS 自己貼的 <code>accelerator=nvidia</code> 也不在清單上，所以照預設安裝，沒有任何節點符合。</p>
+<p>解法是把 chart 預設的 affinity 拿掉，改用我們自己的 <code>nodeSelector: pool=gpudra</code>。值檔（<code>day7-manifests/01-dra-nvidia-values.yaml</code>）長這樣：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span><span class="m">01</span>-dra-nvidia-values.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="s">gpuResourcesEnabledOverride: true    # master switch; without it there are no GPU resources</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="s">resources:</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="s">  gpus:</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="s">    enabled: true</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="s">  computeDomains:</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="s">    enabled: false                   # no MNNVL hardware here; also drops the controller</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="s">nvidiaDriverRoot: /                  # AKS ships the driver in the host root via the VHD</span>
+</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>
+</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="s">logVerbosity: &quot;4&quot;</span>
+</span><span id="__span-4-13"><a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>
+</span><span id="__span-4-14"><a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="s">kubeletPlugin:</span>
+</span><span id="__span-4-15"><a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="s">  affinity: null</span>
+</span><span id="__span-4-16"><a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a><span class="s">  nodeSelector:</span>
+</span><span id="__span-4-17"><a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a><span class="s">    pool: gpudra</span>
+</span><span id="__span-4-18"><a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a><span class="s">  tolerations:</span>
+</span><span id="__span-4-19"><a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a><span class="s">  - key: nvidia.com/gpu</span>
+</span><span id="__span-4-20"><a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a><span class="s">    operator: Exists</span>
+</span><span id="__span-4-21"><a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a><span class="s">    effect: NoSchedule</span>
+</span><span id="__span-4-22"><a id="__codelineno-4-22" name="__codelineno-4-22" href="#__codelineno-4-22"></a><span class="s">  - key: kubernetes.azure.com/scalesetpriority</span>
+</span><span id="__span-4-23"><a id="__codelineno-4-23" name="__codelineno-4-23" href="#__codelineno-4-23"></a><span class="s">    operator: Equal</span>
+</span><span id="__span-4-24"><a id="__codelineno-4-24" name="__codelineno-4-24" href="#__codelineno-4-24"></a><span class="s">    value: spot</span>
+</span><span id="__span-4-25"><a id="__codelineno-4-25" name="__codelineno-4-25" href="#__codelineno-4-25"></a><span class="s">    effect: NoSchedule</span>
+</span><span id="__span-4-26"><a id="__codelineno-4-26" name="__codelineno-4-26" href="#__codelineno-4-26"></a><span class="s">EOF</span>
+</span></code></pre></div>
+<p><code>nvidiaDriverRoot</code> 指的是主機上 NVIDIA driver 裝在哪裡。AKS 的 GPU 節點開機映像（VHD）已經把 driver 裝在主機根目錄，所以維持預設的 <code>/</code> 就對了。文件另外提醒，GKE 要改成 <code>/home/kubernetes/bin/nvidia</code>，由 GPU Operator 管理 driver 的叢集要改成 <code>/run/nvidia/driver</code>。</p>
+<h3 id="mine-1">安裝並確認 kubelet plugin 狀態<a class="headerlink" href="#mine-1" title="Permanent link">&para;</a></h3>
+<p><code>affinity: null</code> 會刪掉 chart 預設的 affinity，讓 <code>nodeSelector: pool=gpudra</code> 決定部署位置。不要換成 <code>{}</code>：helm 對 map（鍵值對）逐鍵合併，空 map 不會覆蓋任何預設值。</p>
+<p>使用上面的值檔安裝：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="gp">$ </span>helm<span class="w"> </span>install<span class="w"> </span>dra-driver-nvidia-gpu<span class="w"> </span>oci://registry.k8s.io/dra-driver-nvidia/charts/dra-driver-nvidia-gpu<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">    </span>--version<span class="w"> </span><span class="m">0</span>.4.1<span class="w"> </span>--create-namespace<span class="w"> </span>--namespace<span class="w"> </span>dra-driver-nvidia-gpu<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span>-f<span class="w"> </span><span class="m">01</span>-dra-nvidia-values.yaml<span class="w"> </span>--wait<span class="w"> </span>--timeout<span class="w"> </span>6m
+</span></code></pre></div>
+<p>安裝後查詢 DaemonSet 和 pod。以下是修正值檔後留下的查詢紀錄，並非首次安裝的輸出：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>dra-driver-nvidia-gpu<span class="w"> </span>get<span class="w"> </span>ds
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="go">NAME                                   DESIRED  CURRENT  READY  NODE SELECTOR</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="go">dra-driver-nvidia-gpu-kubelet-plugin   1        1        0      pool=gpudra</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>dra-driver-nvidia-gpu<span class="w"> </span>get<span class="w"> </span>pods
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="go">dra-driver-nvidia-gpu-kubelet-plugin-r4ntp   1/1   Running</span>
+</span></code></pre></div>
+<p><code>DESIRED</code> 是符合部署條件的節點數，本章只有一台 <code>gpudra</code> 節點，所以應該是 1。查詢 DaemonSet 時 <code>READY</code> 還是 0，稍後的 pod 查詢已是 <code>1/1 Running</code>。它是 <code>1/1</code> 而不是文件範例裡的 <code>2/2</code>，因為 ComputeDomain 關掉了，pod 裡只剩 <code>gpus</code> 這個容器。不能只看 helm 的成功訊息：<code>DESIRED</code> 是 0 時，<code>--wait</code> 也會回報成功。</p>
+<h2 id="3-resourceslice">步驟 3:讀 ResourceSlice，看真卡宣告了什麼<a class="headerlink" href="#3-resourceslice" title="Permanent link">&para;</a></h2>
+<p>kubelet plugin 起來之後，第一件事就是把節點上的卡寫成 ResourceSlice：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>resourceslice<span class="w"> </span>-o<span class="w"> </span>wide
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="go">NAME                                                       NODE                            DRIVER</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="go">00000-gpu.nvidia.com-aks-gpudra-34911544-vmss000000-2ff44  aks-gpudra-34911544-vmss000000  gpu.nvidia.com</span>
+</span></code></pre></div>
+<p>打開來看裡面的內容。這份就是之後寫 CEL 選擇器的依據：</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">spec</span><span class="p">:</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nt">driver</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gpu.nvidia.com</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span><span class="nt">nodeName</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">aks-gpudra-34911544-vmss000000</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span><span class="nt">pool</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> generation</span><span class="p">:</span><span class="w"> </span><span class="nv">1</span><span class="p p-Indicator">,</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">aks-gpudra-34911544-vmss000000</span><span class="p p-Indicator">,</span><span class="nt"> resourceSliceCount</span><span class="p">:</span><span class="w"> </span><span class="nv">1</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">  </span><span class="nt">devices</span><span class="p">:</span>
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gpu-0</span>
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">    </span><span class="nt">attributes</span><span class="p">:</span>
+</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">      </span><span class="nt">type</span><span class="p">:</span><span class="w">                  </span><span class="p p-Indicator">{</span><span class="nt"> string</span><span class="p">:</span><span class="w"> </span><span class="nv">gpu</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">      </span><span class="nt">uuid</span><span class="p">:</span><span class="w">                  </span><span class="p p-Indicator">{</span><span class="nt"> string</span><span class="p">:</span><span class="w"> </span><span class="nv">GPU-bf5809e7-…</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-8-10"><a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="w">      </span><span class="nt">productName</span><span class="p">:</span><span class="w">           </span><span class="p p-Indicator">{</span><span class="nt"> string</span><span class="p">:</span><span class="w"> </span><span class="nv">Tesla T4</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-8-11"><a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="w">      </span><span class="nt">brand</span><span class="p">:</span><span class="w">                 </span><span class="p p-Indicator">{</span><span class="nt"> string</span><span class="p">:</span><span class="w"> </span><span class="nv">Nvidia</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-8-12"><a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="w">      </span><span class="nt">architecture</span><span class="p">:</span><span class="w">          </span><span class="p p-Indicator">{</span><span class="nt"> string</span><span class="p">:</span><span class="w"> </span><span class="nv">Turing</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-8-13"><a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="w">      </span><span class="nt">cudaComputeCapability</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> version</span><span class="p">:</span><span class="w"> </span><span class="nv">7.5.0</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-8-14"><a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="w">      </span><span class="nt">driverVersion</span><span class="p">:</span><span class="w">         </span><span class="p p-Indicator">{</span><span class="nt"> version</span><span class="p">:</span><span class="w"> </span><span class="nv">580.159.4</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-8-15"><a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="w">      </span><span class="nt">cudaDriverVersion</span><span class="p">:</span><span class="w">     </span><span class="p p-Indicator">{</span><span class="nt"> version</span><span class="p">:</span><span class="w"> </span><span class="nv">13.0.0</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-8-16"><a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="w">      </span><span class="nt">addressingMode</span><span class="p">:</span><span class="w">        </span><span class="p p-Indicator">{</span><span class="nt"> string</span><span class="p">:</span><span class="w"> </span><span class="nv">HMM</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-8-17"><a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="w">      </span><span class="nt">resource.kubernetes.io/pciBusID</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> string</span><span class="p">:</span><span class="w"> </span><span class="s">&#39;0001:00:00.0&#39;</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span><span id="__span-8-18"><a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a><span class="w">    </span><span class="nt">capacity</span><span class="p">:</span>
+</span><span id="__span-8-19"><a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a><span class="w">      </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> value</span><span class="p">:</span><span class="w"> </span><span class="nv">16Gi</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span></code></pre></div>
+<p>跟 Day 6 模擬 driver 的 ResourceSlice 比，屬性多了不少，而且都是向硬體查來的：<code>productName</code> 是 <code>Tesla T4</code>、<code>architecture</code> 是 <code>Turing</code>、<code>capacity.memory</code> 是 <code>16Gi</code>。<code>addressingMode</code> 的值 HMM 指 Linux 的 Heterogeneous Memory Management（讓 GPU 能直接存取主機記憶體的核心功能），它和 <code>cudaDriverVersion</code> 這類屬性本章用不到。</p>
+<p>寫選擇器時，NVIDIA 自己的屬性掛在 driver 名稱底下，例如 <code>device.attributes['gpu.nvidia.com'].productName</code>；容量是 <code>device.capacity['gpu.nvidia.com'].memory</code>；<code>pciBusID</code> 這種各廠商通用的鍵則掛在 <code>device.attributes['resource.kubernetes.io'].pciBusID</code>。</p>
+<p id="mine-6">寫第一條選擇器之前，有三個值要先看清楚：</p>
+<ol>
+<li><code>driverVersion</code> 是 <code>580.159.4</code>，不是 <code>nvidia-smi</code> 印的 <code>580.159.04</code>。driver 把 NVML 回傳的字串轉成 semver（「主版本.次版本.修訂號」三段數字的版本格式）再轉回字串，前導零就不見了。</li>
+<li><code>cudaComputeCapability</code> 是三段式的 <code>7.5.0</code>；NVML 給的是兩段的 <code>7.5</code>，同樣被補了一段。這兩個屬性都是 version 型，CEL 裡要用版本比較，不要用字串相等。</li>
+<li><code>memory</code> 是整數的 <code>16Gi</code>，來自 NVML 回報的總量（16384 MiB），沒有先扣掉保留區。</li>
+</ol>
+<p>這份 ResourceSlice 沒有 <code>pcieRoot</code> 屬性，無法用它寫依 PCIe 拓樸挑卡的選擇器，但不影響本章的整卡配置。原因見<a href="#mine-4">延伸閱讀：PCIe 拓樸屬性為什麼缺少</a>。</p>
+<h2 id="4-nvidiacomgpu-pod">步驟 4:送出一顆沒寫 <code>nvidia.com/gpu</code> 的 pod<a class="headerlink" href="#4-nvidiacomgpu-pod" title="Permanent link">&para;</a></h2>
+<p>回到開場的問題。<code>day7-manifests/02-gate-claimtemplate-pod.yaml</code> 裡的 pod，<code>resources</code> 底下沒有任何 <code>nvidia.com/*</code>，唯一的請求是一個 claim：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span><span class="m">02</span>-gate-claimtemplate-pod.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="s">kind: Namespace</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="s">metadata:</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="s">  name: dra-gate</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="s">---</span>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="s">apiVersion: resource.k8s.io/v1</span>
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="s">kind: ResourceClaimTemplate</span>
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="s">metadata:</span>
+</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="s">  namespace: dra-gate</span>
+</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="s">  name: single-gpu</span>
+</span><span id="__span-9-12"><a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="s">spec:</span>
+</span><span id="__span-9-13"><a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="s">  spec:</span>
+</span><span id="__span-9-14"><a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="s">    devices:</span>
+</span><span id="__span-9-15"><a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="s">      requests:</span>
+</span><span id="__span-9-16"><a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a><span class="s">      - name: gpu</span>
+</span><span id="__span-9-17"><a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a><span class="s">        exactly:</span>
+</span><span id="__span-9-18"><a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a><span class="s">          deviceClassName: gpu.nvidia.com</span>
+</span><span id="__span-9-19"><a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a><span class="s">---</span>
+</span><span id="__span-9-20"><a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-9-21"><a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a><span class="s">kind: Pod</span>
+</span><span id="__span-9-22"><a id="__codelineno-9-22" name="__codelineno-9-22" href="#__codelineno-9-22"></a><span class="s">metadata:</span>
+</span><span id="__span-9-23"><a id="__codelineno-9-23" name="__codelineno-9-23" href="#__codelineno-9-23"></a><span class="s">  namespace: dra-gate</span>
+</span><span id="__span-9-24"><a id="__codelineno-9-24" name="__codelineno-9-24" href="#__codelineno-9-24"></a><span class="s">  name: gate-smi</span>
+</span><span id="__span-9-25"><a id="__codelineno-9-25" name="__codelineno-9-25" href="#__codelineno-9-25"></a><span class="s">spec:</span>
+</span><span id="__span-9-26"><a id="__codelineno-9-26" name="__codelineno-9-26" href="#__codelineno-9-26"></a><span class="s">  restartPolicy: Never</span>
+</span><span id="__span-9-27"><a id="__codelineno-9-27" name="__codelineno-9-27" href="#__codelineno-9-27"></a><span class="s">  nodeSelector:</span>
+</span><span id="__span-9-28"><a id="__codelineno-9-28" name="__codelineno-9-28" href="#__codelineno-9-28"></a><span class="s">    pool: gpudra</span>
+</span><span id="__span-9-29"><a id="__codelineno-9-29" name="__codelineno-9-29" href="#__codelineno-9-29"></a><span class="s">  tolerations:</span>
+</span><span id="__span-9-30"><a id="__codelineno-9-30" name="__codelineno-9-30" href="#__codelineno-9-30"></a><span class="s">  - key: kubernetes.azure.com/scalesetpriority</span>
+</span><span id="__span-9-31"><a id="__codelineno-9-31" name="__codelineno-9-31" href="#__codelineno-9-31"></a><span class="s">    operator: Equal</span>
+</span><span id="__span-9-32"><a id="__codelineno-9-32" name="__codelineno-9-32" href="#__codelineno-9-32"></a><span class="s">    value: spot</span>
+</span><span id="__span-9-33"><a id="__codelineno-9-33" name="__codelineno-9-33" href="#__codelineno-9-33"></a><span class="s">    effect: NoSchedule</span>
+</span><span id="__span-9-34"><a id="__codelineno-9-34" name="__codelineno-9-34" href="#__codelineno-9-34"></a><span class="s">  containers:</span>
+</span><span id="__span-9-35"><a id="__codelineno-9-35" name="__codelineno-9-35" href="#__codelineno-9-35"></a><span class="s">  - name: ctr</span>
+</span><span id="__span-9-36"><a id="__codelineno-9-36" name="__codelineno-9-36" href="#__codelineno-9-36"></a><span class="s">    image: nvcr.io/nvidia/cuda:12.6.2-base-ubuntu24.04</span>
+</span><span id="__span-9-37"><a id="__codelineno-9-37" name="__codelineno-9-37" href="#__codelineno-9-37"></a><span class="s">    command: [&quot;bash&quot;, &quot;-c&quot;]</span>
+</span><span id="__span-9-38"><a id="__codelineno-9-38" name="__codelineno-9-38" href="#__codelineno-9-38"></a><span class="s">    args:</span>
+</span><span id="__span-9-39"><a id="__codelineno-9-39" name="__codelineno-9-39" href="#__codelineno-9-39"></a><span class="s">    - |</span>
+</span><span id="__span-9-40"><a id="__codelineno-9-40" name="__codelineno-9-40" href="#__codelineno-9-40"></a><span class="s">      echo &quot;===== nvidia-smi -L =====&quot;; nvidia-smi -L</span>
+</span><span id="__span-9-41"><a id="__codelineno-9-41" name="__codelineno-9-41" href="#__codelineno-9-41"></a><span class="s">      echo &quot;===== nvidia-smi =====&quot;; nvidia-smi</span>
+</span><span id="__span-9-42"><a id="__codelineno-9-42" name="__codelineno-9-42" href="#__codelineno-9-42"></a><span class="s">      echo &quot;===== NVIDIA env =====&quot;; env | grep -i -E &#39;nvidia|gpu|cuda&#39; | sort</span>
+</span><span id="__span-9-43"><a id="__codelineno-9-43" name="__codelineno-9-43" href="#__codelineno-9-43"></a><span class="s">      echo &quot;===== /dev/nvidia* =====&quot;; ls -l /dev/nvidia* 2&gt;&amp;1</span>
+</span><span id="__span-9-44"><a id="__codelineno-9-44" name="__codelineno-9-44" href="#__codelineno-9-44"></a><span class="s">    resources:</span>
+</span><span id="__span-9-45"><a id="__codelineno-9-45" name="__codelineno-9-45" href="#__codelineno-9-45"></a><span class="s">      claims:                             # the only &quot;request&quot; in this pod</span>
+</span><span id="__span-9-46"><a id="__codelineno-9-46" name="__codelineno-9-46" href="#__codelineno-9-46"></a><span class="s">      - name: gpu</span>
+</span><span id="__span-9-47"><a id="__codelineno-9-47" name="__codelineno-9-47" href="#__codelineno-9-47"></a><span class="s">  resourceClaims:</span>
+</span><span id="__span-9-48"><a id="__codelineno-9-48" name="__codelineno-9-48" href="#__codelineno-9-48"></a><span class="s">  - name: gpu</span>
+</span><span id="__span-9-49"><a id="__codelineno-9-49" name="__codelineno-9-49" href="#__codelineno-9-49"></a><span class="s">    resourceClaimTemplateName: single-gpu</span>
+</span><span id="__span-9-50"><a id="__codelineno-9-50" name="__codelineno-9-50" href="#__codelineno-9-50"></a><span class="s">EOF</span>
+</span></code></pre></div>
+<p>映像用的是 NGC（NVIDIA 的容器映像倉庫）上的 <code>nvcr.io/nvidia/cuda</code>，不用登入就能拉。容器裡依序印出 <code>nvidia-smi</code>、跟 NVIDIA 有關的環境變數和 <code>/dev/nvidia*</code>：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>gate-smi 0/1 Completed
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>===== nvidia-smi -L =====
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>GPU 0: Tesla T4 (UUID: GPU-bf5809e7-…)
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>===== nvidia-smi =====
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>| NVIDIA-SMI 580.159.04  |  0  Tesla T4  Off | 00000001:00:00.0 Off | 0MiB / 16384MiB | 8% |
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>===== NVIDIA env =====
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>NVIDIA_DRIVER_CAPABILITIES=compute,utility
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>NVIDIA_VISIBLE_DEVICES=void            ← 注意這一行
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64
+</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>===== /dev/nvidia* =====
+</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>/dev/nvidia0  /dev/nvidiactl  /dev/nvidia-uvm  /dev/nvidia-uvm-tools  /dev/nvidia-caps/…
+</span></code></pre></div>
+<p>看得到卡。而且有三個地方可以確認，這張卡就是 DRA 配給它的那一張：</p>
+<ol>
+<li><strong>UUID 對得起來</strong>。步驟 3 的 ResourceSlice 上 <code>uuid</code> 是 <code>GPU-bf5809e7-…</code>，容器裡 <code>nvidia-smi -L</code> 印的是同一個字串。</li>
+<li><strong><code>NVIDIA_VISIBLE_DEVICES=void</code></strong>。這個變數要另外解釋，見下一段。</li>
+<li><strong>裝置檔真的在容器的 <code>/dev</code> 底下</strong>。</li>
+</ol>
+<h3 id="cdi">卡是怎麼進到容器的：CDI<a class="headerlink" href="#cdi" title="Permanent link">&para;</a></h3>
+<p>容器要用 GPU，光是排程器說「這張卡歸你」不夠：<code>/dev/nvidia0</code> 這類裝置檔要放進容器、driver 的函式庫路徑要補上。Day 3–5 的做法是 device plugin 把裝置 ID 寫進環境變數 <code>NVIDIA_VISIBLE_DEVICES</code>，再由 <code>nvidia-container-runtime</code> 讀這個變數，把對應的卡掛進去。</p>
+<p>上面的輸出裡，這個變數被設成 <code>void</code>，意思是「什麼都不要掛」，卡卻還是在容器裡。表示掛卡的不是這條舊路線，而是步驟 1 提過的 <strong>CDI</strong>：知道要掛什麼的元件，把「要放進哪些裝置檔、設哪些環境變數」寫成一份宣告檔，放在 container runtime 會讀的目錄；runtime 照著檔案改容器，不需要認得任何廠商的環境變數。</p>
+<p>兩條路線並排來看：</p>
+<p><img alt="兩條路線上下並排。device plugin 路線：pod 寫 nvidia.com/gpu: 1、kubelet 拿到裝置 ID、寫進環境變數 NVIDIA_VISIBLE_DEVICES、nvidia-container-runtime 照變數掛卡。DRA 路線：pod 寫 resourceClaims、排程器配走 ResourceSlice 上的裝置、kubelet plugin 寫 /var/run/cdi 宣告檔、containerd 照 CDI 宣告檔改容器" src="../../assets/diagrams/s1d7-two-routes.svg" /></p>
+<p>從圖上可以看到，兩條路線前半段都是「先決定給哪張卡」，差在後半段怎麼把卡交給容器：舊路線靠環境變數傳話，DRA 路線靠一份寫在節點上的檔案。DRA 這一段再展開，由上往下是五站：</p>
+<p><img alt="由上往下五站：ResourceClaim 的 status.allocation 記著 gpu-0；kubelet plugin 準備裝置並寫出宣告檔；/var/run/cdi 底下以 claim UID 命名的宣告檔，裡面有 deviceNodes、NVIDIA_VISIBLE_DEVICES=void 和 create-symlinks hook；containerd 從 cdi_spec_dirs 讀到它；容器裡出現 /dev/nvidia0，nvidia-smi 看得到 T4" src="../../assets/diagrams/s1d7-cdi-chain.svg" /></p>
+<p>DRA 要卡失敗時，可以照這張圖一站一站查：claim 有沒有 <code>allocation</code>、節點上有沒有對應的宣告檔、containerd 有沒有讀這個目錄、容器裡有沒有裝置檔。下面兩段輸出分別對應中間兩站。</p>
+<p><strong>宣告檔確實存在</strong>。driver 為每個 claim 在節點上寫一份，檔名是 <code>/var/run/cdi/k8s.gpu.nvidia.com-claim_&lt;claim UID&gt;.yaml</code>，內容節錄如下：</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nt">cdiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5.0</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">k8s.gpu.nvidia.com/claim</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="nt">devices</span><span class="p">:</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">b3f7d9bb-…-gpu-0</span><span class="w">            </span><span class="c1"># &lt;claimUID&gt;-&lt;deviceName&gt;</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">  </span><span class="nt">containerEdits</span><span class="p">:</span>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">    </span><span class="nt">deviceNodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> path</span><span class="p">:</span><span class="w"> </span><span class="nv">/dev/nvidia0</span><span class="p p-Indicator">,</span><span class="nt"> major</span><span class="p">:</span><span class="w"> </span><span class="nv">195</span><span class="p p-Indicator">,</span><span class="nt"> permissions</span><span class="p">:</span><span class="w"> </span><span class="nv">rwm</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w"> </span><span class="p p-Indicator">]</span>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="nt">containerEdits</span><span class="p">:</span>
+</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="w">  </span><span class="nt">env</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="w"> </span><span class="nv">NVIDIA_VISIBLE_DEVICES=void</span><span class="w"> </span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># switch off the legacy path to avoid double injection</span>
+</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="w">  </span><span class="nt">deviceNodes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="w"> </span><span class="nv">/dev/nvidia-uvm</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">/dev/nvidia-uvm-tools</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">/dev/nvidiactl</span><span class="w"> </span><span class="p p-Indicator">]</span>
+</span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="w">  </span><span class="nt">hooks</span><span class="p">:</span>
+</span><span id="__span-11-11"><a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> hookName</span><span class="p">:</span><span class="w"> </span><span class="nv">createContainer</span><span class="p p-Indicator">,</span><span class="nt"> path</span><span class="p">:</span><span class="w"> </span><span class="nv">/var/lib/kubelet/plugins/gpu.nvidia.com/nvidia-cdi-hook</span><span class="p p-Indicator">,</span>
+</span><span id="__span-11-12"><a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a><span class="nt">      args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">nvidia-cdi-hook</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">create-symlinks</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span></code></pre></div>
+<p><code>devices</code> 底下是這個 claim 配到的 <code>/dev/nvidia0</code>。外層的 <code>containerEdits</code> 套用在「從這份檔案拿到任何一個裝置的容器」上，不是節點上所有容器：包括把 <code>NVIDIA_VISIBLE_DEVICES</code> 設成 <code>void</code>（避免舊路線又掛一次），以及一個 hook。hook 是容器建立時 runtime 會執行的一支程式，這裡的 <code>create-symlinks</code> 負責在容器裡建立函式庫需要的符號連結。</p>
+<p><strong>containerd 會讀這個目錄</strong>。下面這段是裝 driver 前抓的，在步驟 1 開好節點之後，用一顆 privileged pod 切進主機的檔案系統來看：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>NVIDIA-SMI 580.159.04   Driver Version: 580.159.04   CUDA Version: 13.0   Tesla T4  0MiB / 16384MiB
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>/dev/nvidia0  /dev/nvidiactl  /dev/nvidia-uvm  /dev/nvidia-uvm-tools  /dev/nvidia-caps/…
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>$ containerd config dump | grep -i cdi
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>    enable_cdi = true
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>    cdi_spec_dirs = [&#39;/etc/cdi&#39;, &#39;/var/run/cdi&#39;]
+</span></code></pre></div>
+<p>前兩行確認主機本身已經準備好：<code>nvidia-smi</code> 看得到 Tesla T4，driver 是 580.159.04、CUDA 13.0，VRAM 用量 0MiB 表示還沒有程式在用；第二行是主機上已經有的 <code>/dev/nvidia*</code> 裝置檔，也就是之後宣告檔要放進容器的那些。後兩行是 containerd 實際生效的設定：<code>enable_cdi = true</code>，<code>cdi_spec_dirs</code> 包含 <code>/var/run/cdi</code>。這個目錄在裝 driver 之前還不存在，是 driver 建的；這個節點跑的是 containerd 2.3.2，2.x 預設就會讀它，所以整條路接得起來。containerd 1.x 的叢集要自己把 <code>enable_cdi</code> 打開。</p>
+<p>查這件事要用 <code>containerd config dump</code>（讀生效的值），不要用 <code>cat /etc/containerd/config.toml</code>：AKS 的設定檔裡沒有任何 CDI 相關的鍵，只看設定檔會以為 CDI 沒開。同一份設定檔裡有一行 <code>default_runtime_name = "nvidia-container-runtime"</code>，也就是 AKS 的 GPU 節點預設就用 NVIDIA 的 runtime，這解釋了 Day 4 的<a href="../sprint1-day4-hami-kai-integration/#mine-1">「KAI 替共卡 pod 指定 RuntimeClass "nvidia"，AKS 沒有，pod 建不出來」</a>：GPU 節點根本不需要有人指名 runtime。</p>
+<p>到這裡開場的問題有答案了：<strong>Tesla T4 上用 DRA 配置整張卡完全正常，沒有遇到 Turing 世代或 T4 特有的限制。</strong></p>
+<h2 id="5-cel">步驟 5:用真屬性寫 CEL，一個能滿足、一個不能<a class="headerlink" href="#5-cel" title="Permanent link">&para;</a></h2>
+<p>有了真的屬性，CEL 選擇器就能寫出有意義的條件。<code>day7-manifests/03-a-cel-real-attributes.yaml</code> 建兩個 template，只差 VRAM 的門檻：一個要求至少 8Gi，一個要求至少 24Gi。T4 有 16Gi，前者能滿足，後者不能：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span><span class="m">03</span>-a-cel-real-attributes.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="s">kind: Namespace</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="s">metadata:</span>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="s">  name: dra-3a</span>
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="s">EOF</span>
+</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>
+</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="c1"># gpu-mem-8gi:  16Gi &gt;= 8Gi  -&gt; satisfiable / gpu-mem-24gi: 16Gi &lt; 24Gi -&gt; unsatisfiable</span>
+</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="k">while</span><span class="w"> </span><span class="nb">read</span><span class="w"> </span>-r<span class="w"> </span>tpl<span class="w"> </span>threshold<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+</span><span id="__span-13-10"><a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="w">  </span>cat<span class="w"> </span><span class="s">&lt;&lt;EOF</span>
+</span><span id="__span-13-11"><a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="s">---</span>
+</span><span id="__span-13-12"><a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="s">apiVersion: resource.k8s.io/v1</span>
+</span><span id="__span-13-13"><a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="s">kind: ResourceClaimTemplate</span>
+</span><span id="__span-13-14"><a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="s">metadata:</span>
+</span><span id="__span-13-15"><a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="s">  namespace: dra-3a</span>
+</span><span id="__span-13-16"><a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a><span class="s">  name: $tpl</span>
+</span><span id="__span-13-17"><a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a><span class="s">spec:</span>
+</span><span id="__span-13-18"><a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a><span class="s">  spec:</span>
+</span><span id="__span-13-19"><a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a><span class="s">    devices:</span>
+</span><span id="__span-13-20"><a id="__codelineno-13-20" name="__codelineno-13-20" href="#__codelineno-13-20"></a><span class="s">      requests:</span>
+</span><span id="__span-13-21"><a id="__codelineno-13-21" name="__codelineno-13-21" href="#__codelineno-13-21"></a><span class="s">      - name: gpu</span>
+</span><span id="__span-13-22"><a id="__codelineno-13-22" name="__codelineno-13-22" href="#__codelineno-13-22"></a><span class="s">        exactly:</span>
+</span><span id="__span-13-23"><a id="__codelineno-13-23" name="__codelineno-13-23" href="#__codelineno-13-23"></a><span class="s">          deviceClassName: gpu.nvidia.com</span>
+</span><span id="__span-13-24"><a id="__codelineno-13-24" name="__codelineno-13-24" href="#__codelineno-13-24"></a><span class="s">          selectors:</span>
+</span><span id="__span-13-25"><a id="__codelineno-13-25" name="__codelineno-13-25" href="#__codelineno-13-25"></a><span class="s">          - cel:</span>
+</span><span id="__span-13-26"><a id="__codelineno-13-26" name="__codelineno-13-26" href="#__codelineno-13-26"></a><span class="s">              expression: &quot;device.capacity[&#39;gpu.nvidia.com&#39;].memory.compareTo(quantity(&#39;$threshold&#39;)) &gt;= 0&quot;</span>
+</span><span id="__span-13-27"><a id="__codelineno-13-27" name="__codelineno-13-27" href="#__codelineno-13-27"></a><span class="s">EOF</span>
+</span><span id="__span-13-28"><a id="__codelineno-13-28" name="__codelineno-13-28" href="#__codelineno-13-28"></a><span class="k">done</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="m">03</span>-a-cel-real-attributes.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;TABLE&#39;</span>
+</span><span id="__span-13-29"><a id="__codelineno-13-29" name="__codelineno-13-29" href="#__codelineno-13-29"></a><span class="s">gpu-mem-8gi  8Gi</span>
+</span><span id="__span-13-30"><a id="__codelineno-13-30" name="__codelineno-13-30" href="#__codelineno-13-30"></a><span class="s">gpu-mem-24gi 24Gi</span>
+</span><span id="__span-13-31"><a id="__codelineno-13-31" name="__codelineno-13-31" href="#__codelineno-13-31"></a><span class="s">TABLE</span>
+</span><span id="__span-13-32"><a id="__codelineno-13-32" name="__codelineno-13-32" href="#__codelineno-13-32"></a>
+</span><span id="__span-13-33"><a id="__codelineno-13-33" name="__codelineno-13-33" href="#__codelineno-13-33"></a><span class="k">while</span><span class="w"> </span><span class="nb">read</span><span class="w"> </span>-r<span class="w"> </span>pod<span class="w"> </span>tpl<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+</span><span id="__span-13-34"><a id="__codelineno-13-34" name="__codelineno-13-34" href="#__codelineno-13-34"></a><span class="w">  </span>cat<span class="w"> </span><span class="s">&lt;&lt;EOF</span>
+</span><span id="__span-13-35"><a id="__codelineno-13-35" name="__codelineno-13-35" href="#__codelineno-13-35"></a><span class="s">---</span>
+</span><span id="__span-13-36"><a id="__codelineno-13-36" name="__codelineno-13-36" href="#__codelineno-13-36"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-13-37"><a id="__codelineno-13-37" name="__codelineno-13-37" href="#__codelineno-13-37"></a><span class="s">kind: Pod</span>
+</span><span id="__span-13-38"><a id="__codelineno-13-38" name="__codelineno-13-38" href="#__codelineno-13-38"></a><span class="s">metadata:</span>
+</span><span id="__span-13-39"><a id="__codelineno-13-39" name="__codelineno-13-39" href="#__codelineno-13-39"></a><span class="s">  namespace: dra-3a</span>
+</span><span id="__span-13-40"><a id="__codelineno-13-40" name="__codelineno-13-40" href="#__codelineno-13-40"></a><span class="s">  name: $pod</span>
+</span><span id="__span-13-41"><a id="__codelineno-13-41" name="__codelineno-13-41" href="#__codelineno-13-41"></a><span class="s">spec:</span>
+</span><span id="__span-13-42"><a id="__codelineno-13-42" name="__codelineno-13-42" href="#__codelineno-13-42"></a><span class="s">  restartPolicy: Never</span>
+</span><span id="__span-13-43"><a id="__codelineno-13-43" name="__codelineno-13-43" href="#__codelineno-13-43"></a><span class="s">  nodeSelector:</span>
+</span><span id="__span-13-44"><a id="__codelineno-13-44" name="__codelineno-13-44" href="#__codelineno-13-44"></a><span class="s">    pool: gpudra</span>
+</span><span id="__span-13-45"><a id="__codelineno-13-45" name="__codelineno-13-45" href="#__codelineno-13-45"></a><span class="s">  tolerations:</span>
+</span><span id="__span-13-46"><a id="__codelineno-13-46" name="__codelineno-13-46" href="#__codelineno-13-46"></a><span class="s">  - key: kubernetes.azure.com/scalesetpriority</span>
+</span><span id="__span-13-47"><a id="__codelineno-13-47" name="__codelineno-13-47" href="#__codelineno-13-47"></a><span class="s">    operator: Equal</span>
+</span><span id="__span-13-48"><a id="__codelineno-13-48" name="__codelineno-13-48" href="#__codelineno-13-48"></a><span class="s">    value: spot</span>
+</span><span id="__span-13-49"><a id="__codelineno-13-49" name="__codelineno-13-49" href="#__codelineno-13-49"></a><span class="s">    effect: NoSchedule</span>
+</span><span id="__span-13-50"><a id="__codelineno-13-50" name="__codelineno-13-50" href="#__codelineno-13-50"></a><span class="s">  containers:</span>
+</span><span id="__span-13-51"><a id="__codelineno-13-51" name="__codelineno-13-51" href="#__codelineno-13-51"></a><span class="s">  - name: ctr</span>
+</span><span id="__span-13-52"><a id="__codelineno-13-52" name="__codelineno-13-52" href="#__codelineno-13-52"></a><span class="s">    image: nvcr.io/nvidia/cuda:12.6.2-base-ubuntu24.04</span>
+</span><span id="__span-13-53"><a id="__codelineno-13-53" name="__codelineno-13-53" href="#__codelineno-13-53"></a><span class="s">    command: [&quot;bash&quot;, &quot;-c&quot;]</span>
+</span><span id="__span-13-54"><a id="__codelineno-13-54" name="__codelineno-13-54" href="#__codelineno-13-54"></a><span class="s">    args: [&quot;nvidia-smi -L; trap &#39;exit 0&#39; TERM; sleep 9999 &amp; wait&quot;]</span>
+</span><span id="__span-13-55"><a id="__codelineno-13-55" name="__codelineno-13-55" href="#__codelineno-13-55"></a><span class="s">    resources:</span>
+</span><span id="__span-13-56"><a id="__codelineno-13-56" name="__codelineno-13-56" href="#__codelineno-13-56"></a><span class="s">      claims:</span>
+</span><span id="__span-13-57"><a id="__codelineno-13-57" name="__codelineno-13-57" href="#__codelineno-13-57"></a><span class="s">      - name: gpu</span>
+</span><span id="__span-13-58"><a id="__codelineno-13-58" name="__codelineno-13-58" href="#__codelineno-13-58"></a><span class="s">  resourceClaims:</span>
+</span><span id="__span-13-59"><a id="__codelineno-13-59" name="__codelineno-13-59" href="#__codelineno-13-59"></a><span class="s">  - name: gpu</span>
+</span><span id="__span-13-60"><a id="__codelineno-13-60" name="__codelineno-13-60" href="#__codelineno-13-60"></a><span class="s">    resourceClaimTemplateName: $tpl</span>
+</span><span id="__span-13-61"><a id="__codelineno-13-61" name="__codelineno-13-61" href="#__codelineno-13-61"></a><span class="s">EOF</span>
+</span><span id="__span-13-62"><a id="__codelineno-13-62" name="__codelineno-13-62" href="#__codelineno-13-62"></a><span class="k">done</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="m">03</span>-a-cel-real-attributes.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;TABLE&#39;</span>
+</span><span id="__span-13-63"><a id="__codelineno-13-63" name="__codelineno-13-63" href="#__codelineno-13-63"></a><span class="s">pod-mem-ok         gpu-mem-8gi</span>
+</span><span id="__span-13-64"><a id="__codelineno-13-64" name="__codelineno-13-64" href="#__codelineno-13-64"></a><span class="s">pod-mem-impossible gpu-mem-24gi</span>
+</span><span id="__span-13-65"><a id="__codelineno-13-65" name="__codelineno-13-65" href="#__codelineno-13-65"></a><span class="s">TABLE</span>
+</span></code></pre></div>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="go">pod/pod-mem-ok          1/1  Running   resourceclaim/pod-mem-ok-gpu-x4j2c          allocated,reserved</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="go">pod/pod-mem-impossible  0/1  Pending   resourceclaim/pod-mem-impossible-gpu-vppgv  pending</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>dra-3a<span class="w"> </span>logs<span class="w"> </span>pod-mem-ok
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="go">GPU 0: Tesla T4 (UUID: GPU-bf5809e7-…)</span>
+</span></code></pre></div>
+<p><code>pod-mem-ok</code> 拿到卡跑起來了；<code>pod-mem-impossible</code> 停在 <code>Pending</code>，它的 claim 停在 <code>pending</code>。driver 正常運作，只是節點上沒有一顆裝置符合這個 claim 的條件。</p>
+<p>能滿足的那顆，配置結果寫回 claim 的 <code>status</code>：</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="nt">status</span><span class="p">:</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="w">  </span><span class="nt">allocation</span><span class="p">:</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="w">    </span><span class="nt">devices</span><span class="p">:</span>
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="w">      </span><span class="nt">results</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> device</span><span class="p">:</span><span class="w"> </span><span class="nv">gpu-0</span><span class="p p-Indicator">,</span><span class="nt"> driver</span><span class="p">:</span><span class="w"> </span><span class="nv">gpu.nvidia.com</span><span class="p p-Indicator">,</span><span class="nt"> pool</span><span class="p">:</span><span class="w"> </span><span class="nv">aks-gpudra-…</span><span class="p p-Indicator">,</span><span class="nt"> request</span><span class="p">:</span><span class="w"> </span><span class="nv">gpu</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w"> </span><span class="p p-Indicator">]</span>
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="w">    </span><span class="nt">nodeSelector</span><span class="p">:</span>
+</span><span id="__span-15-6"><a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="w">      </span><span class="nt">nodeSelectorTerms</span><span class="p">:</span>
+</span><span id="__span-15-7"><a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">matchFields</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> key</span><span class="p">:</span><span class="w"> </span><span class="nv">metadata.name</span><span class="p p-Indicator">,</span><span class="nt"> operator</span><span class="p">:</span><span class="w"> </span><span class="nv">In</span><span class="p p-Indicator">,</span><span class="nt"> values</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">aks-gpudra-34911544-vmss000000</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w"> </span><span class="p p-Indicator">]</span>
+</span><span id="__span-15-8"><a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="w">  </span><span class="nt">reservedFor</span><span class="p">:</span>
+</span><span id="__span-15-9"><a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> name</span><span class="p">:</span><span class="w"> </span><span class="nv">pod-mem-ok</span><span class="p p-Indicator">,</span><span class="nt"> resource</span><span class="p">:</span><span class="w"> </span><span class="nv">pods</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</span></code></pre></div>
+<p><code>results</code> 記著配到哪一顆裝置（<code>gpu-0</code>），<code>reservedFor</code> 記著誰在用（<code>pod-mem-ok</code>）。另外 <code>allocation.nodeSelector</code> 用 <code>matchFields: metadata.name</code> 把 pod 綁在那台節點上：卡在哪台機器，pod 就只能去哪台。裝置配置反過來決定排程，device plugin 沒有這個方向。</p>
+<p>不能滿足那顆，排程器的事件全文是：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>Warning  FailedScheduling  default-scheduler
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>  0/2 nodes are available: 1 cannot allocate all claims,
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>  1 node(s) didn&#39;t match Pod&#39;s node affinity/selector.
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>  still not schedulable, preemption: 0/2 nodes are available:
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>  2 Preemption is not helpful for scheduling.
+</span></code></pre></div>
+<p>這段文字跟 Day 6 模擬 driver 的訊息一字不差。換了真硬體、換了 driver、失敗原因也不同（VRAM 不夠，而不是裝置用完），事件文字都一樣。所以 Day 6 的<a href="../sprint1-day6-dra-simulated-devices/#mine-2">「<code>cannot allocate all claims</code> 不說是哪個 claim、哪條條件」</a>是 Kubernetes 排程器裡 DRA 那一段本身的行為，跟 driver 無關。訊息不會告訴你是哪個 claim、哪條選擇器沒過，查法還是一樣：把 <code>kubectl get resourceslice -o yaml</code> 的屬性攤開，逐條對照選擇器。</p>
+<p>就算選擇器的意思寫對了，claim 也可能停在 <code>pending</code>，常見原因有兩種：一是目標節點上根本沒有這個 driver 的 ResourceSlice（kubelet plugin 沒部署上去，回到步驟 2 看 <code>DESIRED</code>）；二是屬性名稱或值的大小寫、拼法跟 ResourceSlice 上不一致，例如寫成 <code>productname</code>，或把 <code>Tesla T4</code> 寫成 <code>tesla t4</code>。CEL 的字串比對是逐字元的，所以照 ResourceSlice 上印出來的字寫最保險。</p>
+<h3 id="describe-node">從 <code>describe node</code> 看不到這張卡<a class="headerlink" href="#describe-node" title="Permanent link">&para;</a></h3>
+<p>趁 <code>pod-mem-ok</code> 還占著那張 T4，看一下節點：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>describe<span class="w"> </span>node<span class="w"> </span>&lt;gpudra-node&gt;
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="go">Capacity:     cpu: 4       memory: 28740840Ki   pods: 250</span>
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="go">Allocatable:  cpu: 3860m   memory: 23467240Ki   pods: 250</span>
+</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="go">Non-terminated Pods:                                        CPU Requests  Memory Requests</span>
+</span><span id="__span-17-5"><a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="go">  dra-3a                 pod-mem-ok                         0 (0%)        0 (0%)</span>
+</span><span id="__span-17-6"><a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="go">  dra-driver-nvidia-gpu  dra-driver-nvidia-gpu-kubelet-…    0 (0%)        0 (0%)</span>
+</span><span id="__span-17-7"><a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="go">Allocated resources:     cpu 335m (8%)    memory 526Mi (2%)</span>
+</span></code></pre></div>
+<p>一台插著 Tesla T4、而且那張卡此刻正被一顆 pod 占用的機器：<code>Capacity</code> 沒有 GPU、<code>Allocatable</code> 沒有 GPU、<code>Allocated resources</code> 也沒有 GPU，占著卡的那顆 pod 每一欄都是 <code>0 (0%)</code>。Day 6 在模擬裝置上看到的<a href="../sprint1-day6-dra-simulated-devices/#mine-3">「節點上看不到 DRA 的裝置，<code>describe node</code> 顯示 <code>0 (0%)</code>」</a>，在真硬體上一樣。</p>
+<p>用 device plugin 時，「這台機器還剩幾張卡」用 <code>kubectl describe node</code> 一眼就能算出來；用 DRA 時，node 物件上根本沒有這個數字，要拿 ResourceSlice（有哪些卡）和 ResourceClaim（哪些被配走）自己算。所以 Day 1–5 用到的工具，例如 HAMi-WebUI 的容量頁、KAI 的佇列配額計算、任何讀 <code>node.status.allocatable['nvidia.com/gpu']</code> 的儀表板或自動擴縮元件，在只用 DRA 的節點上都會回答「這台沒有 GPU」。Day 3 的<a href="../sprint1-day3-hami-memory-isolation/#mine-2">「<code>kubectl describe node</code> 查不到 VRAM 餘額」</a>是比較輕微的同類問題，那時查不到的只是 VRAM 餘額，現在是整張卡。</p>
+<h2 id="6-claim-pod-t4">步驟 6:一個 claim、兩顆 pod、同一張 T4<a class="headerlink" href="#6-claim-pod-t4" title="Permanent link">&para;</a></h2>
+<p>步驟 5 的 <code>pod-mem-ok</code> 還占著這張 T4。一個裝置同一時間只能配給一個 claim，要先把它收回來，下一個實驗才拿得到卡。刪掉整個 <code>dra-3a</code> namespace，pod 和 template 產生的 claim 會一起被刪：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>kubectl<span class="w"> </span>delete<span class="w"> </span>namespace<span class="w"> </span>dra-3a
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>resourceclaims<span class="w"> </span>-A
+</span></code></pre></div>
+<p>第二個指令列出來的 claim 裡，已經沒有 <code>dra-3a</code> 的，卡就空出來了（<code>dra-gate</code> 那顆的 claim 在 <code>gate-smi</code> 跑完時就被刪掉，原因見<a href="#mine-5">疑難排解：Job 跑完之後查不到它用過哪張卡</a>）。這一步要新建的是一個具名 claim 和兩顆 pod。</p>
+<p>到目前為止，claim 都是由 template 替每顆 pod 各建一個。claim 也可以先建好、取一個名字，讓好幾顆 pod 指名使用。<code>day7-manifests/03-b-sharing-one-claim-two-pods.yaml</code> 建一個具名的 <code>ResourceClaim</code> 叫 <code>shared-t4</code>，兩顆 pod 都寫 <code>resourceClaimName: shared-t4</code>：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span><span class="m">03</span>-b-sharing-one-claim-two-pods.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="s">kind: Namespace</span>
+</span><span id="__span-19-4"><a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="s">metadata:</span>
+</span><span id="__span-19-5"><a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="s">  name: dra-3b</span>
+</span><span id="__span-19-6"><a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="s">---</span>
+</span><span id="__span-19-7"><a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="s">apiVersion: resource.k8s.io/v1</span>
+</span><span id="__span-19-8"><a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="s">kind: ResourceClaim</span>
+</span><span id="__span-19-9"><a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a><span class="s">metadata:</span>
+</span><span id="__span-19-10"><a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a><span class="s">  namespace: dra-3b</span>
+</span><span id="__span-19-11"><a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a><span class="s">  name: shared-t4</span>
+</span><span id="__span-19-12"><a id="__codelineno-19-12" name="__codelineno-19-12" href="#__codelineno-19-12"></a><span class="s">spec:</span>
+</span><span id="__span-19-13"><a id="__codelineno-19-13" name="__codelineno-19-13" href="#__codelineno-19-13"></a><span class="s">  devices:</span>
+</span><span id="__span-19-14"><a id="__codelineno-19-14" name="__codelineno-19-14" href="#__codelineno-19-14"></a><span class="s">    requests:</span>
+</span><span id="__span-19-15"><a id="__codelineno-19-15" name="__codelineno-19-15" href="#__codelineno-19-15"></a><span class="s">    - name: gpu</span>
+</span><span id="__span-19-16"><a id="__codelineno-19-16" name="__codelineno-19-16" href="#__codelineno-19-16"></a><span class="s">      exactly:</span>
+</span><span id="__span-19-17"><a id="__codelineno-19-17" name="__codelineno-19-17" href="#__codelineno-19-17"></a><span class="s">        deviceClassName: gpu.nvidia.com</span>
+</span><span id="__span-19-18"><a id="__codelineno-19-18" name="__codelineno-19-18" href="#__codelineno-19-18"></a><span class="s">EOF</span>
+</span><span id="__span-19-19"><a id="__codelineno-19-19" name="__codelineno-19-19" href="#__codelineno-19-19"></a>
+</span><span id="__span-19-20"><a id="__codelineno-19-20" name="__codelineno-19-20" href="#__codelineno-19-20"></a><span class="k">for</span><span class="w"> </span>pod<span class="w"> </span><span class="k">in</span><span class="w"> </span>share-a<span class="w"> </span>share-b<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+</span><span id="__span-19-21"><a id="__codelineno-19-21" name="__codelineno-19-21" href="#__codelineno-19-21"></a><span class="w">  </span>cat<span class="w"> </span><span class="s">&lt;&lt;EOF</span>
+</span><span id="__span-19-22"><a id="__codelineno-19-22" name="__codelineno-19-22" href="#__codelineno-19-22"></a><span class="s">---</span>
+</span><span id="__span-19-23"><a id="__codelineno-19-23" name="__codelineno-19-23" href="#__codelineno-19-23"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-19-24"><a id="__codelineno-19-24" name="__codelineno-19-24" href="#__codelineno-19-24"></a><span class="s">kind: Pod</span>
+</span><span id="__span-19-25"><a id="__codelineno-19-25" name="__codelineno-19-25" href="#__codelineno-19-25"></a><span class="s">metadata:</span>
+</span><span id="__span-19-26"><a id="__codelineno-19-26" name="__codelineno-19-26" href="#__codelineno-19-26"></a><span class="s">  namespace: dra-3b</span>
+</span><span id="__span-19-27"><a id="__codelineno-19-27" name="__codelineno-19-27" href="#__codelineno-19-27"></a><span class="s">  name: $pod</span>
+</span><span id="__span-19-28"><a id="__codelineno-19-28" name="__codelineno-19-28" href="#__codelineno-19-28"></a><span class="s">spec:</span>
+</span><span id="__span-19-29"><a id="__codelineno-19-29" name="__codelineno-19-29" href="#__codelineno-19-29"></a><span class="s">  restartPolicy: Never</span>
+</span><span id="__span-19-30"><a id="__codelineno-19-30" name="__codelineno-19-30" href="#__codelineno-19-30"></a><span class="s">  nodeSelector:</span>
+</span><span id="__span-19-31"><a id="__codelineno-19-31" name="__codelineno-19-31" href="#__codelineno-19-31"></a><span class="s">    pool: gpudra</span>
+</span><span id="__span-19-32"><a id="__codelineno-19-32" name="__codelineno-19-32" href="#__codelineno-19-32"></a><span class="s">  tolerations:</span>
+</span><span id="__span-19-33"><a id="__codelineno-19-33" name="__codelineno-19-33" href="#__codelineno-19-33"></a><span class="s">  - key: kubernetes.azure.com/scalesetpriority</span>
+</span><span id="__span-19-34"><a id="__codelineno-19-34" name="__codelineno-19-34" href="#__codelineno-19-34"></a><span class="s">    operator: Equal</span>
+</span><span id="__span-19-35"><a id="__codelineno-19-35" name="__codelineno-19-35" href="#__codelineno-19-35"></a><span class="s">    value: spot</span>
+</span><span id="__span-19-36"><a id="__codelineno-19-36" name="__codelineno-19-36" href="#__codelineno-19-36"></a><span class="s">    effect: NoSchedule</span>
+</span><span id="__span-19-37"><a id="__codelineno-19-37" name="__codelineno-19-37" href="#__codelineno-19-37"></a><span class="s">  containers:</span>
+</span><span id="__span-19-38"><a id="__codelineno-19-38" name="__codelineno-19-38" href="#__codelineno-19-38"></a><span class="s">  - name: ctr</span>
+</span><span id="__span-19-39"><a id="__codelineno-19-39" name="__codelineno-19-39" href="#__codelineno-19-39"></a><span class="s">    image: nvcr.io/nvidia/cuda:12.6.2-base-ubuntu24.04</span>
+</span><span id="__span-19-40"><a id="__codelineno-19-40" name="__codelineno-19-40" href="#__codelineno-19-40"></a><span class="s">    command: [&quot;bash&quot;, &quot;-c&quot;]</span>
+</span><span id="__span-19-41"><a id="__codelineno-19-41" name="__codelineno-19-41" href="#__codelineno-19-41"></a><span class="s">    args: [&quot;nvidia-smi -L; nvidia-smi --query-gpu=uuid,name,memory.total --format=csv; trap &#39;exit 0&#39; TERM; sleep 9999 &amp; wait&quot;]</span>
+</span><span id="__span-19-42"><a id="__codelineno-19-42" name="__codelineno-19-42" href="#__codelineno-19-42"></a><span class="s">    resources:</span>
+</span><span id="__span-19-43"><a id="__codelineno-19-43" name="__codelineno-19-43" href="#__codelineno-19-43"></a><span class="s">      claims:</span>
+</span><span id="__span-19-44"><a id="__codelineno-19-44" name="__codelineno-19-44" href="#__codelineno-19-44"></a><span class="s">      - name: gpu</span>
+</span><span id="__span-19-45"><a id="__codelineno-19-45" name="__codelineno-19-45" href="#__codelineno-19-45"></a><span class="s">  resourceClaims:</span>
+</span><span id="__span-19-46"><a id="__codelineno-19-46" name="__codelineno-19-46" href="#__codelineno-19-46"></a><span class="s">  - name: gpu</span>
+</span><span id="__span-19-47"><a id="__codelineno-19-47" name="__codelineno-19-47" href="#__codelineno-19-47"></a><span class="s">    resourceClaimName: shared-t4</span>
+</span><span id="__span-19-48"><a id="__codelineno-19-48" name="__codelineno-19-48" href="#__codelineno-19-48"></a><span class="s">EOF</span>
+</span><span id="__span-19-49"><a id="__codelineno-19-49" name="__codelineno-19-49" href="#__codelineno-19-49"></a><span class="k">done</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="m">03</span>-b-sharing-one-claim-two-pods.yaml
+</span></code></pre></div>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="go">share-a 1/1 Running   share-b 1/1 Running   resourceclaim/shared-t4 allocated,reserved</span>
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>dra-3b<span class="w"> </span>logs<span class="w"> </span>share-a<span class="w">     </span><span class="c1"># share-b prints the exact same lines</span>
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="go">GPU 0: Tesla T4 (UUID: GPU-bf5809e7-…)</span>
+</span><span id="__span-20-4"><a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="go">uuid, name, memory.total [MiB]</span>
+</span><span id="__span-20-5"><a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="go">GPU-bf5809e7-…, Tesla T4, 16384 MiB</span>
+</span></code></pre></div>
+<p>兩顆 pod 同時在跑，印出同一個 UUID。claim 的 <code>reservedFor</code> 有兩筆，<code>share-a</code> 和 <code>share-b</code> 各一筆；claim 上沒有 ownerReference（物件上記錄「我屬於誰」的欄位，主人被刪時物件會跟著被回收），因為具名 claim 不屬於任何一顆 pod。</p>
+<p>只有在 device plugin 未啟用共享、以整張實體 GPU 配置的設定下，兩顆 pod 各要求 <code>nvidia.com/gpu: 1</code> 才會需要兩張卡。NVIDIA device plugin 也支援共享，詳見<a href="https://github.com/NVIDIA/k8s-device-plugin#shared-access-to-gpus">官方共享設定文件</a>；不能把整卡配置的限制概括成 device plugin 無法共卡。</p>
+<p>共享在實作上是什麼？回頭看步驟 4 那張圖：宣告檔是一個 claim 一份，以 claim UID 命名。兩顆 pod 共用一個 claim，節點上的 <code>/var/run/cdi</code> 也確實只有一份檔案，同一份宣告檔被注入兩個容器。</p>
+<h2 id="7claim">步驟 7:claim 的生命週期<a class="headerlink" href="#7claim" title="Permanent link">&para;</a></h2>
+<p>claim 什麼時候被收回？具名 claim 和 template 產生的 claim 不一樣。下面先接續步驟 6，讓 <code>share-a</code>、<code>share-b</code> 依序離開；再另外跑一顆用 template 的 pod <code>owner-tmpl</code>，然後刪掉它。<code>owner-tmpl</code> 的 manifest（<code>day7-manifests/03-c-lifecycle.yaml</code>）跟步驟 4 的寫法相同，只換了 namespace 和名稱：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span><span class="m">03</span>-c-lifecycle.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="s">kind: Namespace</span>
+</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="s">metadata:</span>
+</span><span id="__span-21-5"><a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="s">  name: dra-3c</span>
+</span><span id="__span-21-6"><a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="s">---</span>
+</span><span id="__span-21-7"><a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="s">apiVersion: resource.k8s.io/v1</span>
+</span><span id="__span-21-8"><a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a><span class="s">kind: ResourceClaimTemplate</span>
+</span><span id="__span-21-9"><a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a><span class="s">metadata:</span>
+</span><span id="__span-21-10"><a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a><span class="s">  namespace: dra-3c</span>
+</span><span id="__span-21-11"><a id="__codelineno-21-11" name="__codelineno-21-11" href="#__codelineno-21-11"></a><span class="s">  name: owned-gpu</span>
+</span><span id="__span-21-12"><a id="__codelineno-21-12" name="__codelineno-21-12" href="#__codelineno-21-12"></a><span class="s">spec:</span>
+</span><span id="__span-21-13"><a id="__codelineno-21-13" name="__codelineno-21-13" href="#__codelineno-21-13"></a><span class="s">  spec:</span>
+</span><span id="__span-21-14"><a id="__codelineno-21-14" name="__codelineno-21-14" href="#__codelineno-21-14"></a><span class="s">    devices:</span>
+</span><span id="__span-21-15"><a id="__codelineno-21-15" name="__codelineno-21-15" href="#__codelineno-21-15"></a><span class="s">      requests:</span>
+</span><span id="__span-21-16"><a id="__codelineno-21-16" name="__codelineno-21-16" href="#__codelineno-21-16"></a><span class="s">      - name: gpu</span>
+</span><span id="__span-21-17"><a id="__codelineno-21-17" name="__codelineno-21-17" href="#__codelineno-21-17"></a><span class="s">        exactly:</span>
+</span><span id="__span-21-18"><a id="__codelineno-21-18" name="__codelineno-21-18" href="#__codelineno-21-18"></a><span class="s">          deviceClassName: gpu.nvidia.com</span>
+</span><span id="__span-21-19"><a id="__codelineno-21-19" name="__codelineno-21-19" href="#__codelineno-21-19"></a><span class="s">---</span>
+</span><span id="__span-21-20"><a id="__codelineno-21-20" name="__codelineno-21-20" href="#__codelineno-21-20"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-21-21"><a id="__codelineno-21-21" name="__codelineno-21-21" href="#__codelineno-21-21"></a><span class="s">kind: Pod</span>
+</span><span id="__span-21-22"><a id="__codelineno-21-22" name="__codelineno-21-22" href="#__codelineno-21-22"></a><span class="s">metadata:</span>
+</span><span id="__span-21-23"><a id="__codelineno-21-23" name="__codelineno-21-23" href="#__codelineno-21-23"></a><span class="s">  namespace: dra-3c</span>
+</span><span id="__span-21-24"><a id="__codelineno-21-24" name="__codelineno-21-24" href="#__codelineno-21-24"></a><span class="s">  name: owner-tmpl</span>
+</span><span id="__span-21-25"><a id="__codelineno-21-25" name="__codelineno-21-25" href="#__codelineno-21-25"></a><span class="s">spec:</span>
+</span><span id="__span-21-26"><a id="__codelineno-21-26" name="__codelineno-21-26" href="#__codelineno-21-26"></a><span class="s">  restartPolicy: Never</span>
+</span><span id="__span-21-27"><a id="__codelineno-21-27" name="__codelineno-21-27" href="#__codelineno-21-27"></a><span class="s">  nodeSelector:</span>
+</span><span id="__span-21-28"><a id="__codelineno-21-28" name="__codelineno-21-28" href="#__codelineno-21-28"></a><span class="s">    pool: gpudra</span>
+</span><span id="__span-21-29"><a id="__codelineno-21-29" name="__codelineno-21-29" href="#__codelineno-21-29"></a><span class="s">  tolerations:</span>
+</span><span id="__span-21-30"><a id="__codelineno-21-30" name="__codelineno-21-30" href="#__codelineno-21-30"></a><span class="s">  - key: kubernetes.azure.com/scalesetpriority</span>
+</span><span id="__span-21-31"><a id="__codelineno-21-31" name="__codelineno-21-31" href="#__codelineno-21-31"></a><span class="s">    operator: Equal</span>
+</span><span id="__span-21-32"><a id="__codelineno-21-32" name="__codelineno-21-32" href="#__codelineno-21-32"></a><span class="s">    value: spot</span>
+</span><span id="__span-21-33"><a id="__codelineno-21-33" name="__codelineno-21-33" href="#__codelineno-21-33"></a><span class="s">    effect: NoSchedule</span>
+</span><span id="__span-21-34"><a id="__codelineno-21-34" name="__codelineno-21-34" href="#__codelineno-21-34"></a><span class="s">  containers:</span>
+</span><span id="__span-21-35"><a id="__codelineno-21-35" name="__codelineno-21-35" href="#__codelineno-21-35"></a><span class="s">  - name: ctr</span>
+</span><span id="__span-21-36"><a id="__codelineno-21-36" name="__codelineno-21-36" href="#__codelineno-21-36"></a><span class="s">    image: nvcr.io/nvidia/cuda:12.6.2-base-ubuntu24.04</span>
+</span><span id="__span-21-37"><a id="__codelineno-21-37" name="__codelineno-21-37" href="#__codelineno-21-37"></a><span class="s">    command: [&quot;bash&quot;, &quot;-c&quot;]</span>
+</span><span id="__span-21-38"><a id="__codelineno-21-38" name="__codelineno-21-38" href="#__codelineno-21-38"></a><span class="s">    args: [&quot;nvidia-smi -L; trap &#39;exit 0&#39; TERM; sleep 9999 &amp; wait&quot;]</span>
+</span><span id="__span-21-39"><a id="__codelineno-21-39" name="__codelineno-21-39" href="#__codelineno-21-39"></a><span class="s">    resources:</span>
+</span><span id="__span-21-40"><a id="__codelineno-21-40" name="__codelineno-21-40" href="#__codelineno-21-40"></a><span class="s">      claims:</span>
+</span><span id="__span-21-41"><a id="__codelineno-21-41" name="__codelineno-21-41" href="#__codelineno-21-41"></a><span class="s">      - name: gpu</span>
+</span><span id="__span-21-42"><a id="__codelineno-21-42" name="__codelineno-21-42" href="#__codelineno-21-42"></a><span class="s">  resourceClaims:</span>
+</span><span id="__span-21-43"><a id="__codelineno-21-43" name="__codelineno-21-43" href="#__codelineno-21-43"></a><span class="s">  - name: gpu</span>
+</span><span id="__span-21-44"><a id="__codelineno-21-44" name="__codelineno-21-44" href="#__codelineno-21-44"></a><span class="s">    resourceClaimTemplateName: owned-gpu</span>
+</span><span id="__span-21-45"><a id="__codelineno-21-45" name="__codelineno-21-45" href="#__codelineno-21-45"></a><span class="s">EOF</span>
+</span></code></pre></div>
+<p><code>share-a</code>、<code>share-b</code> 刪掉之後卡就空出來了，這時再 <code>kubectl apply -f 03-c-lifecycle.yaml</code>。整段的操作與觀察如下：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>dra-3b<span class="w"> </span>delete<span class="w"> </span>pod<span class="w"> </span>share-a
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="go">  shared-t4:  state=gpu-0   reservedFor=share-b      ← 還配著,因為 share-b 還在</span>
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>dra-3b<span class="w"> </span>delete<span class="w"> </span>pod<span class="w"> </span>share-b
+</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="go">  shared-t4   pending   allocation=(null)  reservedFor=(空)   ← 物件還在,配置被收回</span>
+</span><span id="__span-22-5"><a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a>
+</span><span id="__span-22-6"><a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="go">  NAME                   STATE   OWNER        FINALIZER</span>
+</span><span id="__span-22-7"><a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="go">  owner-tmpl-gpu-jhdnp   gpu-0   owner-tmpl   resource.kubernetes.io/delete-protection</span>
+</span><span id="__span-22-8"><a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>dra-3c<span class="w"> </span>delete<span class="w"> </span>pod<span class="w"> </span>owner-tmpl
+</span><span id="__span-22-9"><a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>dra-3c<span class="w"> </span>get<span class="w"> </span>resourceclaims
+</span><span id="__span-22-10"><a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a><span class="go">  No resources found in dra-3c namespace.</span>
+</span></code></pre></div>
+<p>我們可以看到兩種收回方式：</p>
+<ul>
+<li><strong>具名 claim</strong>：<code>share-a</code> 離開時，claim 還配著卡，因為 <code>share-b</code> 還在用；兩顆都離開後，<code>allocation</code> 清空、卡被收回，但 claim 物件本身還在。</li>
+<li><strong>template 產生的 claim</strong>：claim 的 OWNER 是那顆 pod，上面還有一個 finalizer（物件被刪除前必須先清掉的標記，用來確保清理步驟跑完）<code>resource.kubernetes.io/delete-protection</code>。pod 被刪，claim 跟著被回收。</li>
+</ul>
+<p>kubelet plugin 這一側的收回只有一行 log：<code>Unprepare: regular GPU: noop</code>。整張卡的配置不需要在硬體上做任何還原，不像 MIG（把 A100、H100 這類卡切成多個獨立區塊的硬體功能）要拆掉切出來的區塊，所以卡收回來馬上就能給下一顆 pod。</p>
+<p>兩種 claim 的行為跟 Day 6 模擬 driver 完全一致。由此可知：忘了刪具名 claim，留下的只是一個 API 物件，卡並沒有被占住。</p>
+<p>一次性的工作要多注意一件事。步驟 4 的 <code>gate-smi</code> 跑完之後是 <code>Completed</code>，pod 物件還在，它的 claim 卻已經不見了，事後查不到它用過哪一張卡，見<a href="#mine-5">疑難排解：Job 跑完之後查不到它用過哪張卡</a>。</p>
+<h2 id="opaque-config">選讀：用 opaque config 指定共享策略<a class="headerlink" href="#opaque-config" title="Permanent link">&para;</a></h2>
+<p>這一段要用到空著的卡。步驟 7 已經刪掉 <code>share-a</code>、<code>share-b</code> 和 <code>owner-tmpl</code>，<code>shared-t4</code> 雖然還在，配置已經被收回；開始前可以再用 <code>kubectl get resourceclaims -A</code> 確認，沒有任何 claim 是 <code>allocated,reserved</code>。</p>
+<p>兩顆 pod 共用一張卡時，卡上的運算怎麼輪流，可以交給 driver 設定。v0.4.1 支援 TimeSlicing 和 MPS（Multi-Process Service，NVIDIA 讓多個程序同時共用一張卡的服務）。這些共享策略是透過 claim 的 <strong>opaque config</strong> 指定的：claim 除了寫「我要一顆裝置」，還可以附上一段只有該廠商 driver 看得懂的參數，Kubernetes 不解讀，直接轉交給 driver。</p>
+<p>這條管道被 driver 自己的 <strong>feature gate</strong>（功能開關）擋著。<code>TimeSlicingSettings</code>、<code>MPSSupport</code> 這幾個開關都還在 alpha 階段，預設關閉。</p>
+<p>這裡要分清楚兩種開關。Day 6 的<a href="../sprint1-day6-dra-simulated-devices/#mine-1">「把差異做在 driver 這一層」</a>說的是 Kubernetes API server 的開關，AKS 不讓使用者改。driver 的開關則是 driver 程式自己讀的設定，在 chart 裡就是一個值，想開就開。用 <code>helm upgrade … --set featureGates.TimeSlicingSettings=true</code> 升級之後，plugin log 裡的 <code>Feature gates: map[string]bool{…, "TimeSlicingSettings":true, …}</code> 確認開關生效。</p>
+<p>接著 claim 就可以帶著參數送出去（<code>day7-manifests/04-timeslicing-config.yaml</code>）：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>cat<span class="w"> </span>&gt;<span class="w"> </span><span class="m">04</span>-timeslicing-config.yaml<span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="s">kind: Namespace</span>
+</span><span id="__span-23-4"><a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="s">metadata:</span>
+</span><span id="__span-23-5"><a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="s">  name: dra-ts</span>
+</span><span id="__span-23-6"><a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="s">---</span>
+</span><span id="__span-23-7"><a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="s">apiVersion: resource.k8s.io/v1</span>
+</span><span id="__span-23-8"><a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a><span class="s">kind: ResourceClaim</span>
+</span><span id="__span-23-9"><a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a><span class="s">metadata:</span>
+</span><span id="__span-23-10"><a id="__codelineno-23-10" name="__codelineno-23-10" href="#__codelineno-23-10"></a><span class="s">  namespace: dra-ts</span>
+</span><span id="__span-23-11"><a id="__codelineno-23-11" name="__codelineno-23-11" href="#__codelineno-23-11"></a><span class="s">  name: shared-t4-ts</span>
+</span><span id="__span-23-12"><a id="__codelineno-23-12" name="__codelineno-23-12" href="#__codelineno-23-12"></a><span class="s">spec:</span>
+</span><span id="__span-23-13"><a id="__codelineno-23-13" name="__codelineno-23-13" href="#__codelineno-23-13"></a><span class="s">  devices:</span>
+</span><span id="__span-23-14"><a id="__codelineno-23-14" name="__codelineno-23-14" href="#__codelineno-23-14"></a><span class="s">    requests:</span>
+</span><span id="__span-23-15"><a id="__codelineno-23-15" name="__codelineno-23-15" href="#__codelineno-23-15"></a><span class="s">    - name: gpu</span>
+</span><span id="__span-23-16"><a id="__codelineno-23-16" name="__codelineno-23-16" href="#__codelineno-23-16"></a><span class="s">      exactly:</span>
+</span><span id="__span-23-17"><a id="__codelineno-23-17" name="__codelineno-23-17" href="#__codelineno-23-17"></a><span class="s">        deviceClassName: gpu.nvidia.com</span>
+</span><span id="__span-23-18"><a id="__codelineno-23-18" name="__codelineno-23-18" href="#__codelineno-23-18"></a><span class="s">    config:</span>
+</span><span id="__span-23-19"><a id="__codelineno-23-19" name="__codelineno-23-19" href="#__codelineno-23-19"></a><span class="s">    - requests: [&quot;gpu&quot;]</span>
+</span><span id="__span-23-20"><a id="__codelineno-23-20" name="__codelineno-23-20" href="#__codelineno-23-20"></a><span class="s">      opaque:</span>
+</span><span id="__span-23-21"><a id="__codelineno-23-21" name="__codelineno-23-21" href="#__codelineno-23-21"></a><span class="s">        driver: gpu.nvidia.com</span>
+</span><span id="__span-23-22"><a id="__codelineno-23-22" name="__codelineno-23-22" href="#__codelineno-23-22"></a><span class="s">        parameters:</span>
+</span><span id="__span-23-23"><a id="__codelineno-23-23" name="__codelineno-23-23" href="#__codelineno-23-23"></a><span class="s">          apiVersion: resource.nvidia.com/v1beta1</span>
+</span><span id="__span-23-24"><a id="__codelineno-23-24" name="__codelineno-23-24" href="#__codelineno-23-24"></a><span class="s">          kind: GpuConfig</span>
+</span><span id="__span-23-25"><a id="__codelineno-23-25" name="__codelineno-23-25" href="#__codelineno-23-25"></a><span class="s">          sharing:</span>
+</span><span id="__span-23-26"><a id="__codelineno-23-26" name="__codelineno-23-26" href="#__codelineno-23-26"></a><span class="s">            strategy: TimeSlicing</span>
+</span><span id="__span-23-27"><a id="__codelineno-23-27" name="__codelineno-23-27" href="#__codelineno-23-27"></a><span class="s">            timeSlicingConfig:</span>
+</span><span id="__span-23-28"><a id="__codelineno-23-28" name="__codelineno-23-28" href="#__codelineno-23-28"></a><span class="s">              interval: Long</span>
+</span><span id="__span-23-29"><a id="__codelineno-23-29" name="__codelineno-23-29" href="#__codelineno-23-29"></a><span class="s">EOF</span>
+</span><span id="__span-23-30"><a id="__codelineno-23-30" name="__codelineno-23-30" href="#__codelineno-23-30"></a>
+</span><span id="__span-23-31"><a id="__codelineno-23-31" name="__codelineno-23-31" href="#__codelineno-23-31"></a><span class="k">for</span><span class="w"> </span>pod<span class="w"> </span><span class="k">in</span><span class="w"> </span>ts-a<span class="w"> </span>ts-b<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+</span><span id="__span-23-32"><a id="__codelineno-23-32" name="__codelineno-23-32" href="#__codelineno-23-32"></a><span class="w">  </span>cat<span class="w"> </span><span class="s">&lt;&lt;EOF</span>
+</span><span id="__span-23-33"><a id="__codelineno-23-33" name="__codelineno-23-33" href="#__codelineno-23-33"></a><span class="s">---</span>
+</span><span id="__span-23-34"><a id="__codelineno-23-34" name="__codelineno-23-34" href="#__codelineno-23-34"></a><span class="s">apiVersion: v1</span>
+</span><span id="__span-23-35"><a id="__codelineno-23-35" name="__codelineno-23-35" href="#__codelineno-23-35"></a><span class="s">kind: Pod</span>
+</span><span id="__span-23-36"><a id="__codelineno-23-36" name="__codelineno-23-36" href="#__codelineno-23-36"></a><span class="s">metadata:</span>
+</span><span id="__span-23-37"><a id="__codelineno-23-37" name="__codelineno-23-37" href="#__codelineno-23-37"></a><span class="s">  namespace: dra-ts</span>
+</span><span id="__span-23-38"><a id="__codelineno-23-38" name="__codelineno-23-38" href="#__codelineno-23-38"></a><span class="s">  name: $pod</span>
+</span><span id="__span-23-39"><a id="__codelineno-23-39" name="__codelineno-23-39" href="#__codelineno-23-39"></a><span class="s">spec:</span>
+</span><span id="__span-23-40"><a id="__codelineno-23-40" name="__codelineno-23-40" href="#__codelineno-23-40"></a><span class="s">  restartPolicy: Never</span>
+</span><span id="__span-23-41"><a id="__codelineno-23-41" name="__codelineno-23-41" href="#__codelineno-23-41"></a><span class="s">  nodeSelector:</span>
+</span><span id="__span-23-42"><a id="__codelineno-23-42" name="__codelineno-23-42" href="#__codelineno-23-42"></a><span class="s">    pool: gpudra</span>
+</span><span id="__span-23-43"><a id="__codelineno-23-43" name="__codelineno-23-43" href="#__codelineno-23-43"></a><span class="s">  tolerations:</span>
+</span><span id="__span-23-44"><a id="__codelineno-23-44" name="__codelineno-23-44" href="#__codelineno-23-44"></a><span class="s">  - key: kubernetes.azure.com/scalesetpriority</span>
+</span><span id="__span-23-45"><a id="__codelineno-23-45" name="__codelineno-23-45" href="#__codelineno-23-45"></a><span class="s">    operator: Equal</span>
+</span><span id="__span-23-46"><a id="__codelineno-23-46" name="__codelineno-23-46" href="#__codelineno-23-46"></a><span class="s">    value: spot</span>
+</span><span id="__span-23-47"><a id="__codelineno-23-47" name="__codelineno-23-47" href="#__codelineno-23-47"></a><span class="s">    effect: NoSchedule</span>
+</span><span id="__span-23-48"><a id="__codelineno-23-48" name="__codelineno-23-48" href="#__codelineno-23-48"></a><span class="s">  containers:</span>
+</span><span id="__span-23-49"><a id="__codelineno-23-49" name="__codelineno-23-49" href="#__codelineno-23-49"></a><span class="s">  - name: ctr</span>
+</span><span id="__span-23-50"><a id="__codelineno-23-50" name="__codelineno-23-50" href="#__codelineno-23-50"></a><span class="s">    image: nvcr.io/nvidia/cuda:12.6.2-base-ubuntu24.04</span>
+</span><span id="__span-23-51"><a id="__codelineno-23-51" name="__codelineno-23-51" href="#__codelineno-23-51"></a><span class="s">    command: [&quot;bash&quot;, &quot;-c&quot;]</span>
+</span><span id="__span-23-52"><a id="__codelineno-23-52" name="__codelineno-23-52" href="#__codelineno-23-52"></a><span class="s">    args: [&quot;nvidia-smi -L; nvidia-smi --query-gpu=compute_mode --format=csv; trap &#39;exit 0&#39; TERM; sleep 9999 &amp; wait&quot;]</span>
+</span><span id="__span-23-53"><a id="__codelineno-23-53" name="__codelineno-23-53" href="#__codelineno-23-53"></a><span class="s">    resources:</span>
+</span><span id="__span-23-54"><a id="__codelineno-23-54" name="__codelineno-23-54" href="#__codelineno-23-54"></a><span class="s">      claims:</span>
+</span><span id="__span-23-55"><a id="__codelineno-23-55" name="__codelineno-23-55" href="#__codelineno-23-55"></a><span class="s">      - name: gpu</span>
+</span><span id="__span-23-56"><a id="__codelineno-23-56" name="__codelineno-23-56" href="#__codelineno-23-56"></a><span class="s">  resourceClaims:</span>
+</span><span id="__span-23-57"><a id="__codelineno-23-57" name="__codelineno-23-57" href="#__codelineno-23-57"></a><span class="s">  - name: gpu</span>
+</span><span id="__span-23-58"><a id="__codelineno-23-58" name="__codelineno-23-58" href="#__codelineno-23-58"></a><span class="s">    resourceClaimName: shared-t4-ts</span>
+</span><span id="__span-23-59"><a id="__codelineno-23-59" name="__codelineno-23-59" href="#__codelineno-23-59"></a><span class="s">EOF</span>
+</span><span id="__span-23-60"><a id="__codelineno-23-60" name="__codelineno-23-60" href="#__codelineno-23-60"></a><span class="k">done</span><span class="w"> </span>&gt;&gt;<span class="w"> </span><span class="m">04</span>-timeslicing-config.yaml
+</span></code></pre></div>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="go">ts-a 1/1 Running   ts-b 1/1 Running   resourceclaim/shared-t4-ts allocated,reserved</span>
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="gp">$ </span>kubectl<span class="w"> </span>-n<span class="w"> </span>dra-ts<span class="w"> </span>logs<span class="w"> </span>ts-a
+</span><span id="__span-24-3"><a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="go">GPU 0: Tesla T4 (UUID: GPU-bf5809e7-…)</span>
+</span><span id="__span-24-4"><a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="go">compute_mode</span>
+</span><span id="__span-24-5"><a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="go">Default</span>
+</span></code></pre></div>
+<p>設定被接受，兩顆 pod 都起來，plugin log 沒有錯誤。容器裡看到的 <code>compute_mode</code> 是 <code>Default</code>，這是預期的：TimeSlicing 的 <code>interval</code> 調的是 GPU 在不同程序之間切換的時間片長度，不會改 compute mode。compute mode 要開 MPS 或設成 EXCLUSIVE_PROCESS（一張卡只准一個程序使用）才會改變；MPS 需要 driver 在節點上另外起一個背景程式，本章沒有示範。</p>
+<p>從 driver 這一側看共享，plugin log 最清楚。同一個 claim 的第二顆 pod 進來時，driver 不會重新準備裝置，直接回傳第一次準備好的結果：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>08:46:15.607  Returning newly prepared devices for claim &#39;dra-ts/shared-t4-ts:…&#39;: [gpu-0 …]
+</span><span id="__span-25-2"><a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a>08:46:15.627  Skip prepare: claim already in PrepareCompleted state: dra-ts/shared-t4-ts:…
+</span><span id="__span-25-3"><a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a>08:46:15.627  Returning newly prepared devices for claim &#39;dra-ts/shared-t4-ts:…&#39;: [gpu-0 …]
+</span></code></pre></div>
+<p>這組範例說明的是：opaque config 在 AKS 上是通的，claim 帶著廠商參數送進 driver，driver 接受並解析參數。device plugin 只能在 DaemonSet 的設定裡做整台節點一致的設定，沒辦法讓兩顆 pod 各用不同的共享策略。</p>
+<h2 id="mine-3">步驟 8:舊寫法的相容設定在 AKS 上不存在<a class="headerlink" href="#mine-3" title="Permanent link">&para;</a></h2>
+<p>步驟 5 看到，DRA 配出去的卡不會出現在節點的 <code>nvidia.com/gpu</code> 上。chart 替還在用舊寫法的工作負載準備了一個相容設定：在 <code>resource.k8s.io/v1</code> 的叢集上，它會在 <code>gpu.nvidia.com</code> 這個 DeviceClass 上多寫一個 <code>extendedResourceName: nvidia.com/gpu</code>，讓還在寫 <code>resources.limits: nvidia.com/gpu: 1</code> 的 pod 也能由 DRA 配卡。這就是步驟 1 錯誤訊息裡 KEP 5004 要做的事。它需要 API server 開啟 <code>DRAExtendedResource</code> 這個 alpha 開關，而 AKS 上這個開關是關的。</p>
+<p>用一個不會影響其他東西的測試用 DeviceClass 驗證：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>-<span class="w"> </span>&lt;&lt;<span class="s1">&#39;EOF&#39;</span>
+</span><span id="__span-26-2"><a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="go">apiVersion: resource.k8s.io/v1</span>
+</span><span id="__span-26-3"><a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="go">kind: DeviceClass</span>
+</span><span id="__span-26-4"><a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a><span class="go">metadata: { name: extres-probe.example.com }</span>
+</span><span id="__span-26-5"><a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a><span class="go">spec:</span>
+</span><span id="__span-26-6"><a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a><span class="go">  selectors: [ { cel: { expression: &quot;device.driver == &#39;nonexistent.example.com&#39;&quot; } } ]</span>
+</span><span id="__span-26-7"><a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a><span class="go">  extendedResourceName: example.com/probe-gpu</span>
+</span><span id="__span-26-8"><a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a><span class="go">EOF</span>
+</span><span id="__span-26-9"><a id="__codelineno-26-9" name="__codelineno-26-9" href="#__codelineno-26-9"></a><span class="go">deviceclass.resource.k8s.io/extres-probe.example.com created      ← 建立成功,沒有任何警告</span>
+</span><span id="__span-26-10"><a id="__codelineno-26-10" name="__codelineno-26-10" href="#__codelineno-26-10"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>deviceclass<span class="w"> </span>extres-probe.example.com<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.spec}&#39;</span>
+</span><span id="__span-26-11"><a id="__codelineno-26-11" name="__codelineno-26-11" href="#__codelineno-26-11"></a><span class="go">{&quot;selectors&quot;:[{&quot;cel&quot;:{&quot;expression&quot;:&quot;device.driver == &#39;nonexistent.example.com&#39;&quot;}}]}</span>
+</span><span id="__span-26-12"><a id="__codelineno-26-12" name="__codelineno-26-12" href="#__codelineno-26-12"></a><span class="go">                                          ← extendedResourceName 不見了</span>
+</span></code></pre></div>
+<p>物件建立成功，沒有任何警告，但讀回來時 <code>extendedResourceName</code> 不在了。API server 對「所屬功能沒開的欄位」的處理方式是直接拿掉，不回報錯誤。chart 寫進 <code>gpu.nvidia.com</code> 的那個欄位也會遇到同樣的事，所以在 AKS 上，改用 DRA 的工作負載都要改寫成 <code>resourceClaims</code>，不能新舊寫法並行。在開了 <code>DRAExtendedResource</code> 的叢集上，欄位會留下來，這個限制就不存在。要確認一個欄位有沒有留下來，唯一的辦法是建完之後讀回來比對。</p>
+<h2 id="9">步驟 9:卸載與刪池<a class="headerlink" href="#9" title="Permanent link">&para;</a></h2>
+<p>先刪掉各步驟的工作負載 namespace，再卸載 driver，並觀察 ResourceSlice 多久才消失：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-27-1"><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="gp">$ </span>helm<span class="w"> </span>uninstall<span class="w"> </span>dra-driver-nvidia-gpu<span class="w"> </span>-n<span class="w"> </span>dra-driver-nvidia-gpu
+</span><span id="__span-27-2"><a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="go">release &quot;dra-driver-nvidia-gpu&quot; uninstalled</span>
+</span><span id="__span-27-3"><a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="go">  still 1 slice(s), elapsed 3s</span>
+</span><span id="__span-27-4"><a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="go">  still 1 slice(s), elapsed 19s</span>
+</span><span id="__span-27-5"><a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a><span class="go">  ResourceSlice gone (elapsed 32s)</span>
+</span><span id="__span-27-6"><a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a>
+</span><span id="__span-27-7"><a id="__codelineno-27-7" name="__codelineno-27-7" href="#__codelineno-27-7"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>resourceslice,deviceclass
+</span><span id="__span-27-8"><a id="__codelineno-27-8" name="__codelineno-27-8" href="#__codelineno-27-8"></a><span class="go">No resources found</span>
+</span></code></pre></div>
+<p>三個 DeviceClass 是 chart 建的物件，uninstall 時立刻消失。ResourceSlice 不是 chart 建的，是 kubelet plugin 在執行時建的。kubelet plugin 隨 uninstall 消失後，節點上的 kubelet 會先等 30 秒，才把這個 driver 的 ResourceSlice 刪掉；上面量到的時間跟這 30 秒相符。Day 6 的<a href="../sprint1-day6-dra-simulated-devices/#mine-4">「<code>helm uninstall</code> 之後 ResourceSlice 還在」</a>在真 driver 上一樣成立。</p>
+<p>這段空檔要留意：ResourceSlice 還在，但已經沒有 driver 能準備裝置。這時送進來的 claim 會被排程器配置成功，然後卡在節點上的 kubelet 那一端。要換 driver 版本或搬移 driver，先確認 ResourceSlice 歸零，再讓新的工作負載進來。</p>
+<p>最後刪掉節點池，並確認它真的不在了：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-28-1"><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>delete<span class="w"> </span>-g<span class="w"> </span>&lt;resource-group&gt;<span class="w"> </span>--cluster-name<span class="w"> </span>&lt;cluster&gt;<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-28-2"><a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="w">    </span>-n<span class="w"> </span>gpudra<span class="w"> </span>--subscription<span class="w"> </span>&lt;subscription-id&gt;<span class="w"> </span>--no-wait
+</span><span id="__span-28-3"><a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>list<span class="w"> </span>…<span class="w">  </span>→<span class="w">  </span>只剩<span class="w"> </span>system<span class="w"> </span>與<span class="w"> </span>gpuspot<span class="o">(</span>Count<span class="w"> </span><span class="m">0</span><span class="o">)</span>,gpudra<span class="w"> </span>不在清單上
+</span><span id="__span-28-4"><a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a><span class="gp">$ </span>az<span class="w"> </span>aks<span class="w"> </span>nodepool<span class="w"> </span>show<span class="w"> </span>…<span class="w"> </span>-n<span class="w"> </span>gpudra<span class="w">  </span>→<span class="w">  </span>rpc<span class="w"> </span>error:<span class="w"> </span><span class="nv">code</span><span class="w"> </span><span class="o">=</span><span class="w"> </span>NotFound<span class="w"> </span><span class="nv">desc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span>Agent<span class="w"> </span>Pool<span class="w"> </span>not<span class="w"> </span>found
+</span><span id="__span-28-5"><a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>nodes<span class="w">  </span>→<span class="w">  </span>只剩<span class="w"> </span>system<span class="w"> </span>節點池的節點
+</span></code></pre></div>
+<h2 id="_2">疑難排解<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<h3 id="mine-5">Job 跑完之後查不到它用過哪張卡<a class="headerlink" href="#mine-5" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：一次性的 pod（<code>restartPolicy: Never</code>）跑完變成 <code>Completed</code>，pod 物件還在，但 <code>kubectl -n dra-gate get resourceclaims</code> 已經是 <code>No resources found</code>。pod 的 <code>status.resourceClaimStatuses</code> 還留著 claim 的名字（<code>gate-smi-gpu-pcq9k</code>），claim 本身卻不存在。</p>
+<p><strong>原因</strong>：這是 Kubernetes 本身的行為，跟 driver 無關。kube-controller-manager 裡負責 ResourceClaim 的 controller 會在 pod 進入結束狀態時，主動刪掉 template 產生的 claim，好讓卡盡快被收回，不等 pod 物件被刪。</p>
+<p><strong>修法</strong>：想留下「這個工作當時用了哪張卡」，有三種做法：在 pod 還在跑的時候查；改用具名 claim，它不會隨 pod 消失；或從容器裡把裝置身分印進 log，本章每顆 pod 都跑 <code>nvidia-smi -L</code> 就是這個用途。Job 和 CronJob 跑完之後，沒辦法再用 <code>kubectl get resourceclaim</code> 事後查核。用 device plugin 時，pod 的 <code>resources</code> 欄位會跟著 pod 物件留下來，這一點 DRA 反而比較難查。</p>
+<h2 id="_3">想一想<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<ul>
+<li>同事在另一個雲平台上裝了 <code>dra-driver-nvidia-gpu</code>，<code>helm install</code> 回報成功，DeviceClass 也在，可是 <code>kubectl get resourceslice</code> 什麼都沒有。你會先看哪個數字？如果那個數字是 0，接著查什麼？</li>
+<li>一顆 pod 的 claim 寫了 <code>device.attributes['gpu.nvidia.com'].productName == 'Tesla T4'</code>，節點上確實插著 T4，pod 卻一直 Pending，claim 是 <code>pending</code>。這是 driver 沒部署、條件沒有裝置符合，還是容器注入出了問題？你會拿什麼對照？</li>
+<li>為了省一台機器，有人想把 DRA driver 直接裝到已經跑著 HAMi device plugin 的 GPU 節點上。安裝時會發生什麼事？就算硬是裝上去，你擔心的是什麼？</li>
+</ul>
+<h2 id="_4">小結<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<p>DRA 的 driver 做兩件事：把節點上的卡寫成 ResourceSlice，以及在 pod 啟動前把配到的卡準備好。這一章在一張 T4 上把這兩件事都看了一遍。driver 的 kubelet plugin 要部署到節點上，靠的是節點標籤，標籤對不上時 DaemonSet 的 <code>DESIRED</code> 會是 0，而 helm 不會告訴你；ResourceSlice 上的屬性是寫選擇器唯一的依據，版本號被正規化過，要照它寫；卡進到容器靠的是 CDI 宣告檔，不是 <code>NVIDIA_VISIBLE_DEVICES</code>。之後 DRA 要卡失敗時，可以照這個順序查：DaemonSet 有沒有跑起來、claim 有沒有配到裝置、節點上有沒有宣告檔、容器裡有沒有裝置檔。另外要記得，DRA 的卡不會出現在 <code>describe node</code> 上，template 產生的 claim 在 pod 結束時就被刪掉，所有依賴 <code>nvidia.com/gpu</code> 的工具在 DRA 節點上都看不到卡。</p>
+<h2 id="_5">延伸閱讀<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<h3 id="mine-4">PCIe 拓樸屬性為什麼缺少<a class="headerlink" href="#mine-4" title="Permanent link">&para;</a></h3>
+<p>步驟 3 的 ResourceSlice 沒有 <code>pcieRoot</code> 屬性。PCIe Root Complex（PCIe 根節點）是 CPU 這一側連出 PCIe 匯流排的起點，<code>pcieRoot</code> 標出這張卡掛在哪一個根節點底下，多卡機器上可以用它把兩張卡配在同一條 PCIe 路徑下。plugin log 的警告如下：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-29-1"><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>W0805 08:45:31.616654 nvlib.go:543] error getting PCIe root for device 0, continuing without attribute:
+</span><span id="__span-29-2"><a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a>  failed to resolve PCIe Root Complex for PCI Bus ID 0001:00:00.0:
+</span><span id="__span-29-3"><a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a>  symlink target for PCI Bus ID 0001:00:00.0 is invalid: it must start with devices/pci:
+</span><span id="__span-29-4"><a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a>  devices/LNXSYSTM:00/LNXSYBUS:00/ACPI0004:00/MSFT1000:00/47505500-…/pci0001:00/0001:00:00.0
+</span></code></pre></div>
+<p>driver 讀 <code>/sys</code> 底下的路徑來找 PCIe 根節點，而且要求路徑以 <code>devices/pci</code> 開頭。Azure 的 GPU 虛擬機透過 VMBus（Hyper-V 在主機與虛擬機之間傳遞裝置的通道）把實體卡交給虛擬機，路徑的開頭變成 <code>devices/LNXSYSTM:00/…</code>，解析就失敗了。driver 印一行警告後繼續執行，不影響整張卡的配置；受影響的只有多卡機器上依 PCIe 拓樸挑卡的選擇器，這類選擇器在 Azure 的 N 系列機型上寫不出來。</p>
+<h3 id="_6">參考文件<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
+<p>想再深入，可以從這幾份開始：</p>
+<ul>
+<li><strong><a href="https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu">dra-driver-nvidia-gpu 專案首頁</a></strong> —— 本章主題的原始碼與 chart，README 開頭就寫著 GPU kubelet plugin 在 chart 裡預設是關的，對應步驟 2 的總開關。</li>
+<li><strong><a href="https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu/blob/v0.4.1/docs/prerequisites.md">dra-driver-nvidia-gpu v0.4.1 的前置條件文件</a></strong> —— Kubernetes ≥ 1.34.2、driver ≥ v565、runtime 啟用 CDI，以及把 NFD 列為需求的那句話，步驟 1 五項前置條件的出處。</li>
+<li><strong><a href="https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu/blob/v0.4.1/cmd/gpu-kubelet-plugin/deviceinfo.go">deviceinfo.go（v0.4.1）</a></strong> —— ResourceSlice 上每個屬性怎麼組出來，<code>driverVersion</code> 與 <code>cudaComputeCapability</code> 轉成 semver 的地方就在這裡。</li>
+<li><strong><a href="https://github.com/cncf-tags/container-device-interface/blob/main/SPEC.md">Container Device Interface 規格</a></strong> —— <code>containerEdits</code>、<code>deviceNodes</code>、<code>hooks</code>、<code>env</code> 各欄位的定義，步驟 4 那份宣告檔照著讀就懂。</li>
+</ul>
+<h2 id="_7">下一步<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h2>
+<p>三套機制到這裡都實際操作過了：KAI 決定「誰先排、能不能整組一起排」，HAMi 決定「一張卡怎麼切給多個容器、切完會不會互相干擾」，DRA 決定「裝置怎麼被描述、被挑選、被交到容器手上」。三者的邊界並不像介紹文寫的那樣互不重疊：KAI 和 HAMi 這一章一直在同一座叢集裡跑著，只是被標籤隔在另一個節點池；而 DRA 想接手的能力，例如 VRAM 切分、逐 claim 的共享策略，有一部分正是 HAMi 現在提供的。</p>
+<p>Day 8 把這三套放在同一張表上比：哪一類問題該交給誰、哪些組合可以並存、哪些組合會像 Day 4 那樣互相衝突，以及在 AKS 這種不能改 feature gate 的託管叢集上，這條 DRA 路線離正式環境還差什麼。<a href="../sprint1-day8-decision-matrix/">Day 8</a></p>
+<hr />
+<div class="admonition quote">
+<p>Kubernetes 標誌為 CNCF 之官方資產，此處作社群教學用途。</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到頂端
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="頁腳" >
+        
+          
+          <a href="../sprint1-day6-dra-simulated-devices/" class="md-footer__link md-footer__link--prev" aria-label="上一頁: Day 6 · DRA 概念與模擬裝置">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                上一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 6 · DRA 概念與模擬裝置
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../sprint1-day8-decision-matrix/" class="md-footer__link md-footer__link--next" aria-label="下一頁: Day 8 · Sprint 1 總結">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                下一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 8 · Sprint 1 總結
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      KAI Scheduler、HAMi、Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,作社群教學用途
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.code.annotate", "content.code.select", "content.tabs.link", "search.suggest", "search.highlight", "search.share"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u8907\u88fd", "clipboard.copy": "\u8907\u88fd", "search.result.more.one": "\u6b64\u9801\u5c1a\u6709 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.more.other": "\u6b64\u9801\u5c1a\u6709 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.none": "\u6c92\u6709\u7b26\u5408\u7684\u9805\u76ee", "search.result.one": "\u627e\u5230 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.other": "\u627e\u5230 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.placeholder": "\u6253\u5b57\u9032\u884c\u641c\u5c0b", "search.result.term.missing": "\u7f3a\u5c11\u5b57\u8a5e", "select.version": "\u9078\u64c7\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

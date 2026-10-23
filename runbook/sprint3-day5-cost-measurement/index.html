@@ -1,0 +1,3744 @@
+
+<!doctype html>
+<html lang="zh-TW" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="雲原生實作課程：GPU 排程、eBPF 與執行期安全、WebAssembly、服務網格與機密運算、遊戲伺服器平台">
+      
+      
+      
+        <link rel="canonical" href="https://deepwavelab.github.io/CloudNativePracticing/runbook/sprint3-day5-cost-measurement/">
+      
+      
+        <link rel="prev" href="../sprint3-day4-wasmedge/">
+      
+      
+        <link rel="next" href="../sprint3-day6-spinkube-shim/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Day 5 · 執行時間、記憶體與量測範圍 - Cloud Native Lab Course</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/terminal.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#day-5-wasm-shim" class="md-skip">
+          跳轉到
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="頁首">
+    <a href="../.." title="Cloud Native Lab Course" class="md-header__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Cloud Native Lab Course
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Day 5 · 執行時間、記憶體與量測範圍
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換深色模式"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="切換深色模式" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="切換淺色模式"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="切換淺色模式" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜尋" placeholder="搜尋" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="搜尋">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="分享" aria-label="分享" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="清除" aria-label="清除" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜尋引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="標籤" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../.." class="md-tabs__link">
+          
+  
+  
+    
+  
+  首頁
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint1-day0-azure-aks-foundation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 1 · GPU 排程三部曲
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint2-day0-ebpf-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 2 · eBPF 與執行期安全
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../sprint3-day0-wasm-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 3 · WebAssembly
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint4-day0-mesh-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 4 · 服務網格與機密運算
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../sprint5-day0-game-server-concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Sprint 5 · 遊戲伺服器平台
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="導覽列" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Cloud Native Lab Course" class="md-nav__button md-logo" aria-label="Cloud Native Lab Course" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Cloud Native Lab Course
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../.." class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首頁
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_1" id="__nav_1_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    首頁
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 3 · WebAssembly 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 4 · 服務網格與機密運算 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sprints/sprint5/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 5 · 遊戲伺服器平台 介紹
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 1 · GPU 排程三部曲
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day0-azure-aks-foundation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 環境建置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day1-kai-queue-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · KAI 安裝與 Queue 基礎
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day2-gang-scheduling-preemption/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Gang Scheduling 與搶占
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day3-hami-memory-isolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · HAMi 安裝與 VRAM 用量限制
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day4-hami-kai-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · HAMi 與 KAI 整合
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day5-hami-webui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · HAMi-WebUI 觀測介面
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day6-dra-simulated-devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · DRA 概念與模擬裝置
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day7-dra-aks-real-gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · DRA 配置實體 GPU
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint1-day8-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · Sprint 1 總結
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 2 · eBPF 與執行期安全
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day0-ebpf-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · eBPF 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day1-bpftrace-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · bpftrace 三支經典工具
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day2-bpftrace-kubernetes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · 把核心事件接回 Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day3-falco-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Falco 安裝與預設規則
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day4-falco-custom-rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · 自訂規則、誤報調校與告警路由
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day5-tetragon-basics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Tetragon 與 TracingPolicy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day6-tetragon-enforcement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · 從偵測到攔截
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day7-cilium-kubeproxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Cilium 與 kube-proxy replacement
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day8-cilium-network-policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · CiliumNetworkPolicy（L3/L4 → L7）
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day9-hubble/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Hubble 可觀測性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint2-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 綜合：四套工具的分工
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 3 · WebAssembly
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 3 · WebAssembly
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day0-wasm-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · wasm 是什麼
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day1-three-generations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · RuntimeClass 與節點執行路徑
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day2-wasmcloud/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · wasmCloud 與元件模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day3-wasmcloud-distributed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · wasmCloud 分散式模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day4-wasmedge/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · WasmEdge 執行期
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · 執行時間、記憶體與量測範圍
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · 執行時間、記憶體與量測範圍
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#step-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1: 先確認 Day 4 的 shim 還在不在
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2: 一份原始碼，三個目標
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 2: 一份原始碼，三個目標">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        打包成映像
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3: 先量量具本身的雜訊
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-n50" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4: 建立、執行與清理，兩批各 n=50
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 4: 建立、執行與清理，兩批各 n=50">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#bootstrap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        用 bootstrap 估計差距的範圍
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        這組數字能說什麼
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5: 記憶體
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 5: 記憶體">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#shim-memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        shim 的記憶體：觀察並行容器增加時的用量
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        容器自己的記憶體
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        磁碟
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wasmcloud" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        wasmCloud 那一側：量不到單一元件
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-wasmcloud" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6: wasmCloud 的啟動時間要放在哪一欄
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        這些數字能用到哪裡
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        疑難排解
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="疑難排解">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        VM 換過之後，RuntimeClass 還在但 pod 起不來
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        乾淨的 host 一直分不到 workload
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        想一想
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        小結
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day6-spinkube-shim/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · SpinKube（上）：shim 佈建
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day7-spinkube-operator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · SpinKube（下）：operator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day8-reversibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · SpinKube 移除與節點殘留
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint3-day9-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · 依工作負載選擇 Wasm 路線
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 4 · 服務網格與機密運算
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 4 · 服務網格與機密運算
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_1" id="__nav_5_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part 1 · 服務網格（Day 0–4）
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part 1 · 服務網格（Day 0–4）
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day0-mesh-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 服務網格與入口閘道的三層地圖
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day1-envoy-gateway/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · Envoy Gateway 與 HTTP/3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day2-istio-ambient/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Istio ambient：服務間 mTLS 與連線限制
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day3-cilium-mesh/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Cilium mesh：WireGuard 加密與 L7
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day4-istio-vs-cilium/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · Istio 與 Cilium 比較
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Part 2 · 機密運算（Day 5–9）
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Part 2 · 機密運算（Day 5–9）
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day5-confidential-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · 機密運算的威脅模型
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day6-kata-sandboxing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · Kata Pod Sandboxing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day7-katacc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · kata-cc：SEV-SNP 機密硬體
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day8-attestation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 遠端證明：MAA、SKR 與金鑰釋放
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint4-day9-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · 機密容器的需求與驗證範圍
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sprint 5 · 遊戲伺服器平台
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sprint 5 · 遊戲伺服器平台
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day0-game-server-concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 0 · 遊戲伺服器平台概念
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day1-agones-first-gameserver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 1 · Agones 第一顆 GameServer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day2-fleet-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 2 · Fleet 生命週期
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day3-allocation-autoscaler/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 3 · Allocation 與 autoscaler
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day4-quilkin-udp-proxy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 4 · Quilkin UDP proxy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day5-nakama-postgres/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 5 · Nakama 與 PostgreSQL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day6-matchmaking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 6 · Matchmaking 串接
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day7-python-client-e2e/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 7 · Python client 端到端
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day8-observability-resilience/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 8 · 觀測與韌性
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day9-unity-client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 9 · Unity client 與 relay server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sprint5-day10-decision-matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Day 10 · 遊戲伺服器平台總結
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目錄">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目錄
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#step-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 1: 先確認 Day 4 的 shim 還在不在
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 2: 一份原始碼，三個目標
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 2: 一份原始碼，三個目標">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        打包成映像
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 3: 先量量具本身的雜訊
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-n50" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 4: 建立、執行與清理，兩批各 n=50
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 4: 建立、執行與清理，兩批各 n=50">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#bootstrap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        用 bootstrap 估計差距的範圍
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        這組數字能說什麼
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 5: 記憶體
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="步驟 5: 記憶體">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#shim-memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        shim 的記憶體：觀察並行容器增加時的用量
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        容器自己的記憶體
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        磁碟
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wasmcloud" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        wasmCloud 那一側：量不到單一元件
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-wasmcloud" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        步驟 6: wasmCloud 的啟動時間要放在哪一欄
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        這些數字能用到哪裡
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        疑難排解
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="疑難排解">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mine-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        VM 換過之後，RuntimeClass 還在但 pod 起不來
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mine-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        乾淨的 host 一直分不到 workload
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        想一想
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        小結
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        延伸閱讀
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        下一步
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="day-5-wasm-shim">Day 5: 量測 wasm 與容器的成本——對照組、信賴區間與 shim 的記憶體<a class="headerlink" href="#day-5-wasm-shim" title="Permanent link">&para;</a></h1>
+<p><img align="right" alt="WebAssembly 官方標誌" src="../../assets/logos/webassembly-icon-color.svg" width="95" /></p>
+<p>你大概讀過這類說法：「wasm 冷啟動比容器快一個數量級」「wasm 比容器輕」。想在自己的叢集上驗證，最直接的做法是拿同一支程式，一次編成 wasm 交給 Day 4 裝好的 wasmedge shim，一次編成一般執行檔交給 runc，各啟動 50 次。結果出來，wasmedge 的中位數是 167 毫秒，runc 是 173.5 毫秒。可以說 wasm 快了 6.5 毫秒嗎？再跑一批，換成快 10.5 毫秒。這點差距是否只是量測的波動？</p>
+<p>這一章在一顆節點上比較容器建立、執行到清理的總時間與記憶體，再說明映像大小的比較條件，重點放在每個數字量完之後要問的問題：量具本身有多少雜訊，差距有沒有大過雜訊，兩個數字是不是在同一個條件下量的。讀完之後，拿到兩組啟動時間或記憶體讀數時，你能判斷差距能不能拿來排名，也能說出 wasm 容器在節點上的記憶體花在哪裡。</p>
+<h2 id="step-1">步驟 1: 先確認 Day 4 的 shim 還在不在<a class="headerlink" href="#step-1" title="Permanent link">&para;</a></h2>
+<p>Day 4 在節點上裝了 109 MiB 的 wasmedge shim、在 containerd 設定裡加了 8 行，也建了 <code>wasmedge</code> 這個 RuntimeClass。動手量之前，先在本機執行 <code>kubectl get node -o jsonpath='{.items[0].status.runtimeHandlers[*].name}'</code>。這個完整 JSONPath 取自重裝腳本 <code>42-reinstall-wasmedge.sh</code> 第 55 行；<code>runtimeHandlers</code> 是 kubelet 回報節點有哪些 handler 的欄位。</p>
+<p>如果清單裡有 <code>wasmedge</code>，再照 <a href="../sprint3-day1-three-generations/">Day 1 步驟 3</a> 的方式確認 shim 檔案與 containerd 設定仍在；三者都正常就直接進入步驟 2。若有缺失，再依本步驟末尾的 Day 4 連結補齊缺少的部分，不要重複加入已存在的設定。</p>
+<p>如果兩章之間節點 VM 被替換，寫在舊 VM 磁碟上的安裝與設定可能消失。以下保留一組缺失時的對照紀錄：用 Day 1 的指令將目前狀態存成 <code>day5-s0-</code> 開頭的檔案，再與基準比對。區塊裡的 <code>{…runtimeHandlers}</code> 是不可照打的簡寫，查詢時請使用上方的完整 JSONPath。</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">$ </span>diff<span class="w"> </span>&lt;Day1<span class="w"> </span>基準&gt;/baseline-containerd-config.toml<span class="w"> </span>day5-s0-containerd-config.toml
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="go">（無輸出,exit=0）                              ← 與 Day 1 基準逐字相同</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="gp">$ </span>cat<span class="w"> </span>day5-s0-shim-binaries.txt
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="go">-rwxr-xr-x 1 root root  8805376 /usr/bin/containerd-shim-runc-v2</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="go">-rwxr-xr-x 1 root root 10015640 /usr/bin/runc</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="go">                                               ← 那支 109 MiB 的 shim 不見了</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>node<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{…runtimeHandlers}&#39;</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="go">[&#39;&#39;, &#39;runc&#39;, &#39;untrusted&#39;]                      ← wasmedge 不在了</span>
+</span></code></pre></div>
+<p>這組紀錄中，containerd 設定和 Day 1 基準逐字相同，shim 檔案不在，<code>runtimeHandlers</code> 裡也沒有 <code>wasmedge</code>。遇到這三項都缺失的情況，才需要重做完整安裝。</p>
+<p>再看叢集這一側：</p>
+<div class="language-console highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="gp">$ </span>kubectl<span class="w"> </span>get<span class="w"> </span>runtimeclass
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="go">kata-vm-isolation   kata</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="go">runc                runc</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="go">wasm-day1-runc      runc</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="go">wasm-day1-untrusted untrusted</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="go">wasmedge            wasmedge          ← 還在</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="go">wasmtime-spin-v2    wasmtime-spin-v2</span>
+</span></code></pre></div>
+<p><code>wasmedge</code> 這個 RuntimeClass 還在。RuntimeClass 是存在 etcd 裡的叢集物件，不會因為換了 VM 就消失。下面這張圖把兩側放在一起，上排是 Day 4 結束時，下排是 VM 換過之後：</p>
+<p><img alt="兩排對照：Day 4 結束時，叢集層有 RuntimeClass wasmedge，節點層有 containerd 設定的 8 行、109 MiB 的 shim 和 runtimeHandlers 裡的 wasmedge；VM 汰換之後，RuntimeClass 仍在，節點層三樣都消失，於是指名 wasmedge 的 pod 會停在 ContainerCreating" src="../../assets/diagrams/s3d5-two-layers.svg" /></p>
+<p>我們可以從圖上看到，VM 換過之後，叢集處於「名字還在、實作不在」的狀態。這跟 Day 1 看到的 <code>kata-vm-isolation</code> 是同一類問題：API server 不會檢查 RuntimeClass 指向的 handler 在節點上存不存在，本例沒有排程標籤限制，Pod 排上節點後會因 handler 缺失而停在 <code>ContainerCreating</code>；Day 1 的 Kata 例子則先被 selector 擋在排程階段。要判斷 handler 在不在，看節點的 <code>runtimeHandlers</code>，不要看 <code>kubectl get runtimeclass</code>。遇到這個狀況的處理方式見<a href="#mine-1">疑難排解：VM 換過之後，RuntimeClass 還在但 pod 起不來</a>。</p>
+<p>本課在 <code>az aks stop</code>／<code>start</code> 後觀察到節點替換，不代表每次停止、啟動都一定更換 VM。節點映像升級、spot 節點被回收也會換掉 VM，可以預期同樣的結果，但本課沒有實際驗證。</p>
+<p>這個結果也影響 <a href="../sprint3-day8-reversibility/">Day 8</a> 的做法。Day 8 要移除 SpinKube，再把節點的 containerd 設定和 Day 1 的基準逐字比對，確認拆得乾淨。如果比對期間換了 VM，結果相同也可能只是新節點沒有安裝過那些元件。所以 Day 8 的移除和比對要在同一個 VM 生命週期內做完，中間不能停機。</p>
+<p>需要補回缺失項目時，依序參照 Day 4 的<a href="../sprint3-day4-wasmedge/#install-shim">安裝 shim</a>、<a href="../sprint3-day4-wasmedge/#configure-handler">設定 handler</a>與<a href="../sprint3-day4-wasmedge/#run-images">映像解包設定</a>。RuntimeClass 還在時，不必重建它。裝完在本機執行完整指令 <code>kubectl get node -o jsonpath='{.items[0].status.runtimeHandlers}'</code>，<code>runtimeHandlers</code> 裡應該又出現 <code>wasmedge</code>，確認後進入步驟 2。</p>
+<h2 id="2">步驟 2: 一份原始碼，三個目標<a class="headerlink" href="#2" title="Permanent link">&para;</a></h2>
+<p><a href="../sprint3-day4-wasmedge/#gate">Day 4</a> 發現 wasm 有兩種格式：wasmedge shim 只吃 core module，wasmCloud 只吃 component。網路上現成的範例程式各自編成其中一種，拿兩支不同的程式比，量到的差距可能來自程式本身。所以這一章自己寫一支程式，從同一份原始碼編出三個版本。</p>
+<p>Rust 用 <strong>target triple</strong> 指定要編給哪一種執行環境，它是一串用連字號串起來的名字，寫出 CPU 架構、作業系統和執行環境。這裡用到三個：</p>
+<table>
+<thead>
+<tr>
+<th>target triple</th>
+<th>產出</th>
+<th>給誰跑</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>wasm32-wasip1</code></td>
+<td>core module</td>
+<td>wasmedge shim</td>
+</tr>
+<tr>
+<td><code>wasm32-wasip2</code></td>
+<td>component</td>
+<td>wasmCloud</td>
+</tr>
+<tr>
+<td><code>x86_64-unknown-linux-musl</code></td>
+<td>靜態連結的 Linux 執行檔</td>
+<td>runc</td>
+</tr>
+</tbody>
+</table>
+<p>原生版要是 linux/amd64 的執行檔，所以在叢集裡開一顆裝了 Rust 工具鏈的 pod 來編：</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Pod</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nt">metadata</span><span class="p">:</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">builder</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">wasmlab</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="nt">spec</span><span class="p">:</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">  </span><span class="nt">restartPolicy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Never</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span><span class="nt">containers</span><span class="p">:</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">rust</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">rust:1-bookworm</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;sleep&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;infinity&quot;</span><span class="p p-Indicator">]</span>
+</span></code></pre></div>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>kubectl<span class="w"> </span>apply<span class="w"> </span>-f<span class="w"> </span>builder.yaml
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>kubectl<span class="w"> </span>-n<span class="w"> </span>wasmlab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-it<span class="w"> </span>builder<span class="w"> </span>--<span class="w"> </span>bash
+</span></code></pre></div>
+<p>musl 是 Linux 的 C 標準函式庫；這裡把需要的函式一起連結進執行檔，讓空映像也能執行。進到 pod 之後，先裝 musl 的工具，再開一個新專案：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>apt-get<span class="w"> </span>update<span class="w"> </span>-qq
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>apt-get<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>-qq<span class="w"> </span>musl-tools
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>/work<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>/work
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>cargo<span class="w"> </span>new<span class="w"> </span>--bin<span class="w"> </span>payload
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="nb">cd</span><span class="w"> </span>payload
+</span></code></pre></div>
+<p>程式有兩種模式。不帶參數時印一行就結束，計時涵蓋這次容器建立、程式執行與清理完成；帶 <code>stay &lt;秒數&gt;</code> 時會停住不結束，讓我們有時間去讀它佔了多少記憶體。把 <code>src/main.rs</code> 換成：</p>
+<div class="language-rust highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">fn</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">args</span><span class="p">:</span><span class="w"> </span><span class="nb">Vec</span><span class="o">&lt;</span><span class="nb">String</span><span class="o">&gt;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="p">::</span><span class="n">env</span><span class="p">::</span><span class="n">args</span><span class="p">().</span><span class="n">skip</span><span class="p">(</span><span class="mi">1</span><span class="p">).</span><span class="n">collect</span><span class="p">();</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="n">args</span><span class="p">.</span><span class="n">first</span><span class="p">().</span><span class="n">map</span><span class="p">(</span><span class="nb">String</span><span class="p">::</span><span class="n">as_str</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="s">&quot;stay&quot;</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">        </span><span class="kd">let</span><span class="w"> </span><span class="n">secs</span><span class="p">:</span><span class="w"> </span><span class="kt">u64</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">args</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="mi">1</span><span class="p">).</span><span class="n">and_then</span><span class="p">(</span><span class="o">|</span><span class="n">s</span><span class="o">|</span><span class="w"> </span><span class="n">s</span><span class="p">.</span><span class="n">parse</span><span class="p">().</span><span class="n">ok</span><span class="p">()).</span><span class="n">unwrap_or</span><span class="p">(</span><span class="mi">300</span><span class="p">);</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">        </span><span class="fm">println!</span><span class="p">(</span><span class="s">&quot;cnp-sprint3-day5 payload: resident for {secs}s&quot;</span><span class="p">);</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">        </span><span class="n">std</span><span class="p">::</span><span class="n">thread</span><span class="p">::</span><span class="n">sleep</span><span class="p">(</span><span class="n">std</span><span class="p">::</span><span class="n">time</span><span class="p">::</span><span class="n">Duration</span><span class="p">::</span><span class="n">from_secs</span><span class="p">(</span><span class="n">secs</span><span class="p">));</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">        </span><span class="k">return</span><span class="p">;</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">    </span><span class="p">}</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">who</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">args</span><span class="p">.</span><span class="n">is_empty</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="s">&quot;world&quot;</span><span class="p">.</span><span class="n">to_string</span><span class="p">()</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">args</span><span class="p">.</span><span class="n">join</span><span class="p">(</span><span class="s">&quot; &quot;</span><span class="p">)</span><span class="w"> </span><span class="p">};</span>
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">    </span><span class="fm">println!</span><span class="p">(</span><span class="s">&quot;cnp-sprint3-day5 payload: hello {who}&quot;</span><span class="p">);</span>
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="p">}</span>
+</span></code></pre></div>
+<p><code>Cargo.toml</code> 的 release 設定控制最佳化方式。三個版本共用縮小產物、跨模組最佳化、移除符號與 panic 時直接結束的選項，避免編譯選項成為另一個差異：</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">[profile.release]</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">opt-level</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;s&quot;</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">lto</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">strip</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="n">panic</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;abort&quot;</span>
+</span></code></pre></div>
+<p>然後一次編出三個目標：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># one crate, one release profile, three target triples</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>rustup<span class="w"> </span>target<span class="w"> </span>add<span class="w"> </span>wasm32-wasip1<span class="w"> </span>wasm32-wasip2<span class="w"> </span>x86_64-unknown-linux-musl
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="k">for</span><span class="w"> </span>T<span class="w"> </span><span class="k">in</span><span class="w"> </span>wasm32-wasip1<span class="w"> </span>wasm32-wasip2<span class="w"> </span>x86_64-unknown-linux-musl<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span>cargo<span class="w"> </span>build<span class="w"> </span>--release<span class="w"> </span>--target<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$T</span><span class="s2">&quot;</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="k">done</span>
+</span></code></pre></div>
+<p>三次建置使用相同原始碼與 release 選項，改變的是 target triple；各目標仍會連入不同的標準函式庫與執行期支援。後面量到的差距，就不會是「兩支程式寫得不一樣」造成的。</p>
+<h3 id="_1">打包成映像<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h3>
+<p>三個成品要包成 OCI 映像，containerd 和 wasmCloud 才拉得到。rootfs 是容器看見的檔案系統；這裡用 tar 打包。artifact 泛指 registry 裡儲存的成品，不一定是 Linux 容器映像。本課包了四個：</p>
+<table>
+<thead>
+<tr>
+<th>後綴</th>
+<th>內容</th>
+<th>給誰</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-wasm</code></td>
+<td>core module，空 base，tar rootfs</td>
+<td>wasmedge shim</td>
+</tr>
+<tr>
+<td><code>-native-scratch</code></td>
+<td>原生執行檔，空 base，tar rootfs</td>
+<td>runc，<strong>無 base image</strong></td>
+</tr>
+<tr>
+<td><code>-native-debian</code></td>
+<td>原生執行檔疊在 <code>debian:12-slim</code> 上</td>
+<td>runc，<strong>有 base image</strong></td>
+</tr>
+<tr>
+<td><code>-comp</code></td>
+<td>component，<code>application/wasm</code> artifact</td>
+<td>wasmCloud</td>
+</tr>
+</tbody>
+</table>
+<p><code>-wasm</code> 和 <code>-native-scratch</code> 用的是同一套打包方式：一層 tar，裡面只有那一個檔案，沒有任何 base image。兩者的映像大小要能比較，這是前提；如果一邊多疊了一層作業系統，比到的就是那層作業系統的大小。<code>-native-debian</code> 是另一種對照，代表一般疊在 Linux 發行版上的應用容器。</p>
+<p>打包用 <code>crane</code>（v0.21.9）和 <code>oras</code>（v1.3.3）兩個工具，在 builder pod 裡執行。先在 builder 安裝對應版本：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>curl<span class="w"> </span>-sSL<span class="w"> </span>https://github.com/google/go-containerregistry/releases/download/v0.21.9/go-containerregistry_Linux_x86_64.tar.gz<span class="w"> </span><span class="p">|</span><span class="w"> </span>tar<span class="w"> </span>xz<span class="w"> </span>-C<span class="w"> </span>/usr/local/bin<span class="w"> </span>crane
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>curl<span class="w"> </span>-sSL<span class="w"> </span>https://github.com/oras-project/oras/releases/download/v1.3.3/oras_1.3.3_linux_amd64.tar.gz<span class="w"> </span><span class="p">|</span><span class="w"> </span>tar<span class="w"> </span>xz<span class="w"> </span>-C<span class="w"> </span>/usr/local/bin<span class="w"> </span>oras
+</span></code></pre></div>
+<p>本課推到 ttl.sh，這是不用帳號的臨時 registry，tag 寫 <code>1h</code> 代表映像一小時後自動刪除，量測要在這段時間內做完；想留久一點，換成自己的 registry。<code>&lt;prefix&gt;</code> 換成一串自己的隨機字：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>/out
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>cp<span class="w"> </span>target/wasm32-wasip1/release/payload.wasm<span class="w">        </span>/out/payload-wasip1.wasm
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>cp<span class="w"> </span>target/wasm32-wasip2/release/payload.wasm<span class="w">        </span>/out/payload-wasip2.wasm
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>cp<span class="w"> </span>target/x86_64-unknown-linux-musl/release/payload<span class="w"> </span>/out/payload-native
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="nb">cd</span><span class="w"> </span>/out
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="nv">R</span><span class="o">=</span>ttl.sh/&lt;prefix&gt;
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>tar<span class="w"> </span>--owner<span class="o">=</span><span class="m">0</span><span class="w"> </span>--group<span class="o">=</span><span class="m">0</span><span class="w"> </span>--mode<span class="o">=</span><span class="m">0755</span><span class="w"> </span>-cf<span class="w"> </span>wasm-layer.tar<span class="w"> </span>--transform<span class="w"> </span><span class="s1">&#39;s,payload-wasip1.wasm,payload.wasm,&#39;</span><span class="w"> </span>payload-wasip1.wasm
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>tar<span class="w"> </span>--owner<span class="o">=</span><span class="m">0</span><span class="w"> </span>--group<span class="o">=</span><span class="m">0</span><span class="w"> </span>--mode<span class="o">=</span><span class="m">0755</span><span class="w"> </span>-cf<span class="w"> </span>native-layer.tar<span class="w"> </span>--transform<span class="w"> </span><span class="s1">&#39;s,payload-native,payload,&#39;</span><span class="w"> </span>payload-native
+</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>
+</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>crane<span class="w"> </span>append<span class="w"> </span>--oci-empty-base<span class="w"> </span>-f<span class="w"> </span>wasm-layer.tar<span class="w">   </span>-t<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">R</span><span class="si">}</span><span class="s2">-wasm-base:1h&quot;</span><span class="w">   </span>--platform<span class="w"> </span>linux/amd64
+</span><span id="__span-9-12"><a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>crane<span class="w"> </span>mutate<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">R</span><span class="si">}</span><span class="s2">-wasm-base:1h&quot;</span><span class="w">   </span>--entrypoint<span class="w"> </span>/payload.wasm<span class="w"> </span>-t<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">R</span><span class="si">}</span><span class="s2">-wasm:1h&quot;</span>
+</span><span id="__span-9-13"><a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>crane<span class="w"> </span>append<span class="w"> </span>--oci-empty-base<span class="w"> </span>-f<span class="w"> </span>native-layer.tar<span class="w"> </span>-t<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">R</span><span class="si">}</span><span class="s2">-native-base:1h&quot;</span><span class="w"> </span>--platform<span class="w"> </span>linux/amd64
+</span><span id="__span-9-14"><a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>crane<span class="w"> </span>mutate<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">R</span><span class="si">}</span><span class="s2">-native-base:1h&quot;</span><span class="w"> </span>--entrypoint<span class="w"> </span>/payload<span class="w">      </span>-t<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">R</span><span class="si">}</span><span class="s2">-native-scratch:1h&quot;</span>
+</span><span id="__span-9-15"><a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>crane<span class="w"> </span>append<span class="w"> </span>-b<span class="w"> </span>debian:12-slim<span class="w"> </span>-f<span class="w"> </span>native-layer.tar<span class="w"> </span>-t<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">R</span><span class="si">}</span><span class="s2">-debian-base:1h&quot;</span>
+</span><span id="__span-9-16"><a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>crane<span class="w"> </span>mutate<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">R</span><span class="si">}</span><span class="s2">-debian-base:1h&quot;</span><span class="w"> </span>--entrypoint<span class="w"> </span>/payload<span class="w">      </span>-t<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">R</span><span class="si">}</span><span class="s2">-native-debian:1h&quot;</span>
+</span><span id="__span-9-17"><a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a>
+</span><span id="__span-9-18"><a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a><span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{}&#39;</span><span class="w"> </span>&gt;<span class="w"> </span>wasm-config.json
+</span><span id="__span-9-19"><a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a>cp<span class="w"> </span>payload-wasip2.wasm<span class="w"> </span>payload.wasm
+</span><span id="__span-9-20"><a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a>oras<span class="w"> </span>push<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">R</span><span class="si">}</span><span class="s2">-comp:1h&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-9-21"><a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a><span class="w">  </span>--config<span class="w"> </span>wasm-config.json:application/vnd.wasm.config.v0+json<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-9-22"><a id="__codelineno-9-22" name="__codelineno-9-22" href="#__codelineno-9-22"></a><span class="w">  </span>payload.wasm:application/wasm
+</span></code></pre></div>
+<p>比較大小時，分別記錄三個成品的檔名、位元組數與 SHA-256，以及每個映像的 reference、各 layer 的大小與 digest。檔案大小和映像 layer 大小分開記錄；映像只拿 <code>-wasm</code> 和 <code>-native-scratch</code> 這兩個打包方式相同的版本來比。</p>
+<p>在 builder pod 裡執行以下指令，保存 <code>ls -l</code> 的檔案大小欄位，雜湊會寫入 <code>/out/sha256.txt</code>。這三行取自建置腳本 <code>43-build-one-source.sh</code> 第 60–62 行：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nb">cd</span><span class="w"> </span>/out
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>ls<span class="w"> </span>-l
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>sha256sum<span class="w"> </span>payload-*<span class="w"> </span>&gt;<span class="w"> </span>/out/sha256.txt
+</span></code></pre></div>
+<p>接著沿用打包時的 <code>R</code>，讀取各映像的 manifest 並存成 JSON；從 <code>layers</code> 裡記下 <code>size</code> 與 <code>digest</code>。以下逐字取自 <code>45-package-and-push.sh</code> 第 45–48 行：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="k">for</span><span class="w"> </span>n<span class="w"> </span><span class="k">in</span><span class="w"> </span>wasm<span class="w"> </span>native-scratch<span class="w"> </span>native-debian<span class="w"> </span>comp<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;=== </span><span class="si">${</span><span class="nv">R</span><span class="si">}</span><span class="s2">-</span><span class="si">${</span><span class="nv">n</span><span class="si">}</span><span class="s2">:1h&quot;</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">  </span>crane<span class="w"> </span>manifest<span class="w"> </span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">R</span><span class="si">}</span><span class="s2">-</span><span class="si">${</span><span class="nv">n</span><span class="si">}</span><span class="s2">:1h&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>tee<span class="w"> </span><span class="s2">&quot;/out/manifest-</span><span class="si">${</span><span class="nv">n</span><span class="si">}</span><span class="s2">.json&quot;</span><span class="p">;</span><span class="w"> </span><span class="nb">echo</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="k">done</span>
+</span></code></pre></div>
+<h2 id="3">步驟 3: 先量量具本身的雜訊<a class="headerlink" href="#3" title="Permanent link">&para;</a></h2>
+<p>容器的單次總時間在節點上用 <code>ctr</code> 量。<code>ctr</code> 是 containerd 附的命令列工具，Day 4 用它查過映像。直接用 <code>ctr</code> 啟動容器，不經過 API server、scheduler 和 kubelet，計時從執行 <code>ctr run --rm</code> 到命令返回，包含命令列工具、RPC、容器建立、程式執行與退出清理。它沒有把純啟動階段分離出來，也不是服務能接收請求的時間。</p>
+<p>用 node-shell 進到節點（Day 1 建的那顆特權 pod）：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nv">NODE_SHELL_POD</span><span class="o">=</span><span class="k">$(</span>kubectl<span class="w"> </span>-n<span class="w"> </span>wasmlab<span class="w"> </span>get<span class="w"> </span>pod<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>node-shell<span class="w"> </span>-o<span class="w"> </span><span class="nv">jsonpath</span><span class="o">=</span><span class="s1">&#39;{.items[0].metadata.name}&#39;</span><span class="k">)</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>kubectl<span class="w"> </span>-n<span class="w"> </span>wasmlab<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-it<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$NODE_SHELL_POD</span><span class="s2">&quot;</span><span class="w"> </span>--<span class="w"> </span>nsenter<span class="w"> </span>-t<span class="w"> </span><span class="m">1</span><span class="w"> </span>-m<span class="w"> </span>--<span class="w"> </span>bash
+</span></code></pre></div>
+<p>前面在 builder 的操作完成後，回到本機再進節點 shell。量測用獨立的 containerd namespace <code>cnp5</code>，跟 kubelet 用的 <code>k8s.io</code> 分開。先用 <code>ctr -n cnp5 images pull</code> 把 <code>-wasm</code> 和 <code>-native-scratch</code> 兩個映像拉到節點上，量測時就不會把下載時間算進去。</p>
+<p>在開始量之前，要先回答一個問題：計時這件事本身要花多少時間、會晃動多少？<code>ctr</code> 每次要啟動一個新的行程、連到 containerd 再回來，這段時間不管跑什麼容器都會付。單一樣本的波動不能直接當成兩組差值的判定門檻，後面會用重抽樣估計差值的不確定性。</p>
+<p>所以先量一組<strong>對照組</strong>（null control）：用同一支 <code>ctr</code> 下一個什麼都不做的指令 <code>ctr version</code>，只問 containerd 的版本，不建立任何容器。這組數字讓我們知道基本命令往返的耗時；它不是 runtime 差距必須超過的門檻。下面的採樣程式依驗證時的 <code>48-measure-node.sh</code> 改寫成直接展開的形式（改寫版本本課沒有實跑），先量 50 次對照組，再交錯量兩個 runtime。這份程式沒有檢查每次命令是否成功，失敗也會記下時間，因此不能直接拿來收集新的有效樣本：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nv">W</span><span class="o">=</span>ttl.sh/&lt;prefix&gt;-wasm:1h
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="nv">C</span><span class="o">=</span>ttl.sh/&lt;prefix&gt;-native-scratch:1h
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="c1"># warm-up so the first sample is not paying for page cache</span>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>ctr<span class="w"> </span>-n<span class="w"> </span>cnp5<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>--runtime<span class="w"> </span>io.containerd.wasmedge.v1<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$W</span><span class="s2">&quot;</span><span class="w"> </span>warm-w<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span>
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>ctr<span class="w"> </span>-n<span class="w"> </span>cnp5<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$C</span><span class="s2">&quot;</span><span class="w"> </span>warm-c<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span>
+</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>
+</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="k">for</span><span class="w"> </span>i<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="k">$(</span>seq<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="m">50</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="w">  </span><span class="nv">t0</span><span class="o">=</span><span class="k">$(</span>date<span class="w"> </span>+%s%N<span class="k">)</span><span class="p">;</span><span class="w"> </span>ctr<span class="w"> </span>-n<span class="w"> </span>cnp5<span class="w"> </span>version<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="nv">t1</span><span class="o">=</span><span class="k">$(</span>date<span class="w"> </span>+%s%N<span class="k">)</span>
+</span><span id="__span-13-10"><a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;harness </span><span class="k">$((</span><span class="w"> </span><span class="o">(</span><span class="nv">t1</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nv">t0</span><span class="o">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="m">1000000</span><span class="w"> </span><span class="k">))</span><span class="s2">&quot;</span>
+</span><span id="__span-13-11"><a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="k">done</span>
+</span><span id="__span-13-12"><a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="k">for</span><span class="w"> </span>i<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="k">$(</span>seq<span class="w"> </span><span class="m">1</span><span class="w"> </span><span class="m">50</span><span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">do</span>
+</span><span id="__span-13-13"><a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="w">  </span><span class="nv">t0</span><span class="o">=</span><span class="k">$(</span>date<span class="w"> </span>+%s%N<span class="k">)</span><span class="p">;</span><span class="w"> </span>ctr<span class="w"> </span>-n<span class="w"> </span>cnp5<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>--runtime<span class="w"> </span>io.containerd.wasmedge.v1<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$W</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;w</span><span class="nv">$RANDOM$i</span><span class="s2">&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="nv">t1</span><span class="o">=</span><span class="k">$(</span>date<span class="w"> </span>+%s%N<span class="k">)</span>
+</span><span id="__span-13-14"><a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;wasmedge </span><span class="k">$((</span><span class="w"> </span><span class="o">(</span><span class="nv">t1</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nv">t0</span><span class="o">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="m">1000000</span><span class="w"> </span><span class="k">))</span><span class="s2">&quot;</span>
+</span><span id="__span-13-15"><a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="w">  </span><span class="nv">t0</span><span class="o">=</span><span class="k">$(</span>date<span class="w"> </span>+%s%N<span class="k">)</span><span class="p">;</span><span class="w"> </span>ctr<span class="w"> </span>-n<span class="w"> </span>cnp5<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$C</span><span class="s2">&quot;</span><span class="w"> </span><span class="s2">&quot;c</span><span class="nv">$RANDOM$i</span><span class="s2">&quot;</span><span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="p">;</span><span class="w"> </span><span class="nv">t1</span><span class="o">=</span><span class="k">$(</span>date<span class="w"> </span>+%s%N<span class="k">)</span>
+</span><span id="__span-13-16"><a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a><span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;runc </span><span class="k">$((</span><span class="w"> </span><span class="o">(</span><span class="nv">t1</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nv">t0</span><span class="o">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="m">1000000</span><span class="w"> </span><span class="k">))</span><span class="s2">&quot;</span>
+</span><span id="__span-13-17"><a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a><span class="k">done</span>
+</span></code></pre></div>
+<p>重新量測時，應先確認映像可執行，每次保留退出碼；失敗立即停止該組採樣並顯示錯誤，不得把失敗時間計入。這次歷史紀錄沒有逐筆退出碼，無法補證每個樣本都成功，因此下面數字只作方法與既有資料判讀，不能當成已通過這項條件的新效能結果。</p>
+<p>有兩個細節值得注意。正式取樣前，每個 runtime 先各跑一次暖機，讓相關的檔案先進到記憶體的快取裡，第一個樣本不會因為讀磁碟而特別慢。另外，wasmedge 和 runc 是一個接一個交錯跑，不是先跑完 50 次 wasmedge 再跑 50 次 runc；如果量測途中節點變忙或變閒，可減少先後次序造成的偏差，但不能保證兩邊受到完全相同的影響。</p>
+<p>整理這些樣本時用<strong>中位數</strong>和 <strong>IQR</strong>。中位數是把 50 個數字排好之後最中間的那個；IQR（四分位距）是排在第 75% 的數字減掉排在第 25% 的數字，也就是中間那一半樣本分布得多寬。不用平均數，是因為啟動時間有一個降不下去的最低值，偶爾又會冒出特別慢的一次，平均數會被少數幾個慢的樣本往上拉，不能代表「一般的一次」。</p>
+<p>對照組的結果：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>harness   n=50   median 16.0 ms   IQR 1.0   (min 15.0, max 30.0)
+</span></code></pre></div>
+<p>這批版本查詢的中位數是 16 毫秒，IQR 為 1 毫秒。它的變異較小，但不能據此把容器樣本的其他變異全部歸因給 runtime。</p>
+<h2 id="4-n50">步驟 4: 建立、執行與清理，兩批各 n=50<a class="headerlink" href="#4-n50" title="Permanent link">&para;</a></h2>
+<p>同樣的程序跑兩批，每批各 50 個樣本。下面是兩批的統計，欄位依序是樣本數、最小值、第 25%、中位數、第 75%、最大值和 IQR（單位毫秒）：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>=== 批次 A
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>label       n     min     p25  median     p75     max     IQR
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>harness    50    15.0    16.0    16.0    17.0    30.0     1.0
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>wasmedge   50   147.0   156.0   167.0   178.5   197.0    22.5
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>runc       50   153.0   159.5   173.5   185.5   279.0    26.0
+</span><span id="__span-15-6"><a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a>
+</span><span id="__span-15-7"><a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>=== 批次 B
+</span><span id="__span-15-8"><a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a>harness    50    15.0    16.0    16.0    17.0    28.0     1.0
+</span><span id="__span-15-9"><a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a>wasmedge   50   147.0   154.0   161.0   169.0   196.0    15.0
+</span><span id="__span-15-10"><a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a>runc       50   148.0   165.0   171.5   181.8   255.0    16.8
+</span></code></pre></div>
+<p>把五組中位數畫在同一把尺上：</p>
+<p><svg viewBox="0 0 660 210" role="img" aria-label="建立至清理的中位數(毫秒,每批 n=50)" width="100%" style="max-width:660px; font-family: var(--md-text-font-family, sans-serif);">
+<text x="0" y="18" font-size="15" font-weight="600" fill="var(--md-default-fg-color)">建立至清理的中位數(毫秒,每批 n=50)</text>
+<text x="160" y="50" font-size="13" text-anchor="end" fill="var(--md-default-fg-color)">版本查詢</text>
+<rect x="170" y="34" width="33" height="22" rx="2" fill="#9aa0a6"/>
+<text x="211" y="50" font-size="13" font-weight="600" fill="var(--md-default-fg-color)">16</text>
+<text x="160" y="84" font-size="13" text-anchor="end" fill="var(--md-default-fg-color)">wasmedge 批次A</text>
+<rect x="170" y="68" width="342" height="22" rx="2" fill="#e8590c"/>
+<text x="520" y="84" font-size="13" font-weight="600" fill="var(--md-default-fg-color)">167</text>
+<text x="160" y="118" font-size="13" text-anchor="end" fill="var(--md-default-fg-color)">runc 批次A</text>
+<rect x="170" y="102" width="356" height="22" rx="2" fill="#4c7bd9"/>
+<text x="534" y="118" font-size="13" font-weight="600" fill="var(--md-default-fg-color)">173.5</text>
+<text x="160" y="152" font-size="13" text-anchor="end" fill="var(--md-default-fg-color)">wasmedge 批次B</text>
+<rect x="170" y="136" width="330" height="22" rx="2" fill="#e8590c"/>
+<text x="508" y="152" font-size="13" font-weight="600" fill="var(--md-default-fg-color)">161</text>
+<text x="160" y="186" font-size="13" text-anchor="end" fill="var(--md-default-fg-color)">runc 批次B</text>
+<rect x="170" y="170" width="352" height="22" rx="2" fill="#4c7bd9"/>
+<text x="530" y="186" font-size="13" font-weight="600" fill="var(--md-default-fg-color)">171.5</text>
+</svg></p>
+<p>wasmedge 和 runc 的長條幾乎一樣長，兩者都遠高於 16 毫秒的版本查詢對照值。兩批的中位數都是 wasmedge 略低，分別低 6.5 和 10.5 毫秒。問題在於：wasmedge 自己的 IQR 就有 15 到 22.5 毫秒，差 6.5 毫秒會不會只是這一批剛好抽到比較快的幾次？</p>
+<h3 id="bootstrap">用 bootstrap 估計差距的範圍<a class="headerlink" href="#bootstrap" title="Permanent link">&para;</a></h3>
+<p>回答這個問題用的是 <strong>bootstrap 信賴區間</strong>。做法是拿手上這 50 個 wasmedge 樣本，從裡面隨機抽 50 次，每次抽完放回去（同一個樣本可以被抽到不只一次），得到一組「重抽」的樣本；runc 也一樣抽一組，算兩組中位數的差。這樣重複一萬次，就有一萬個差值。把最小的 2.5% 和最大的 2.5% 去掉，剩下的範圍叫 95% 信賴區間，意思是：以手上的資料來看，真正的差距大致落在這個範圍內。</p>
+<p>判讀規則很簡單：區間跨過 0，代表「兩者一樣快」也在合理範圍內，這批資料分不出誰快；區間整個在 0 的某一邊，差距才算成立。亂數用固定的種子，同一份資料每次算出來的區間都一樣。</p>
+<p>可在本機下載<a href="../../assets/labs/s3d5/50-effect-vs-noise.py">統計程式</a>、<a href="../../assets/labs/s3d5/samples-node-n50.txt">批次 A</a>與<a href="../../assets/labs/s3d5/samples-node-n50b.txt">批次 B</a>。以 <code>python3 50-effect-vs-noise.py wasmedge runc &lt; samples-node-n50.txt</code> 重算 A，再換成 B 的檔名；這只分析已保存資料，不會連線叢集。兩批的結果：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>=== 批次 A:wasmedge vs runc
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>observed difference = -6.5 ms
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>bootstrap 95% CI    = [-16.0, +1.0] ms
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>verdict: NOT MEASURABLE (CI covers 0)
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>
+</span><span id="__span-16-6"><a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>=== 批次 B:wasmedge vs runc
+</span><span id="__span-16-7"><a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>observed difference = -10.5 ms
+</span><span id="__span-16-8"><a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a>bootstrap 95% CI    = [-16.5, -5.0] ms
+</span><span id="__span-16-9"><a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a>verdict: measurable
+</span></code></pre></div>
+<p>畫在一條數線上，橘色虛線是「差距為 0」：</p>
+<p><img alt="數線上兩條信賴區間：批次 A 從 -16.0 到 +1.0 毫秒，觀察值 -6.5，跨過 0；批次 B 從 -16.5 到 -5.0 毫秒，觀察值 -10.5，沒有跨過 0。對照之下，wasmedge 減版本查詢對照值的區間落在 +141 到 +157 毫秒" src="../../assets/diagrams/s3d5-ci.svg" /></p>
+<p>照著圖看兩件事。第一，批次 A 的區間剛好越過 0，批次 B 的區間停在 -5，兩批的點估計都偏向 wasmedge 較短，區間也大幅重疊；差別是 A 包含 0、B 不包含 0，不能說效果方向相反。第二，就算採信批次 B，差距也在 5 到 16.5 毫秒之間，跟一次啟動的 160 多毫秒比，約占數個百分點，還要看這個差距對應用是否有實際影響。</p>
+<p>同樣的方法拿來比 wasmedge 和版本查詢對照值：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>wasmedge vs harness   批次 A CI = [+144.0, +157.0] ms   measurable
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>                      批次 B CI = [+141.0, +149.5] ms   measurable
+</span></code></pre></div>
+<p>wasmedge 比版本查詢對照值多出約 150 毫秒，兩批都很明確。</p>
+<h3 id="_2">這組數字能說什麼<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h3>
+<p>在這個條件下，兩組「建立、執行、清理」總時間的中位數約為 160–175 毫秒。A 的差值區間包含 0，B 不包含 0；現有資料支持的範圍有限，又缺少逐筆退出碼，不能用來宣稱一般的 wasm 冷啟動排名。</p>
+<p>wasmedge 比版本查詢多出的約 150 毫秒，包含好幾個階段。本課沒有分段計時，不能判定其中多少來自 cgroup、shim、程式本身或清理。若要比較純啟動或 HTTP 可用時間，必須另選一致的開始與結束條件。</p>
+<p>要檢查結果是否穩定，可在相同條件下增加獨立批次。每批維持相同的暖機、版本查詢與交錯採樣方式，依步驟 3 的要求保留退出碼與錯誤；把各批有效樣本分開保存，再用相同統計程式重算中位數、IQR 與差值的信賴區間。增加樣本與批次可讓估計更有依據，但不保證某一種判定一定成立。</p>
+<h2 id="5">步驟 5: 記憶體<a class="headerlink" href="#5" title="Permanent link">&para;</a></h2>
+<h3 id="shim-memory">shim 的記憶體：觀察並行容器增加時的用量<a class="headerlink" href="#shim-memory" title="Permanent link">&para;</a></h3>
+<p>每個容器在節點上都有一個 shim 行程替它跟 containerd 溝通（Day 1 追過這條路徑）。要量 shim 吃多少記憶體，第一個想到的是 <code>ps</code> 的 RSS 欄位，但 RSS 會算錯：RSS 是一個行程用到的全部實體記憶體，包含跟其他行程共用的部分。wasmedge 的 shim 會分出好幾個行程，它們共用同一份程式碼，用 RSS 加總會把共用的部分重複算好幾次。</p>
+<p>所以這裡用 <strong>PSS</strong>（proportional set size）：共用的頁面按共用的行程數平均分攤，每個行程只算自己那一份，加總起來就不會重複。PSS 可以從 <code>/proc/&lt;pid&gt;/smaps_rollup</code> 讀到：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="k">for</span><span class="w"> </span>p<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="k">$(</span>pgrep<span class="w"> </span>-f<span class="w"> </span>containerd-shim<span class="k">)</span><span class="p">;</span><span class="w"> </span><span class="k">do</span><span class="w"> </span>awk<span class="w"> </span><span class="s1">&#39;/^Pss:/{print $2}&#39;</span><span class="w"> </span>/proc/<span class="nv">$p</span>/smaps_rollup<span class="p">;</span><span class="w"> </span><span class="k">done</span>
+</span></code></pre></div>
+<p>（這會把節點上所有 shim 都算進去；本課只加總命令列裡帶 <code>cnp5</code> 的那些，也就是自己用 <code>ctr</code> 啟動的容器。）</p>
+<p>實際使用的<a href="../../assets/labs/s3d5/52-measure-shim-scaling.sh">並行取樣腳本</a>在節點執行，參數為打包時的 <code>&lt;prefix&gt;</code>，僅統計 <code>cnp5</code> namespace 的 shim。它依序建立 1、2、3 個 <code>stay</code> 容器，每組等 6 秒再讀 PSS，清理後才換下一組。上面的泛用 <code>pgrep</code> 只是讀 PSS 的示意，不能直接拿它加總全節點來重現以下數字：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>wasmedge n=1 shim_pss_KiB=49235  shim_procs=4
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>wasmedge n=2 shim_pss_KiB=58774  shim_procs=8
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>wasmedge n=3 shim_pss_KiB=68210  shim_procs=12
+</span><span id="__span-19-4"><a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>runc     n=1 shim_pss_KiB=4709   shim_procs=1
+</span><span id="__span-19-5"><a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>runc     n=2 shim_pss_KiB=9904   shim_procs=2
+</span><span id="__span-19-6"><a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>runc     n=3 shim_pss_KiB=13885  shim_procs=3
+</span></code></pre></div>
+<p>以下是原紀錄從 1–3 個容器樣本推估的固定項與每容器增量。當時用「常駐」稱呼固定項，但沒有直接量過零容器時的用量，不能當成零負載實測，也不能直接套到任意容器數：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>wasmedge  常駐 38.8 MiB  +9.3 MiB/容器  4 行程/容器
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>runc      常駐  0.1 MiB  +4.5 MiB/容器  1 行程/容器
+</span></code></pre></div>
+<p>畫成長條圖：</p>
+<p><svg viewBox="0 0 660 235" role="img" aria-label="shim 記憶體對並行容器數" width="100%" style="max-width:660px; font-family: var(--md-text-font-family, sans-serif);">
+<text x="0" y="18" font-size="15" font-weight="600" fill="var(--md-default-fg-color)">shim 記憶體 PSS(MiB)對並行容器數</text>
+<rect x="0" y="30" width="12" height="12" rx="2" fill="#e8590c"/><text x="18" y="41" font-size="12" fill="var(--md-default-fg-color)">wasmedge</text><rect x="106" y="30" width="12" height="12" rx="2" fill="#4c7bd9"/><text x="124" y="41" font-size="12" fill="var(--md-default-fg-color)">runc</text>
+<text x="100" y="80" font-size="13" text-anchor="end" fill="var(--md-default-fg-color)">1 個容器</text>
+<rect x="110" y="56" width="316" height="18" rx="2" fill="#e8590c"/>
+<text x="434" y="70" font-size="12.5" font-weight="600" fill="var(--md-default-fg-color)">48.1</text>
+<rect x="110" y="79" width="30" height="18" rx="2" fill="#4c7bd9"/>
+<text x="148" y="93" font-size="12.5" font-weight="600" fill="var(--md-default-fg-color)">4.6</text>
+<text x="100" y="139" font-size="13" text-anchor="end" fill="var(--md-default-fg-color)">2 個容器</text>
+<rect x="110" y="115" width="377" height="18" rx="2" fill="#e8590c"/>
+<text x="495" y="129" font-size="12.5" font-weight="600" fill="var(--md-default-fg-color)">57.4</text>
+<rect x="110" y="138" width="64" height="18" rx="2" fill="#4c7bd9"/>
+<text x="182" y="152" font-size="12.5" font-weight="600" fill="var(--md-default-fg-color)">9.7</text>
+<text x="100" y="198" font-size="13" text-anchor="end" fill="var(--md-default-fg-color)">3 個容器</text>
+<rect x="110" y="174" width="438" height="18" rx="2" fill="#e8590c"/>
+<text x="556" y="188" font-size="12.5" font-weight="600" fill="var(--md-default-fg-color)">66.6</text>
+<rect x="110" y="197" width="89" height="18" rx="2" fill="#4c7bd9"/>
+<text x="207" y="211" font-size="12.5" font-weight="600" fill="var(--md-default-fg-color)">13.6</text>
+</svg></p>
+<p>圖上是直接量到的 PSS：1–3 個容器時，wasmedge 約 48–67 MiB，runc 約 4.6–13.6 MiB。這組樣本中，wasmedge 每個容器有 4 個 shim 行程，runc 有 1 個；這是本次樣本的正常觀察，不是故障。計數使用 <code>pgrep -fc 'containerd-shim.*cnp5'</code>，取自並行取樣腳本第 43 行，只計入命令列帶 <code>cnp5</code> 的 shim。同時跑 3 個容器時，兩種 runtime 分別數到 12 與 3 個行程；直接用 <code>pgrep -fc containerd-shim</code> 會混入其他 namespace 的容器。但資料沒有把每一頁記憶體的用途分開，不能把推估的固定項全歸給執行期程式碼。</p>
+<p>固定項加上容器數乘以增量，可以作為這組樣本的近似模型。要用於更大規模的容量規劃，還要在目標容器數與工作負載下取樣；shim 檔案大小也不等於執行時的實體記憶體用量。</p>
+<h3 id="_3">容器自己的記憶體<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h3>
+<p>shim 之外，容器裡的程式自己用多少？cgroup v2 是 Linux 用來分組計帳與限制資源的機制，每個容器在它底下有自己的目錄，其中 <code>memory.current</code> 是目前算在這個容器頭上的記憶體，包含它與子 cgroup 的計帳用量及檔案快取等項目；它不是記憶體限制或峰值，也不能直接當作 RSS。</p>
+<p>以下保留原有簡寫供核對，請勿照打。固定的 cgroup 路徑應改成先查容器 PID，再從 <code>/proc/&lt;pid&gt;/cgroup</code> 取得路徑；這段簡寫修正後的寫法本課沒有實跑。要重現既有量測，請使用後面從驗證素材逐字補入的完整程序：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>ctr<span class="w"> </span>-n<span class="w"> </span>cnp5<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>--runtime<span class="w"> </span>io.containerd.wasmedge.v1<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$W</span><span class="s2">&quot;</span><span class="w"> </span>memw<span class="w"> </span>/payload.wasm<span class="w"> </span>stay<span class="w"> </span><span class="m">120</span>
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>ctr<span class="w"> </span>-n<span class="w"> </span>cnp5<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$C</span><span class="s2">&quot;</span><span class="w"> </span>memc<span class="w"> </span>/payload<span class="w"> </span>stay<span class="w"> </span><span class="m">120</span>
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>cat<span class="w"> </span>/sys/fs/cgroup/cnp5/memw/memory.current<span class="w"> </span>/sys/fs/cgroup/cnp5/memc/memory.current
+</span></code></pre></div>
+<p>以下取自<a href="../../assets/labs/s3d5/51-measure-memory.sh">記憶體取樣腳本</a>第 12、19–40、48–51 行，在步驟 3 的節點 shell 執行，沿用已設定的 <code>W</code>、<code>C</code>。先定義讀值函式，再啟動容器、等 5 秒，查 PID 與 cgroup 路徑，讀值後清理：</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="nv">NSP</span><span class="o">=</span>cnp5
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>report<span class="o">()</span><span class="w"> </span><span class="o">{</span>
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="w">  </span><span class="nb">local</span><span class="w"> </span><span class="nv">id</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$1</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">label</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$2</span><span class="s2">&quot;</span>
+</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="w">  </span><span class="nb">local</span><span class="w"> </span>pid<span class="w"> </span>cg<span class="w"> </span>path
+</span><span id="__span-22-5"><a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="w">  </span><span class="nv">pid</span><span class="o">=</span><span class="k">$(</span>ctr<span class="w"> </span>-n<span class="w"> </span><span class="nv">$NSP</span><span class="w"> </span>task<span class="w"> </span>ls<span class="w"> </span><span class="p">|</span><span class="w"> </span>awk<span class="w"> </span>-v<span class="w"> </span><span class="nv">i</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$id</span><span class="s2">&quot;</span><span class="w"> </span><span class="s1">&#39;$1==i{print $2}&#39;</span><span class="k">)</span>
+</span><span id="__span-22-6"><a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="w">  </span><span class="nv">cg</span><span class="o">=</span><span class="k">$(</span>cat<span class="w"> </span>/proc/<span class="s2">&quot;</span><span class="nv">$pid</span><span class="s2">&quot;</span>/cgroup<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-1<span class="w"> </span><span class="p">|</span><span class="w"> </span>cut<span class="w"> </span>-d:<span class="w"> </span>-f3<span class="k">)</span>
+</span><span id="__span-22-7"><a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="w">  </span><span class="nv">path</span><span class="o">=</span>/sys/fs/cgroup<span class="si">${</span><span class="nv">cg</span><span class="si">}</span>
+</span><span id="__span-22-8"><a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;--- </span><span class="nv">$label</span><span class="s2">  container=</span><span class="nv">$id</span><span class="s2">  pid=</span><span class="nv">$pid</span><span class="s2">&quot;</span>
+</span><span id="__span-22-9"><a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a><span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;    cgroup            = </span><span class="nv">$cg</span><span class="s2">&quot;</span>
+</span><span id="__span-22-10"><a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a><span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;    memory.current    = </span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$path</span><span class="s2">&quot;</span>/memory.current<span class="k">)</span><span class="s2"> bytes&quot;</span>
+</span><span id="__span-22-11"><a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a><span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;    memory.peak       = </span><span class="k">$(</span>cat<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$path</span><span class="s2">&quot;</span>/memory.peak<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span>n/a<span class="k">)</span><span class="s2"> bytes&quot;</span>
+</span><span id="__span-22-12"><a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a><span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;    anon              = </span><span class="k">$(</span>awk<span class="w"> </span><span class="s1">&#39;$1==&quot;anon&quot;{print $2}&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$path</span><span class="s2">&quot;</span>/memory.stat<span class="k">)</span><span class="s2"> bytes&quot;</span>
+</span><span id="__span-22-13"><a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a><span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;    file              = </span><span class="k">$(</span>awk<span class="w"> </span><span class="s1">&#39;$1==&quot;file&quot;{print $2}&#39;</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$path</span><span class="s2">&quot;</span>/memory.stat<span class="k">)</span><span class="s2"> bytes&quot;</span>
+</span><span id="__span-22-14"><a id="__codelineno-22-14" name="__codelineno-22-14" href="#__codelineno-22-14"></a><span class="w">  </span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;    procs in cgroup   = </span><span class="k">$(</span>wc<span class="w"> </span>-l<span class="w"> </span>&lt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$path</span><span class="s2">&quot;</span>/cgroup.procs<span class="k">)</span><span class="s2">&quot;</span>
+</span><span id="__span-22-15"><a id="__codelineno-22-15" name="__codelineno-22-15" href="#__codelineno-22-15"></a><span class="w">  </span>ps<span class="w"> </span>-o<span class="w"> </span>pid,rss,comm<span class="w"> </span>-p<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$pid</span><span class="s2">&quot;</span>
+</span><span id="__span-22-16"><a id="__codelineno-22-16" name="__codelineno-22-16" href="#__codelineno-22-16"></a><span class="o">}</span>
+</span><span id="__span-22-17"><a id="__codelineno-22-17" name="__codelineno-22-17" href="#__codelineno-22-17"></a>
+</span><span id="__span-22-18"><a id="__codelineno-22-18" name="__codelineno-22-18" href="#__codelineno-22-18"></a>ctr<span class="w"> </span>-n<span class="w"> </span><span class="nv">$NSP</span><span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>--runtime<span class="w"> </span>io.containerd.wasmedge.v1<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$W</span><span class="s2">&quot;</span><span class="w"> </span>memw<span class="w"> </span>/payload.wasm<span class="w"> </span>stay<span class="w"> </span><span class="m">120</span>
+</span><span id="__span-22-19"><a id="__codelineno-22-19" name="__codelineno-22-19" href="#__codelineno-22-19"></a>ctr<span class="w"> </span>-n<span class="w"> </span><span class="nv">$NSP</span><span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$C</span><span class="s2">&quot;</span><span class="w"> </span>memc<span class="w"> </span>/payload<span class="w"> </span>stay<span class="w"> </span><span class="m">120</span>
+</span><span id="__span-22-20"><a id="__codelineno-22-20" name="__codelineno-22-20" href="#__codelineno-22-20"></a>sleep<span class="w"> </span><span class="m">5</span>
+</span><span id="__span-22-21"><a id="__codelineno-22-21" name="__codelineno-22-21" href="#__codelineno-22-21"></a>
+</span><span id="__span-22-22"><a id="__codelineno-22-22" name="__codelineno-22-22" href="#__codelineno-22-22"></a>report<span class="w"> </span>memw<span class="w"> </span>wasmedge
+</span><span id="__span-22-23"><a id="__codelineno-22-23" name="__codelineno-22-23" href="#__codelineno-22-23"></a>report<span class="w"> </span>memc<span class="w"> </span>runc
+</span><span id="__span-22-24"><a id="__codelineno-22-24" name="__codelineno-22-24" href="#__codelineno-22-24"></a>
+</span><span id="__span-22-25"><a id="__codelineno-22-25" name="__codelineno-22-25" href="#__codelineno-22-25"></a>ctr<span class="w"> </span>-n<span class="w"> </span><span class="nv">$NSP</span><span class="w"> </span>task<span class="w"> </span><span class="nb">kill</span><span class="w"> </span>-s<span class="w"> </span>SIGKILL<span class="w"> </span>memw<span class="w"> </span><span class="m">2</span>&gt;/dev/null
+</span><span id="__span-22-26"><a id="__codelineno-22-26" name="__codelineno-22-26" href="#__codelineno-22-26"></a>ctr<span class="w"> </span>-n<span class="w"> </span><span class="nv">$NSP</span><span class="w"> </span>task<span class="w"> </span><span class="nb">kill</span><span class="w"> </span>-s<span class="w"> </span>SIGKILL<span class="w"> </span>memc<span class="w"> </span><span class="m">2</span>&gt;/dev/null
+</span><span id="__span-22-27"><a id="__codelineno-22-27" name="__codelineno-22-27" href="#__codelineno-22-27"></a>sleep<span class="w"> </span><span class="m">3</span>
+</span><span id="__span-22-28"><a id="__codelineno-22-28" name="__codelineno-22-28" href="#__codelineno-22-28"></a>ctr<span class="w"> </span>-n<span class="w"> </span><span class="nv">$NSP</span><span class="w"> </span>c<span class="w"> </span>rm<span class="w"> </span>memw<span class="w"> </span>memc<span class="w"> </span><span class="m">2</span>&gt;/dev/null
+</span></code></pre></div>
+<p>以下保留原章節的讀值摘要；<code>mem.txt</code> 第 13–30 行記錄了對應的 PID、cgroup 路徑與讀值：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>--- wasmedge
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>    memory.current = 1601536 bytes   (1.53 MiB)
+</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>    PID   RSS COMMAND
+</span><span id="__span-23-4"><a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>  61034 15064 youki:[2:INIT]
+</span><span id="__span-23-5"><a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a>--- runc
+</span><span id="__span-23-6"><a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a>    memory.current =  294912 bytes   (0.28 MiB)
+</span><span id="__span-23-7"><a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a>    PID   RSS COMMAND
+</span><span id="__span-23-8"><a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a>  61077   316 payload
+</span></code></pre></div>
+<p>同一份原始碼，wasm 版的 <code>memory.current</code> 是 1.53 MiB，原生版是 0.28 MiB，約 5.4 倍。wasm 版除了程式本身，還要在容器裡把 WasmEdge 執行期跑起來。下面的 <code>ps</code> 輸出是同一個行程的 RSS，跟上一節說的一樣包含共用的頁面，所以不拿來比較。</p>
+<p>wasm 容器裡的行程名稱是 <code>youki:[2:INIT]</code>。youki 是一套用 Rust 寫的 OCI 容器執行期，runwasi 用它的函式庫來建立容器，所以行程名稱帶著它的名字。</p>
+<h3 id="_4">磁碟<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
+<p>shim 檔案的大小：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>/usr/bin/containerd-shim-runc-v2              8.4 MiB
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>/usr/local/bin/containerd-shim-wasmedge-v1  109.2 MiB    (13.0 倍)
+</span></code></pre></div>
+<p><svg viewBox="0 0 660 108" role="img" aria-label="shim 二進位檔大小(MiB)" width="100%" style="max-width:660px; font-family: var(--md-text-font-family, sans-serif);">
+<text x="0" y="18" font-size="15" font-weight="600" fill="var(--md-default-fg-color)">shim 二進位檔大小(MiB)</text>
+<text x="160" y="50" font-size="13" text-anchor="end" fill="var(--md-default-fg-color)">runc 的 shim</text>
+<rect x="170" y="34" width="30" height="22" rx="2" fill="#4c7bd9"/>
+<text x="208" y="50" font-size="13" font-weight="600" fill="var(--md-default-fg-color)">8.4</text>
+<text x="160" y="84" font-size="13" text-anchor="end" fill="var(--md-default-fg-color)">wasmedge 的 shim</text>
+<rect x="170" y="68" width="389" height="22" rx="2" fill="#e8590c"/>
+<text x="567" y="84" font-size="13" font-weight="600" fill="var(--md-default-fg-color)">109.2</text>
+</svg></p>
+<p>wasmedge 的 shim 大了 13 倍，這支檔案包含靜態連結的執行期。但磁碟大小不能換算為等量的常駐記憶體。</p>
+<p>把這一步的數字放在一起看：wasm 檔案本身很小，但在節點上跑起來，本次量到的 shim PSS 與容器 cgroup 用量都比 runc 高。做容量規劃時要算的是跑起來之後的記憶體，不是 wasm 檔案的大小。</p>
+<p>要注意這裡的 runc 對照組是空 base 的靜態執行檔，這個對照組沒有加上 Linux 發行版的檔案層。一般應用容器疊在 Linux 發行版上，結果可能不同；本課打包了 <code>-native-debian</code>，但沒有拿它來量。</p>
+<h3 id="wasmcloud">wasmCloud 那一側：量不到單一元件<a class="headerlink" href="#wasmcloud" title="Permanent link">&para;</a></h3>
+<p>wasmCloud 的元件跑在 host 這顆 pod 裡，要量一個元件吃多少記憶體，得先有一顆沒跑過任何元件的 host。<a href="../sprint3-day2-wasmcloud/">Day 2</a> 看過，元件停掉之後記憶體不會還給 host 行程，跑過元件的 host 讀數已經被墊高。所以這裡刪掉一顆 host pod 讓它重建，每 4 秒讀一次新 pod 的記憶體，同時從 log 數它啟動了幾個 workload：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>new host pod: hostgroup-default-…
+</span><span id="__span-25-2"><a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a>t+4s   working_set_bytes=4800512  workloads_started=0
+</span><span id="__span-25-3"><a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a>…
+</span><span id="__span-25-4"><a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a>t+160s working_set_bytes=4837376  workloads_started=0
+</span></code></pre></div>
+<p>160 秒內，新 host 一個 workload 都沒有分到。原因是 <a href="../sprint3-day3-wasmcloud-distributed/">Day 3</a> 看過的行為：wasmCloud 不會重新平衡，新加入的 host 不會分到既有的 workload。這樣做只會得到一顆一直空著的 host，正確的順序見<a href="#mine-3">疑難排解：乾淨的 host 一直分不到 workload</a>。</p>
+<p>能拿到的只有兩端：空 host 約 4.80 MB，帶著 6 個 workload 的 host 約 26.65 MB。那 6 個是 Day 2、Day 3 部署的 blobby 和 hello-world 混在一起，不是本章編的程式，不能除出每個元件多少。</p>
+<h2 id="6-wasmcloud">步驟 6: wasmCloud 的啟動時間要放在哪一欄<a class="headerlink" href="#6-wasmcloud" title="Permanent link">&para;</a></h2>
+<p>對應的 <a href="../../assets/labs/s3d5/47-wasmcloud-payload.yaml">WorkloadDeployment 範本</a>把 image 改成自己的 <code>-comp:1h</code> reference；<a href="../../assets/labs/s3d5/53-measure-wasmcloud.sh">歷史採樣腳本</a>則在本機透過 kubectl 執行，參數依序為 manifest 路徑與次數。這份腳本只供核對下列資料的採樣方式，沒有失敗逾時處理，也沒有確認 HTTP 就緒，不能直接當成服務啟動的測試工具。wasmCloud 的時間是這樣量的：刪掉 <code>WorkloadDeployment</code>，再 <code>kubectl apply</code> 一次，每 0.5 秒查一次狀態，計時到讀到 <code>Ready=True</code>，重複 20 次。終點不是首次 HTTP 成功，還包含輪詢間隔造成的等待：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-26-1"><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>wasmcloud_ready  n=20  min 1422  p25 1979.5  median 2302  p75 5049.2  max 12699  IQR 3069.8
+</span></code></pre></div>
+<p>中位數 2.3 秒，IQR 3.07 秒，晃動的幅度比中位數本身還大。</p>
+<p>這個 2.3 秒不能跟步驟 4 的 160 到 175 毫秒放在同一欄比。下面這張圖把兩條路徑並排，上面是步驟 4 計時的範圍，下面是 wasmCloud 這組數字計時的範圍：</p>
+<p><img alt="兩條路徑並排：上排是步驟 4 的 ctr 層，ctr run、containerd、shim、行程與 cgroup，中位數 160 到 175 毫秒；下排是 wasmCloud，kubectl apply、API server、operator 對帳、NATS、host 拉取並啟動元件、Ready=True，中位數 2.3 秒" src="../../assets/diagrams/s3d5-planes.svg" /></p>
+<p>照著圖看：上排從 <code>ctr</code> 下指令算到容器執行與清理完成；下排從 <code>kubectl apply</code> 開始算，中間經過 API server、operator 的對帳迴圈、wasmCloud 內部用來傳訊息的 NATS，再由 host 拉取元件並啟動。兩組數字的起點、終點和經過的元件都不一樣，我們把這種差別叫做<strong>量測平面</strong>不同。量測平面不同的數字放進同一張表，讀者會以為 wasmCloud 慢了十幾倍，其實是量了不同的東西。</p>
+<p>若要比較到 Ready 的控制路徑時間，得讓 wasmedge 也從 <code>kubectl apply</code> 一個 Pod 開始計時，走完 API server、kubelet、CRI 到 shim 的整條路徑。兩邊還須定義可比的 Ready 條件；若比較服務可用性，應改以成功回應同一種請求為終點。本課沒有做這組量測。</p>
+<h2 id="_5">這些數字能用到哪裡<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<p>本章的結論有幾個前提，引用時要一起帶上：</p>
+<ul>
+<li>只有一顆節點、一支印一行就結束的程式。程式沒有 I/O、沒有網路，也不配置大量記憶體，結論不能直接推到真實的應用。</li>
+<li>計時涵蓋建立、執行與清理；兩批差值的信賴區間有重疊，一批包含 0、一批不包含 0，且缺逐筆退出碼，不能宣稱一般啟動排名。</li>
+<li>容器的對照組只有空 base 的靜態執行檔，沒有量疊在 Linux 發行版上的版本。</li>
+<li>映像大小沒有數字。</li>
+<li>wasmCloud 的啟動時間和每個元件的記憶體，都沒有跟另外兩者放在同一個條件下量到。</li>
+</ul>
+<h2 id="_6">疑難排解<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
+<h3 id="mine-1">VM 換過之後，RuntimeClass 還在但 pod 起不來<a class="headerlink" href="#mine-1" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：前一天裝好、驗過能跑的 <code>wasmedge</code> RuntimeClass，叢集停機再啟動之後，<code>kubectl get runtimeclass</code> 照樣列得出來，但指名它的 pod 都停在 <code>ContainerCreating</code>，訊息是 <code>no runtime for "wasmedge" is configured</code>。</p>
+<p><strong>原因</strong>：RuntimeClass 存在 etcd，handler 的實作（containerd 設定和 shim 檔案）寫在 VM 的磁碟上，換了 VM 只剩前者，見<a href="#step-1">步驟 1</a>。</p>
+<p><strong>修法</strong>：用 <code>kubectl get node -o jsonpath='{.items[0].status.runtimeHandlers}'</code> 確認 handler 不在之後，照 Day 4 的安裝 shim、設定 handler 與映像解包設定重裝。手動對節點做的任何改動，都要假設下一次換 VM 時會消失。</p>
+<h3 id="mine-3">乾淨的 host 一直分不到 workload<a class="headerlink" href="#mine-3" title="Permanent link">&para;</a></h3>
+<p><strong>症狀</strong>：為了量 wasmCloud 單一元件的記憶體，刪掉一顆 host pod 換一顆新的，等了 160 秒，<code>workloads_started</code> 一直是 0。</p>
+<p><strong>原因</strong>：wasmCloud 不重新平衡（<a href="../sprint3-day3-wasmcloud-distributed/">Day 3</a> 量過），新加入的 host 不會分到既有的 workload。刪 pod 換新的，只會得到一顆一直空著的 host。</p>
+<p><strong>修法</strong>：先準備好乾淨的 host，再部署一個新的 <code>WorkloadDeployment</code>，順序不能反。另一種做法是把 host group 縮到 1 顆，讓所有 workload 集中在同一顆 host 上，再一個一個加上去，每加一個讀一次記憶體。</p>
+<h2 id="_7">想一想<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h2>
+<ul>
+<li>同事在另一顆節點上跑了一批 n=30，wasmedge 的中位數比 runc 快 12 毫秒，想在報告裡寫「wasm 啟動比較快」。在同意之前，你會請他補哪些數字？</li>
+<li>一顆節點預計同時跑 20 個 wasmedge 容器。估算 shim 要吃多少記憶體時，109 MiB、38.8 MiB、9.3 MiB 這三個數字各該怎麼用？如果換成 20 個 runc 容器呢？哪些是直接量到的值，哪些只是超出 1–3 個容器範圍的試算，還需要怎樣驗證？</li>
+<li>週一早上，指名 <code>wasmedge</code> 的 pod 全部停在 <code>ContainerCreating</code>，<code>kubectl get runtimeclass</code> 卻看得到 <code>wasmedge</code>。週末叢集停過機。你會先查哪一個欄位？</li>
+</ul>
+<h2 id="_8">小結<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h2>
+<p>比較快慢，要先對齊計時起點、終點與成功條件。本章的 <code>ctr run --rm</code> 包含建立、執行及清理，wasmCloud 則量到狀態被查為 Ready，兩者不能直接排名。版本查詢的 16 毫秒是對照資訊，不是差距的最低門檻；差值要連同信賴區間與資料限制一起解讀。記憶體方面，這組小程式的 wasmedge shim PSS 與容器 cgroup 用量較高，但 1–3 個容器的推估不等於大規模容量公式。每個結論都要連同工作負載、版本與取樣範圍使用。</p>
+<h2 id="_9">延伸閱讀<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h2>
+<p>想再深入，可以從這幾份開始：</p>
+<ul>
+<li><strong><a href="https://github.com/containerd/containerd/blob/main/core/runtime/v2/README.md">containerd 的 shim 說明</a></strong> —— shim 為什麼是獨立的行程、containerd 重啟為什麼不會停掉容器，以及 shim 的生命週期。步驟 5 量到的 shim 行程數和常駐記憶體，可以從這裡理解。</li>
+<li><strong><a href="https://github.com/containerd/runwasi">containerd/runwasi</a></strong> —— 本章量的 wasmedge shim。<code>crates/containerd-shim-wasmedge</code> 底下看得到它用 youki 建立容器，也就是 cgroup 裡那個 <code>youki:[2:INIT]</code> 的來源。</li>
+<li><strong><a href="https://docs.kernel.org/filesystems/proc.html">Linux 核心的 /proc 文件</a></strong> —— <code>smaps_rollup</code> 裡 PSS 和 RSS 的定義。量好幾個行程共用記憶體的程式時，用 RSS 加總會高估。</li>
+</ul>
+<h2 id="_10">下一步<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h2>
+<p>wasmCloud 和 WasmEdge 兩條路線的成本到這裡都量過了：容器計時範圍與資料完整性仍有比較限制，記憶體則是本次 wasmedge 樣本較高。<a href="../sprint3-day6-spinkube-shim/">Day 6</a> 走最後一條路線 SpinKube，它會用 operator 自動把 shim 裝上節點；那一天要看的是，自動化之後節點上被改了什麼、又留下什麼。</p>
+<hr />
+<div class="admonition quote">
+<p>WebAssembly 標誌為 WebAssembly 專案之官方資產(CC0 1.0),此處作社群教學用途。</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到頂端
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="頁腳" >
+        
+          
+          <a href="../sprint3-day4-wasmedge/" class="md-footer__link md-footer__link--prev" aria-label="上一頁: Day 4 · WasmEdge 執行期">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                上一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 4 · WasmEdge 執行期
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../sprint3-day6-spinkube-shim/" class="md-footer__link md-footer__link--next" aria-label="下一頁: Day 6 · SpinKube（上）：shim 佈建">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                下一頁
+              </span>
+              <div class="md-ellipsis">
+                Day 6 · SpinKube（上）：shim 佈建
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      KAI Scheduler、HAMi、Kubernetes 標誌為 CNCF(Linux Foundation)官方資產,作社群教學用途
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.instant.progress", "navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.indexes", "navigation.top", "navigation.footer", "toc.follow", "content.code.copy", "content.code.annotate", "content.code.select", "content.tabs.link", "search.suggest", "search.highlight", "search.share"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u8907\u88fd", "clipboard.copy": "\u8907\u88fd", "search.result.more.one": "\u6b64\u9801\u5c1a\u6709 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.more.other": "\u6b64\u9801\u5c1a\u6709 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.none": "\u6c92\u6709\u7b26\u5408\u7684\u9805\u76ee", "search.result.one": "\u627e\u5230 1 \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.other": "\u627e\u5230 # \u500b\u7b26\u5408\u7684\u9805\u76ee", "search.result.placeholder": "\u6253\u5b57\u9032\u884c\u641c\u5c0b", "search.result.term.missing": "\u7f3a\u5c11\u5b57\u8a5e", "select.version": "\u9078\u64c7\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
