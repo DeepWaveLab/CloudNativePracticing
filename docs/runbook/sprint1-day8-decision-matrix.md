@@ -4,7 +4,7 @@
 
 假設同一週裡，同一座叢集收到三個需求。線上推論組抱怨，兩張 T4 常被離線批次工作佔滿，推論的 pod 進不來；另一組人有三個小模型，每個只要幾 GB 的 VRAM，想塞進同一張卡；採購那邊又說，下一批會進不同型號的卡，希望工作能指定「至少要多新的卡」。
 
-這三個需求，前七天各有一套工具處理過：Day 1–2 的 KAI Scheduler、Day 3–5 的 HAMi、Day 6–7 的 DRA。這一章不開新的 lab，只把三套工具放在同一個問題前面比較。讀完之後，拿到一個 GPU 需求，你能說出該交給哪一套，也知道哪幾套不能裝在同一個節點上。
+這三個需求，前七天各有一套工具處理過：Day 1–2 的 KAI Scheduler、Day 3–5 的 HAMi、Day 6–7 的 DRA。這一章不開新的 lab，只把三套工具放在同一個問題前面比較。讀完之後，拿到一個 GPU 需求，你能說出該交給哪一套，也知道組合使用時怎麼避免重複配置同一批 GPU。
 
 ## 走完之後：三套工具管的是不同層
 
@@ -25,7 +25,7 @@ Day 1 開場的問題是「兩張 T4 被批次工作吃光，推論進不來，�
 1. **KAI 只管排程。** 它決定誰先拿到卡、拿幾張，以及 **gang scheduling**：一組 pod 湊齊才一起排上，湊不齊就都不上。它也能按比例把一張卡分給好幾顆 pod（Day 4 的 `gpu-memory` 寫法），但不做執行期隔離：容器實際吃掉多少 VRAM，它不管。
 2. **真正在容器裡擋住超額用量的，只有 HAMi 的執行期那一格。** DRA 雖然同時改寫了上面兩層：裝置用 `resource.k8s.io` 這組 API 描述，配置由 kube-scheduler 內建的 `dynamicresources` 外掛完成，但它不碰執行期。兩顆 pod 共用一張卡時，各自能吃掉多少，DRA 不管。
 
-所以三套工具大多可以疊著用。會衝突的只有一件事：一個節點上只能有一個元件負責把卡報給 Kubernetes。細節留到後面講共存時再說。
+組合使用時，要避免不同機制各自宣告、配置同一批 GPU，造成重複分配。這不代表所有裝置的 driver 都不能在同一個節點上共存；本課採用的配置方式留到後面說明。
 
 回頭對照 Sprint 開始的時候：Day 0 能問的只有「叢集裡有沒有 GPU、pod 拿不拿得到卡」，卡是節點上的一個整數，拿到就是整張。現在同樣面對「卡不夠分」，你可以先分清楚問題出在哪一層：是誰先拿的排程問題、一張卡要不要切開的隔離問題，還是要描述哪一種卡的宣告問題，再決定交給哪一套。
 
@@ -35,23 +35,13 @@ Day 1 開場的問題是「兩張 T4 被批次工作吃光，推論進不來，�
 
 ![三個問題各自回答：痛點是哪一組工作先拿到卡？是就用 KAI 的佇列、配額、gang。一張卡要不要分給好幾個容器？是就用 HAMi 的 VRAM 硬隔離（卡沒有 MIG 時）。要不要依型號、屬性挑卡，而且叢集在 1.34.2 以上？是就用 DRA 的 claim 加 CEL 條件。回答「是」的那幾套可以一起用，例如前兩題都是「是」時，用 KAI 排程加 HAMi-core 隔離（Day 4）；三題都是「不是」，就維持 device plugin 的整卡配置](../assets/diagrams/s1d8-questions.svg)
 
-我們可以從圖上看到，三個問題彼此獨立，每一題回答「是」，就對應一套工具，結果可以組合。最常見的情況是前兩題都回答「是」：既要分配誰先拿到卡，又要讓多個容器共用一張卡，於是 KAI 和 HAMi-core 一起用，Day 4 整天處理的就是這個組合。三題都回答「不是」，維持原本的整卡配置就好。接下來照圖上的編號，一題一題看前幾章的實測怎麼回答。
+我們可以從圖上看到，三個問題彼此獨立，每一題回答「是」，就對應一套工具，結果可以組合。最常見的情況是前兩題都回答「是」：既要分配誰先拿到卡，又要讓多個容器共用一張卡，於是 KAI 和 HAMi-core 一起用，Day 4 整天處理的就是這個組合。三題都回答「不是」，維持原本的整卡配置就好。接下來看各種需求的取捨。
 
 ### 推論和批次搶同一批卡：交給 KAI 的佇列與配額
 
 這是開場的第一個需求，也是 Day 1 處理的問題。KAI 讓每個佇列有一份 **quota**（保底額度）：quota 內的卡誰都拿不走；別的佇列閒置時，可以借用超過 quota 的卡，但借來的隨時會被收回。
 
-Day 1 的實測是這樣的：`batch-eval` 的 GPU quota 只有 1，在 `inference-prod` 完全閒置時，它借到兩張卡跑滿。`inference-prod` 一送工作進來，借出去的那一張馬上被收回，quota 內的那一張則沒有被動到。收回時 KAI 發出的事件如下：
-
-```text
-Evict  Pod kai-lab/batch-hog-2 was preempted by workload kai-lab/pg-infer-claim-2-...
-  Batch Eval     uses <GPU: 2, ...> with a quota of <GPU: 1, ...>, fair-share of <GPU: 1, ...> and queue priority of <100>.
-  Inference Prod uses <GPU: 0, ...> with a quota of <GPU: 1, ...>, fair-share of <GPU: 1, ...> and queue priority of <200>.
-```
-
-我們可以看到，每個佇列用了幾張、quota 多少、fair-share 多少、佇列優先權多少，四個數字都列在事件訊息裡。之後有人來問「我的工作為什麼不見了」，不必翻排程器日誌，從這段訊息就能看出是哪個佇列超額借用、被誰收回。
-
-設計佇列時有兩個常見的誤會：
+設計佇列時要注意：
 
 - **想讓某個佇列拿到更多卡，要改 quota，不是改 priority。** 佇列優先權只決定超額的卡先分給誰，對 quota 內的卡沒有作用。見 Day 1 的[「queue priority 200 打不贏 quota 內的 100」](sprint1-day1-kai-queue-basics.md#mine-4)。
 - **把工作標成不可被搶占的等級，代價是只能用 quota 內的卡。** 叢集裡明明還有一張卡在跑低優先權的工作，它也拿不到。見 Day 1 的[「`priorityClassName: inference` 反而讓 pod 卡住」](sprint1-day1-kai-queue-basics.md#mine-5)。
@@ -64,28 +54,11 @@ Evict  Pod kai-lab/batch-hog-2 was preempted by workload kai-lab/pg-infer-claim-
 
 分散式訓練一次要好幾張卡，例如八個 worker 各一張。只拿到七張時，那七張卡什麼事都做不了，卻佔著別人的位置。開頭提過的 gang scheduling 就是處理這件事。
 
-Day 2 的叢集只有兩張卡，送進一份要三張卡的工作。三顆 pod 全部 Pending，而且一張卡都沒佔。這時再送一顆不相干、只要一張卡的探測 pod，它照樣跑得起來：
+gang 的代價是整組一起上，被搶占時也整組一起下。即使搶占者只要一張卡，也可能驅逐整組工作，見 Day 2 的[「搶 1 張卡，整個 gang 都被驅逐」](sprint1-day2-gang-scheduling-preemption.md#mine-3)。所以 gang 型的工作最好放進自己的佇列，並給足 quota。
 
-```text
-NAME          READY   STATUS    RESTARTS   AGE   NODE
-gang-prober   1/1     Running   0          26s   aks-gpuspot-21249019-vmss000006
-gang3-7z29z   0/1     Pending   0          66s   <none>
-gang3-8wtjf   0/1     Pending   0          66s   <none>
-gang3-8zjvx   0/1     Pending   0          66s   <none>
-```
+gang 也不是裝了 KAI 就自動有。PodGroup 是 KAI 用來代表「一組 pod」的物件；一般的 `batch/v1` Job 即使寫了 `parallelism: 3`，KAI 替它產生的 PodGroup 預設還是 `minMember: 1`，也就是一顆湊到就上。要 gang 就在 Job 上明寫 `kai.scheduler/batch-min-member`，設定方式見 Day 2 的[「裝了 KAI、Job 寫了 `parallelism: 3`，卻沒有 gang」](sprint1-day2-gang-scheduling-preemption.md#mine-1)。
 
-我們可以看到 `gang3-*` 三顆都停在 Pending，`gang-prober` 卻拿到了卡。PodGroup（KAI 用來代表「一組 pod」的物件）的狀態寫明原因：`Resources were found for 2 pods while 3 are required for gang scheduling`。
-
-gang 有一個代價要先知道：整組一起上，被搶占時也是整組一起下。Day 2 的搶占者只要一張卡，兩個成員卻在同一秒一起被驅逐：
-
-```text
-08:09:05Z  Evict  Pod kai-lab/gang2-x9vkj was preempted by higher priority workload ...
-08:09:05Z  Evict  Pod kai-lab/gang2-7bpkp was preempted by higher priority workload ...
-```
-
-釋出兩張卡，搶占者只用掉一張。見 Day 2 的[「搶 1 張卡，整個 gang 都被驅逐」](sprint1-day2-gang-scheduling-preemption.md#mine-3)。所以 gang 型的工作最好放進自己的佇列，並給足 quota，quota 內的卡就不會被搶。
-
-gang 也不是裝了 KAI 就自動有。一般的 `batch/v1` Job 即使寫了 `parallelism: 3`，KAI 替它產生的 PodGroup 預設還是 `minMember: 1`，也就是一顆湊到就上（Day 2 的[「裝了 KAI、Job 寫了 `parallelism: 3`，卻沒有 gang」](sprint1-day2-gang-scheduling-preemption.md#mine-1)）。要 gang 就在 Job 上明寫 `kai.scheduler/batch-min-member`，再用下面這行確認：
+查詢前先從 Job manifest 的 `metadata.namespace` 確認 namespace，Day 2 使用的是 `kai-lab`。沿用該練習時先設定 `NS=kai-lab`；若用了其他名稱，就把 `NS` 設成該名稱。下方保留原指令，但 `<ns>` 不能直接貼入 shell，會被當成重新導向。正確寫法是 `kubectl -n "$NS" get podgroups -o json | jq '.items[].spec.minMember'`，修正後的寫法本課沒有實跑。
 
 ```bash
 kubectl -n <ns> get podgroups -o json | jq '.items[].spec.minMember'
@@ -103,24 +76,9 @@ kubectl -n <ns> get podgroups -o json | jq '.items[].spec.minMember'
 
 這是開場的第二個需求。先問一句：這批卡有沒有 MIG（Multi-Instance GPU）。MIG 是 A100、H100 這類資料中心卡內建的硬體分卡功能，可以把一張卡切成幾個互相隔離的執行個體，每個有自己專用的運算單元和記憶體，一個執行個體吃滿也影響不到別的。卡有 MIG，就先考慮用它。T4 和消費級顯示卡都沒有 MIG；沒有 MIG 時，要讓多個容器共用一張卡又不互相吃掉 VRAM，課程裡驗成的做法只有 HAMi。
 
-HAMi 做兩件事：device plugin 把一張實體卡對外報成十份，讓多顆 pod 可以排上同一張卡；容器裡再放一個叫 `libvgpu.so` 的函式庫，在 CUDA 要記憶體時檢查有沒有超過這個容器的配額。Day 3 讓一顆配額 4096 MiB 的容器以 512 MiB 為單位一路加碼，同時在節點上記錄實體卡的用量：
+HAMi 做兩件事：device plugin 把一張實體卡對外報成十份，讓多顆 pod 可以排上同一張卡；容器裡再放一個叫 `libvgpu.so` 的函式庫，在 CUDA 要記憶體時檢查有沒有超過這個容器的配額。即使實體卡還有空間，超過容器配額的配置仍會被拒絕，實測過程見 [Day 3 的記憶體隔離實驗](sprint1-day3-hami-memory-isolation.md)。
 
-```text
-[11:17:02] 實體卡 used=4831 MiB | hog: HOG: allocated 2048 MiB total
-[11:17:06] 實體卡 used=5855 MiB | hog: HOG: allocated 3072 MiB total
-[11:17:10] 實體卡 used=6879 MiB | hog: HOG: allocated 3584 MiB total
-[11:17:14] 實體卡 used=3193 MiB | hog: HOG: exception text = CUDA out of memory ...
-```
-
-看第三行到第四行：被擋下的那一刻，實體卡用了 6879 MiB，16384 MiB 的卡還空著 9.5 GB，容器照樣拿不到下一塊 512 MiB。攔下它的函式庫自己也印了一行：
-
-```text
-[HAMI-core ERROR (pid:1 ... allocator.c:52)]: Device 0 OOM 4401922048 / 4294967296
-```
-
-分母 `4294967296` 正好是 4 GiB，也就是這個容器的配額。上限來自容器自己的配額，不是卡上還剩多少，這就是「硬隔離」的意思。同一張卡上的另一顆 pod 經過兩次 OOM，`RESTARTS 0`，資料也沒有受影響。
-
-這個函式庫在 HAMi 專案裡叫 **HAMi-core**。Day 3 裝的是 **HAMi 平台**，也就是整套元件：改寫 pod 的 webhook、挑卡的排程器、device plugin，加上 HAMi-core。HAMi 的排程器是標準的 kube-scheduler 加一個 **extender**（一支外掛程式，內建排程器遇到 GPU 資源時，把選哪張卡的決定交給它）。Day 4 的 KAI 官方整合則只借用 HAMi-core，排程仍由 KAI 自己做。兩條路最後擋下超額的是同一份程式碼，錯誤字串的 `allocator.c:52` 一字不差。
+這個函式庫在 HAMi 專案裡叫 **HAMi-core**。Day 3 裝的是 **HAMi 平台**，也就是整套元件：改寫 pod 的 webhook、挑卡的排程器、device plugin，加上 HAMi-core。HAMi 的排程器是標準的 kube-scheduler 加一個 **extender**（一支外掛程式，內建排程器遇到 GPU 資源時，把選哪張卡的決定交給它）。Day 4 的 KAI 官方整合則只借用 HAMi-core，排程仍由 KAI 自己做。
 
 選哪一條路，看叢集現況：
 
@@ -129,13 +87,15 @@ HAMi 做兩件事：device plugin 把一張實體卡對外報成十份，讓多�
 
 少塞一個換來的是查帳方便：HAMi 平台把已經分出去多少 VRAM 記在 extender 的記憶體和 pod annotation 裡，KAI 路徑的數字則在一個 `kubectl get cm` 就查得到的 ConfigMap 裡。
 
-兩條路只能選一條，不能裝在同一個節點上，原因在下一節。另外，不論哪一條，導入前都要先確認三件事：
+同一批 GPU 要選定一條配置路徑，本課同時使用兩條路徑的結果在下一節。另外，不論哪一條，導入前都要先確認三件事：
 
 - **容器的基底映像要用 glibc。** HAMi 會在它管的每個容器寫入 `/etc/ld.so.preload`，而 `libvgpu.so` 需要 glibc。用 musl 的 busybox 或 alpine，程式還沒開始就以 exit 127 結束，看起來像映像壞了。見 Day 3 的[「busybox、alpine 映像一啟動就 exit 127」](sprint1-day3-hami-memory-isolation.md#mine-3)。
 - **監控要看 annotation，不能只看 Running。** HAMi 的 webhook 設定是 `failurePolicy: Ignore`：webhook 掛掉時，pod 照樣建得起來，只是沒有配額限制，也沒有任何告警。要監控的是 pod 有沒有拿到 `hami.io/vgpu-devices-allocated` annotation。
 - **配額要把 CUDA context 算進去。** 程式第一次使用 GPU 時，CUDA 會替這個 process 在卡上建立一份執行環境，叫 CUDA context，它本身就要佔 VRAM，而 HAMi 算用量時會把它算進去。Day 3 從被拒絕時的數字推算，context 大約 100 MiB。那顆 4096 MiB 的容器只拿到 3584 MiB，主要原因是每次要 512 MiB 這個單位太大，下一塊放不進剩下的空間，不是 context 吃掉了 512 MiB。規劃配額時，在模型需要的量之外多留約 100–200 MiB 給 context。
 
-如果叢集裡的卡 VRAM 大小不一，配額就不能用同一個數字套全部，要按卡型分別設計。HAMi 把每張卡的規格寫在節點 annotation 裡，可以這樣查：
+如果叢集裡的卡 VRAM 大小不一，配額就不能用同一個數字套全部，要按卡型分別設計。HAMi 把每張卡的規格寫在節點 annotation 裡。先用 `kubectl get nodes` 查節點名稱，依 Day 3 設定的 `gpu=on` 標籤確認目標 GPU 節點，再用 `GPU_NODE='查得的節點名稱'` 儲存名稱；單引號內換成實際名稱。
+
+下方保留原指令，但 `<gpu-node>` 不能直接貼入 shell。正確寫法是 `kubectl get node "$GPU_NODE" -o json | jq -r '.metadata.annotations["hami.io/node-nvidia-register"]'`，修正後的寫法本課沒有實跑。節點規格與 annotation 的對照見 [Day 3](sprint1-day3-hami-memory-isolation.md#mine-2)。
 
 ```bash
 kubectl get node <gpu-node> -o json | jq -r '.metadata.annotations["hami.io/node-nvidia-register"]'
@@ -147,35 +107,11 @@ kubectl get node <gpu-node> -o json | jq -r '.metadata.annotations["hami.io/node
 
 這是開場的第三個需求。用 device plugin 時，一張卡在 Kubernetes 眼裡只是節點上的一個整數，`nvidia.com/gpu: 1`。工作想要「至少 Turing 世代」的卡，只能先替節點貼標籤，再用 nodeSelector 繞過去。
 
-DRA（Dynamic Resource Allocation）換掉了這個前提：節點用 **ResourceSlice** 逐一描述每個裝置的屬性；pod 透過 **ResourceClaim**（對裝置的請求，寫法有點像 PVC 之於 PV）要裝置，並可以用 **CEL**（Common Expression Language，一種寫判斷條件的小語言）寫篩選條件。Day 6 用一條 `device.driver != 'retro-gpu.example.com'`，就排除了某一種模擬的舊卡，不必貼節點標籤，也不必分開節點池。
+DRA（Dynamic Resource Allocation）換掉了這個前提：節點用 **ResourceSlice** 逐一描述每個裝置的屬性；pod 透過 **ResourceClaim** 向 Kubernetes 請求符合條件的裝置，並可以用 **CEL**（Common Expression Language，一種寫判斷條件的小語言）寫篩選條件。
 
-Day 7 換上真的 T4，NVIDIA 的 DRA driver 在 ResourceSlice 上報出的屬性裡，這幾個最常拿來篩選：
+要依型號、架構、CUDA 計算能力或記憶體容量挑卡，可以從 [Day 7 的 ResourceSlice 與選擇器](sprint1-day7-dra-aks-real-gpu.md) 開始。條件要依 driver 實際報出的屬性與型別撰寫；例如 `driverVersion` 會正規化成 semver，不能直接拿 `nvidia-smi` 的版本字串比對，見 Day 7 的[版本號說明](sprint1-day7-dra-aks-real-gpu.md#mine-6)。
 
-```yaml
-attributes:
-  productName:           { string: Tesla T4 }   # 型號,可以直接字串比對
-  architecture:          { string: Turing }     # 世代,適合寫成「排掉太舊的」
-  cudaComputeCapability: { version: 7.5.0 }     # version 型,要用版本比較不是字串比較
-capacity:
-  memory:                { value: 16Gi }        # 用 quantity() 與 compareTo() 比大小
-```
-
-`driverVersion` 不在這份清單裡，是因為它被正規化成 semver，`580.159.04` 會變成 `580.159.4`，拿字串比對一定失敗。見 Day 7 的[「照 `nvidia-smi` 版本號寫的選擇器永遠不成立」](sprint1-day7-dra-aks-real-gpu.md#mine-6)。
-
-DRA 還有一個 device plugin 寫不出來的語意：共用。Day 6 讓兩顆 pod 共用一個具名的 claim，另外兩顆各自用 template 要一個裝置。下面上半段是 pod 狀態，下半段是每個 claim 拿到哪個裝置、被誰持有：
-
-```text
-own-a     1/1   Running
-own-b     0/1   Pending      ← 最後一顆裝置被 own-a 拿走了
-share-a   1/1   Running
-share-b   1/1   Running
-
-shared-gpu        gpu-6   reservedFor=share-a, share-b     ← 一顆裝置、兩個持有者
-own-a-gpu-z6rlc   gpu-7   reservedFor=own-a
-own-b-gpu-j5qrn   -       reservedFor=-
-```
-
-我們可以看到 `shared-gpu` 一個裝置有兩個持有者，同樣兩顆 pod，共用寫法只用掉一個裝置；`own-b` 則因為裝置用完而 Pending。不過要記得上一張分層圖：共用的兩顆 pod 在容器裡看到的都是完整的 16384 MiB，誰先吃光誰贏（Day 7），DRA 不做執行期隔離。
+DRA 也能讓多顆 pod 共用一個具名的 claim；各自用 template 請求裝置則會分開配置，寫法見 [Day 6](sprint1-day6-dra-simulated-devices.md)。不過共用裝置沒有各容器用量上限，DRA 不做執行期隔離。需求若包含 VRAM 隔離，光是共用 claim 還不夠。
 
 DRA 的缺口也要一起考慮：
 
@@ -209,17 +145,18 @@ device plugin 與 DRA driver 都能把 GPU 提供給工作負載，但它們各�
 
 我們可以從圖上看到兩件事：
 
-1. **同一批 GPU，本課選擇一條配置路徑。** Day 4 在同一個節點上同時留著 HAMi 平台和 KAI 整合，兩邊互相鎖死，見 Day 4 的[「兩套方案同時裝著，KAI 的 pod 無限重排」](sprint1-day4-hami-kai-integration.md#mine-3)。NVIDIA DRA driver 的 chart 預設會在 `helm template` 階段報錯，提醒 DRA 與原廠 device plugin 可能重複配置 GPU；本課先確定 DRA 節點上沒有原廠 device plugin，才設 `gpuResourcesEnabledOverride=true` 打開 GPU 功能。本課沒有把這兩者放在同一個節點上跑過。
+1. **同一批 GPU，本課選擇一條配置路徑。** Day 4 在同一個節點上同時留著 HAMi 平台和 KAI 整合，HAMi 的 pod 正常 Running，KAI 的 pod 則停在 Pending，佔位 pod 出現 `UnexpectedAdmissionError`，見 Day 4 的[「兩套方案同時裝著，KAI 的 pod 無限重排」](sprint1-day4-hami-kai-integration.md#mine-3)。NVIDIA DRA driver 的 chart 預設會在 `helm template` 階段回報錯誤，提醒 DRA 與原廠 device plugin 可能重複配置 GPU；本課先確定 DRA 節點上沒有原廠 device plugin，才設 `gpuResourcesEnabledOverride=true` 打開 GPU 功能。本課沒有把這兩者放在同一個節點上跑過。
 2. **分節點池，讓兩套機制管理不同的卡。** 本課用不同標籤把 DRA 與 device plugin 隔開，三套工具可以在同一座叢集裡並存。這是本課採用的隔離方式，不是 Kubernetes 對所有 driver 的同節點限制。
 
 下面是課程裡實際跑過的組合（DRA driver 和原廠 device plugin 同節點的情況沒有跑過，不列在表上）：
 
 | 組合 | 在同一個節點上 | 結果 |
 |---|---|---|
-| KAI + HAMi 平台 | 是 | 互相鎖死 |
+| KAI + HAMi 平台 | 是 | HAMi 正常執行，KAI Pending，佔位 pod 配置失敗 |
 | KAI + HAMi-core（搭原廠 device plugin） | 是 | 正常運作 |
 | DRA 在獨立節點池，KAI 與 HAMi 留在原本的池 | 否 | 互不干擾 |
-| 不要 GPU 的 pod | — | 三套都不接手 |
+
+不要求 GPU 的 pod 也可以交給 KAI。是否由 KAI 排程，要看 pod 是否指定 `schedulerName: kai-scheduler`，並用 `kai.scheduler/queue` 標籤指向佇列；[KAI 官方 quickstart](https://github.com/kai-scheduler/KAI-Scheduler/blob/main/docs/quickstart/README.md#cpu-only-pods) 有 CPU-only 範例。這是文件說明，本課沒有另做 CPU-only 實驗。
 
 所以想在一座正在用的叢集裡試新的機制，開一個貼不同標籤的節點池來試，比在既有節點上疊裝安全得多。
 
@@ -249,7 +186,7 @@ kubectl get runtimeclass                                                     # c
 
 **chart 對平台的假設。** Day 7 卡住的事情幾乎都不是硬體問題，而是 chart 預設叢集裡已經有 GPU Operator 或 NFD 幫忙認出 GPU 節點；AKS 兩者都沒有，標籤得自己補（Day 7 的[「helm 說 deployed，kubelet plugin 的 DaemonSet 卻是 `DESIRED 0`」](sprint1-day7-dra-aks-real-gpu.md#mine-2)）。DRA driver 的 driver root 路徑也依平台而不同：AKS 是預設的 `/`，GKE 要改成 `/home/kubernetes/bin/nvidia`，由 GPU Operator 管理的環境則是 `/run/nvidia/driver`。同一份 values 檔換一個平台，可能完全裝不起來。
 
-**節點標籤下在節點池層級。** 在 AKS 上，spot 節點被收回、或節點池縮到 0 再拉起來，拿到的都是全新的 VM，用 `kubectl label nodes` 貼在單一節點上的標籤會跟著消失。HAMi、KAI 和 DRA driver 要的節點標籤，都要設在節點池上（Day 3 補 HAMi 節點標籤那一步）。
+**節點標籤下在節點池層級。** 在 AKS 上，spot 節點被收回、或節點池縮到 0 再重新擴增，拿到的都是全新的 VM，用 `kubectl label nodes` 貼在單一節點上的標籤會跟著消失。HAMi、KAI 和 DRA driver 要的節點標籤，都要設在節點池上（Day 3 補 HAMi 節點標籤那一步）。
 
 **HAMi 的排程器映像從哪裡拉。** HAMi chart 的 kube-scheduler 映像預設指向阿里雲的 registry，tag 由叢集的 Kubernetes 版本推導出來，這個 registry 不保證跟得上最新的版本。安裝前先確認那個 tag 存在；網路受限或有映像來源政策的環境，要改成自己的 registry（Day 3 安裝 HAMi 那一步）。
 
@@ -257,11 +194,13 @@ kubectl get runtimeclass                                                     # c
 
 這一節收的是好幾章都出現過的兩種狀況。
 
-### 安裝指令回報成功，元件卻沒有在跑
+### 自行修改設定後，DaemonSet 的 `DESIRED` 變成 0
 
-`rollout status`、`helm --wait`、`helm upgrade`、Job 的 `Complete`，這些回傳值只代表「指令跑完了」，不代表東西在跑。課程裡這種情況出現過好幾次，最典型的是 DaemonSet 的 desired 是 0，`helm install --wait` 照樣回報 deployed（Day 7 的[「helm 說 deployed，kubelet plugin 的 DaemonSet 卻是 `DESIRED 0`」](sprint1-day7-dra-aks-real-gpu.md#mine-1)）。
+[`helm install --wait`](https://helm.sh/docs/v3/helm/helm_install/) 會等待資源達到就緒條件。要另外確認的是部署範圍：DaemonSet 的 `DESIRED` 是 0 時，沒有預期要啟動的 pod，仍可能通過等待檢查。
 
-安裝或改設定之後，自己再數一次：Deployment 看 `Available`，DaemonSet 看 `DESIRED` 是不是大於 0，gang 看 PodGroup 的 `spec.minMember`，改完設定看 pod 的 `AGE` 有沒有歸零。
+Day 7 提供的 values 已用 `kubeletPlugin.affinity: null` 移除 chart 預設 affinity，再用節點標籤選擇部署位置。自行調整時若改成 `affinity: {}`，Helm 合併設定後會保留預設 affinity；節點缺少對應標籤，就可能出現 `DESIRED 0`。Day 7 紀錄中的修正讓 `DESIRED` 從 0 變成 1，之後 pod 成為 Running，設定方式見 [Day 7 的安裝與狀態確認](sprint1-day7-dra-aks-real-gpu.md#mine-1)。
+
+修改 affinity 或 nodeSelector 後，對照節點標籤，確認 `DESIRED` 等於預期符合條件的節點數，再檢查 `READY`。這是在核對部署範圍，不能把就緒檢查概括成只表示指令執行完畢。
 
 ### 畫面上的數字是 0，或跟實際用量對不上
 
@@ -301,7 +240,7 @@ KAI、HAMi、DRA 不是三選一的競品，而是管一顆 GPU pod 的不同層
 
 ## 下一步
 
-Sprint 1 到這裡結束。課程裡的每個數字都來自同一座只有兩張 T4 的 AKS 叢集，換一個平台或換一批卡，都值得重新量一次。
+Sprint 1 到這裡結束。導入前，先確認 Kubernetes、KAI、HAMi 與 DRA driver 的版本是否符合所選功能的條件，節點標籤是否對得上 chart 的部署設定，RuntimeClass 是否存在，以及 driver root 是否符合平台的安裝路徑。需要 VRAM 隔離時，再依 Day 3 的方法測試超額配置是否被拒絕、同卡其他容器是否受影響，確認目標環境的行為。
 
 下一個 sprint 往更底層走：卡分好了、工作也跑起來之後，要怎麼知道它們在節點上實際做了什麼？Sprint 2 從 eBPF 和執行期安全開始。
 

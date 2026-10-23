@@ -2,11 +2,11 @@
 
 ![Tetragon 官方標誌](../assets/logos/tetragon-icon-color.svg){ align=right width="95" }
 
-Falco 跑了兩天，你已經知道它的限制：沒寫規則的事，它一律看不見（Day 3 的[「從容器連到沒連過的位址，Falco 沒報」](sprint2-day3-falco-basics.md#mine-4)）。有人建議換 Tetragon：它一樣用 eBPF，但過濾在核心裡做完，聽起來比較省，也比較準。你把它裝上去，閒置兩分多鐘，匯出的事件一筆都沒有，比 Falco 還安靜。
+Falco 跑了兩天，你已經知道它的限制：沒有規則比對的動作，不會產生告警（Day 3 的[「從容器連到沒連過的位址，Falco 沒報」](sprint2-day3-falco-basics.md#mine-4)）。如果調查時還需要知道執行過哪些程式、參數是什麼、父行程是誰，就需要行程事件紀錄。Tetragon 是 Cilium 專案底下的 eBPF 安全觀測工具，在每個節點執行一顆 agent，預設記錄行程開始執行程式與結束的事件。Falco 用規則產生告警，Tetragon 的事件則提供後續調查所需的細節。
 
-這一章把 Tetragon 裝在同一座叢集上，Falco 維持 Day 4 結束時的樣子，兩邊同時看同一批動作。我們要回答兩個問題：Tetragon 的安靜是怎麼來的？它把一個動作記在哪一顆 pod 上，準不準？
+要追蹤讀取檔案等更細的動作，可以加入 **TracingPolicy（追蹤策略）**：指定觀察哪些核心函式，以及符合哪些條件才產生事件；這些條件在核心裡比對。**匯出**則是 agent 把事件依設定過濾後，寫成 JSON，供記錄系統收集。策略過濾與匯出過濾發生在不同位置，因此沒收到匯出事件，不代表核心裡沒有發生動作。
 
-讀完之後，看到 Tetragon 的匯出事件很安靜、或某筆事件掛著某顆 pod 的名字時，你能判斷這筆事件是在核心裡被策略擋掉、在匯出前被排除清單丟掉，還是根本沒發生，也知道那個 pod 名字在什麼情況下不能直接相信。
+這一章把 Tetragon 裝在同一座叢集上，Falco 維持 Day 4 結束時的樣子，兩邊同時觀察同一批動作。讀完之後，你能分辨策略過濾與匯出過濾對事件量的影響，也能判斷事件裡的 pod 名字在什麼情況下不能直接當成操作目標。
 
 ## 開始之前
 
@@ -77,7 +77,7 @@ kubectl apply -f ebpf-lab-daemonset.yaml
 
 ## 步驟 1: 安裝 Tetragon
 
-Tetragon 是 Cilium 專案底下的 eBPF 安全觀測工具。跟 Falco 一樣，它在每個節點跑一顆 agent，把核心裡發生的事變成事件。它跟 Cilium 出自同一個組織，但**不需要 Cilium 當網路外掛（CNI）**：課程的 AKS 叢集用的是 Azure CNI overlay，Tetragon 裝下去沒有報錯，設定裡也沒有一處提到 CNI。
+Tetragon **不需要 Cilium 當網路外掛（CNI）**。本章在使用 Azure CNI overlay 的 AKS 叢集安裝，沒有回報錯誤，也沒有另外調整 CNI 設定。
 
 先查有哪些版本：
 
@@ -111,7 +111,7 @@ $ helm template cilium/tetragon --version 1.7.0 | grep '^kind:' | sort | uniq -c
 
 指令裡的 `<tetragon-pod>` 換成 `kubectl -n tetragon get pods` 列出的任一顆 `tetragon-` 開頭的 pod（不是 `tetragon-operator`）；要看特定節點時，加 `-o wide` 對 `NODE` 欄。
 
-CRD 由 operator 在執行期建立、不是 Helm 安裝的，這件事在自動化流程裡會出問題，見[疑難排解：`helm install --wait` 成功，套用策略卻找不到資源類型](#mine-1)。
+CRD 由 operator 在執行期建立，chart 的目錄與建立時序見[CRD 的建立方式](#mine-1)。
 
 ### 啟動日誌
 
@@ -168,7 +168,111 @@ BPF programs (ring buffer)
 
 兩條路從 agent 分開。往右的 `tetra getevents` 不經過任何過濾；往下的那條，先經過三個匯出設定，才寫進檔案：`export-allowlist` 只放行列出的事件，`export-denylist` 丟掉符合條件的事件，`field-filters` 從事件裡拿掉指定的欄位。這一章會看到的是 `export-denylist` 的影響。
 
-看匯出流時要注意一件事：`kubectl logs <tetragon-pod>` 不加 `-c`，拿到的是第一個容器，也就是 agent 自己的文字日誌，**裡面一筆事件都沒有**。要看事件一定要加 `-c export-stdout`。下面這支腳本把這件事包起來，後面幾章都會用：
+看匯出流時，`kubectl logs <tetragon-pod>` 不加 `-c`，拿到的是 agent 自己的文字日誌。要看事件必須加 `-c export-stdout`。另外，直接指定 pod 時，`kubectl logs` 預設讀取全部可用日誌；用 `-l` 選取 pod 時，預設每顆只讀最後 10 行。參數行為見 [kubectl logs 官方文件](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_logs/#options)。
+
+將下面的驗證版腳本存成 `tetra-events.sh`，並設為可執行。它需要本機有 `kubectl` 與 Python 3，會先列出 pod，再逐顆讀取事件；預設不帶 `--since`。計算前後增量時，不要使用 `--since` 的移動時間窗，否則較早的事件會隨時間移出範圍。兩次計數之間也必須維持同一批 pod，且日誌沒有輪替，才能用前後差值表示新增事件。
+
+```bash
+#!/bin/bash
+# tetra-events.sh - pull Tetragon's JSON event stream out of the DaemonSet.
+#
+#   tetra-events.sh                # every raw JSON event from every node
+#   tetra-events.sh --since 2m     # only the last 2 minutes
+#   tetra-events.sh --types        # histogram of event types
+#   tetra-events.sh --compact      # one line per event, the fields that matter
+#   tetra-events.sh --size         # bytes per event, and how much of it is node_labels
+#
+# The events come from the `export-stdout` sidecar, not from `tetragon`: the
+# agent writes /var/run/cilium/tetragon/tetragon.log and hubble-export-stdout
+# tails it. `-c export-stdout` is therefore mandatory -- `kubectl logs` without
+# it picks the first container, which is the agent's own text log and holds no
+# events at all.
+set -u
+K="${KUBECTL:-kubectl}"
+NS="${TETRAGON_NS:-tetragon}"
+MODE=raw
+SINCE=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --types)   MODE=types; shift ;;
+    --compact) MODE=compact; shift ;;
+    --size)    MODE=size; shift ;;
+    --since)   SINCE=(--since "$2"); shift 2 ;;
+    *) echo "unknown arg: $1" >&2; exit 2 ;;
+  esac
+done
+
+stream() {
+  for p in $($K -n "$NS" get pods -l app.kubernetes.io/name=tetragon -o name | sed 's#pod/##'); do
+    $K -n "$NS" logs "$p" -c export-stdout "${SINCE[@]+"${SINCE[@]}"}" 2>/dev/null
+  done
+}
+
+read -r -d '' PY_TYPES <<'PY' || true
+import sys, json, collections
+c = collections.Counter()
+for l in sys.stdin:
+    try: e = json.loads(l)
+    except Exception: continue
+    for k in e:
+        if k not in ("time", "node_name", "node_labels"): c[k] += 1
+for k, v in c.most_common(): print("%8d  %s" % (v, k))
+PY
+
+read -r -d '' PY_COMPACT <<'PY' || true
+import sys, json
+KINDS = ("process_exec", "process_exit", "process_kprobe",
+         "process_tracepoint", "process_lsm", "process_uprobe")
+for l in sys.stdin:
+    try: e = json.loads(l)
+    except Exception: continue
+    for kind in KINDS:
+        if kind not in e: continue
+        b = e[kind]; p = b.get("process", {}); pod = p.get("pod") or {}
+        who = "%s/%s/%s" % (pod.get("namespace", "-"), pod.get("name", "-"),
+                            (pod.get("container") or {}).get("name", "-"))
+        extra = ""
+        if kind in ("process_kprobe", "process_lsm", "process_tracepoint"):
+            val = ""
+            for a in (b.get("args") or []):
+                if "file_arg" in a: val = (a["file_arg"] or {}).get("path", ""); break
+                if "string_arg" in a: val = a["string_arg"]; break
+            extra = "  fn=%s arg=%s policy=%s" % (
+                b.get("function_name", b.get("subsys", "-")), val,
+                b.get("policy_name", "-"))
+        par = (b.get("parent") or {}).get("binary", "-")
+        print("%s %-18s %-46s %s %r parent=%s%s" % (
+            e.get("time", ""), kind, who, p.get("binary", "-"),
+            (p.get("arguments") or "")[:70], par, extra))
+PY
+
+read -r -d '' PY_SIZE <<'PY' || true
+import sys, json
+tot = n = lab = 0
+for l in sys.stdin:
+    l = l.strip()
+    if not l: continue
+    try: e = json.loads(l)
+    except Exception: continue
+    n += 1; tot += len(l)
+    lab += len(json.dumps(e.get("node_labels", {}), separators=(",", ":")))
+if n:
+    print("events=%d  total=%d B  avg=%.0f B/event  node_labels=%.0f B/event (%.0f%%)"
+          % (n, tot, tot / n, lab / n, 100.0 * lab / tot))
+PY
+
+case "$MODE" in
+  raw)     stream ;;
+  types)   stream | python3 -c "$PY_TYPES" ;;
+  compact) stream | python3 -c "$PY_COMPACT" ;;
+  size)    stream | python3 -c "$PY_SIZE" ;;
+esac
+```
+
+<details markdown="1">
+<summary>原章節腳本（保留對照，請勿執行）</summary>
+
+這份版本使用 `logs -l` 與預設 `--since=10m`，會漏計事件。請使用上方從驗證素材補回的完整版本。
 
 ```bash
 cat > tetra-events.sh <<'EOF'
@@ -199,9 +303,11 @@ EOF
 chmod +x tetra-events.sh
 ```
 
+</details>
+
 ### 先看匯出流
 
-裝好之後閒置兩分多鐘，不做任何動作，數這段時間匯出流裡新增的事件，同時數 Falco 的告警。Tetragon 這邊數 `tetra-events.sh` 輸出的行數，每一行是一筆事件，閒置前後各數一次相減；Falco 用 Day 3 的 `falco-alerts.sh` 數，例如 `./falco-alerts.sh | wc -l`。後面幾步的事件數都用這兩支腳本這樣數，只看策略事件時，看 `./tetra-events.sh --types` 裡 `process_kprobe` 那一列：
+裝好之後閒置兩分多鐘，不做任何動作，數這段時間匯出流裡新增的事件，同時數 Falco 的告警。Tetragon 這邊使用上方驗證版腳本、不帶 `--since`，讀取同一批 pod 的完整可用日誌，閒置前後各數一次相減；Falco 用 Day 3 的 `falco-alerts.sh` 數，例如 `./falco-alerts.sh | wc -l`。後面幾步的事件數都用這兩支腳本這樣數，只看策略事件時，看 `./tetra-events.sh --types` 裡 `process_kprobe` 那一列：
 
 ```text
 Tetragon 匯出事件:0 筆 / 132 秒
@@ -210,7 +316,7 @@ Tetragon 匯出事件:0 筆 / 132 秒
 
 兩邊都是零。如果只量到這裡，結論會是「Tetragon 預設跟 Falco 一樣安靜」。先別下結論，看完另一個出口再說。
 
-「新增 0 筆」不代表匯出流是空的。開始閒置之前，匯出流裡已經有 23 筆，是安裝當下寫進去的；閒置期間一筆都沒有再增加。這 23 筆裡，有幾筆的時間比 Tetragon 自己啟動還早：
+「新增 0 筆」不代表匯出流是空的。閒置前後各有 23 筆，所以新增 0 筆。這 23 筆是安裝當下寫進去的。這 23 筆裡，有幾筆的時間比 Tetragon 自己啟動還早：
 
 ```text
 03:12:36  process_exec  kai-scheduler/binder-…/binder    /workspace/app
@@ -378,7 +484,7 @@ kubectl apply -f tracingpolicy-file-open.yaml
 
 **`selectors`**：**選擇器**，決定哪些呼叫要送出事件。比對寫在 BPF 程式裡，在核心裡當場完成。組合規則要記住：**同一個選擇器裡的多個 `matchArgs` 是 AND，不同選擇器之間是 OR**。所以上面這段讀作「路徑以 `/etc/` 開頭，**而且** mask 等於 4（讀取）」。
 
-套用之後，`kubectl apply` 回報成功並不代表策略已經生效（原因見[疑難排解：`kubectl apply` 成功，策略卻沒有載入](#mine-4)）。要問 agent：
+套用之後，用 agent 的 `tetra tracingpolicy list` 確認策略是否載入：
 
 ```console
 $ kubectl -n tetragon exec <tetragon-pod> -c tetragon -- tetra tracingpolicy list
@@ -388,7 +494,7 @@ ID  NAME          STATE     FILTERID  NAMESPACE  SENSORS         KERNELMEMORY  M
 
 `STATE` 是 `enabled` 才算載入成功。`MODE` 的 `monitor_only` 是 agent 依策略內容標的：這條策略裡沒有任何攔截動作，所以只觀察。`FILTERID` 是這條策略在前面那張「策略適用哪些 cgroup id」表裡的編號。`KERNELMEMORY` 的 462.15 kB 是這條策略在核心裡佔的記憶體，Falco 的規則全在使用者空間，沒有對應的數字。
 
-`tetra tracingpolicy list -o json` 還有一個 `stats.action_counters.post` 計數，它不等於事件數：讀一次檔，它增加 5，匯出事件只多 1。拿它估事件量會高估好幾倍，多出來的原因本課沒有查清楚。
+`tetra tracingpolicy list -o json` 的 `stats.action_counters.post` 不等於事件數。單次讀取的紀錄中，它增加 5，匯出事件只增加 1；計算事件量應使用匯出事件，不能直接採用這個計數。
 
 ### 讀一次 `/etc/shadow`
 
@@ -425,7 +531,7 @@ $ kubectl -n ebpf-lab exec baseline-nginx -- cat /etc/shadow > /dev/null
 
 ### 讀 3000 次不符合的檔案
 
-選擇器只放行 `/etc/` 開頭的路徑。在同一顆 pod 裡，讀 3000 次 `/tmp` 底下的檔案：
+選擇器只放行 `/etc/` 開頭的路徑。在同一顆 pod 裡，讀 3000 次 `/tmp` 底下的檔案。下方保留的「策略 kprobe 事件增量:0」只對應 `/tmp/decoy` 的讀取，不是整段指令的策略事件總數；bash 啟動時另有 6 筆，後面分開列出：
 
 ```console
 $ kubectl -n ebpf-lab exec baseline-nginx -- bash -c \
@@ -434,21 +540,21 @@ $ kubectl -n ebpf-lab exec baseline-nginx -- bash -c \
 策略 kprobe 事件增量:0
 ```
 
-一筆都沒有。`security_file_permission` 至少被呼叫了 3000 次，每一次 BPF 程式都比對了路徑前綴，不符合就返回，事件連 ring buffer 都沒進。Falco 要做同樣的篩選，得先把每個事件搬到使用者空間、補完行程與容器資訊，再拿每條規則的條件去比，所以 Falco 沒有告警時也照樣在花 CPU（Day 3 的[「節點的 CPU 實際用量不高，Falco 卻排不進去」](sprint2-day3-falco-basics.md#mine-7)量過這件事）。
+`/tmp/decoy` 的讀取沒有產生策略事件。`security_file_permission` 至少被呼叫了 3000 次，每一次 BPF 程式都比對了路徑前綴，不符合就返回，事件連 ring buffer 都沒進。Falco 要做同樣的篩選，得先把每個事件搬到使用者空間、補完行程與容器資訊，再拿每條規則的條件去比，所以 Falco 沒有告警時也照樣在花 CPU（Day 3 的[「節點的 CPU 實際用量不高，Falco 卻排不進去」](sprint2-day3-falco-basics.md#mine-7)量過這件事）。
 
 這段時間裡策略倒是產生了 6 筆事件，都來自 `bash` 自己：`/etc/nsswitch.conf` 四次、`/etc/passwd` 兩次，是 bash 啟動時查使用者資訊讀的。可見 `/etc/` 這個前綴對任何會跑 shell 的容器都不算少見。真要放到正式環境，前綴要縮到 `/etc/shadow` 這種程度，或加上 `matchBinaries`（依執行檔路徑比對的選擇器條件）排除 shell 自己的查詢。
 
-同一段時間（約 50 秒），把三個數字並排：
+同一段時間（約 50 秒），依動作分開計數：
 
 | | 事件數 |
 |---|---|
-| 策略產生的 `process_kprobe` | **0** |
-| Tetragon 匯出的總事件 | **6016** |
+| 讀取 `/tmp/decoy` 產生的 `process_kprobe` | **0** |
+| bash 啟動時讀取 `/etc/` 產生的 `process_kprobe` | **6** |
 | Falco 告警 | **0** |
 
-策略沒有送出事件，匯出流卻多了 6016 筆。這 6016 筆是 3000 次 `cat` 各自的 exec 與 exit，來自步驟 1 看到的 `__base__`。下面這張圖把兩種事件來源分開畫，看它們各自在哪一關被篩：
+除了上述策略事件，`cat` 的 exec 與 exit 也會由步驟 1 看到的 `__base__` 記錄，不受這條策略的路徑條件限制。下面這張圖把兩種事件來源分開畫，看它們各自在哪一關被篩：
 
-![兩種事件來源的過濾位置：策略的 kprobe 在核心裡先經過選擇器，不符合就當場返回；__base__ 的 exec 與 exit 不經過任何策略的選擇器，一路送進 ring buffer、agent，只在匯出前被排除清單篩一次。3000 次讀 /tmp/decoy 的那 50 秒，策略事件 0 筆，exec 與 exit 匯出 6016 筆](../assets/diagrams/s2d5-two-sources.svg)
+![兩種事件來源的過濾位置：策略的 kprobe 在核心裡先經過選擇器，不符合就當場返回；__base__ 的 exec 與 exit 不經過任何策略的選擇器，一路送進 ring buffer、agent，只在匯出前被排除清單篩一次。讀取 /tmp/decoy 的策略事件為 0 筆，bash 啟動時讀取 /etc/ 另有 6 筆](../assets/diagrams/s2d5-two-sources.svg)
 
 圖上有兩件事要注意。第一，選擇器只管它所屬的那條策略；`__base__` 的事件走右邊那一欄，不受任何 TracingPolicy 影響。第二，`__base__` 事件唯一的關卡是最下面的排除清單，而那是使用者空間的設定，事件到那裡時，核心和 agent 的工作都已經做完了。
 
@@ -484,7 +590,7 @@ $ kubectl -n ebpf-lab exec baseline-nginx -- cat /etc/shadow > /dev/null
 
 `<ebpf-lab-pod>` 是跟 `baseline-nginx` 在同一個節點上的那顆特權 pod：用 `kubectl -n ebpf-lab get pods -o wide` 對 `NODE` 欄找。`<nginx-host-pid>` 是第三行指令印出的數字。兩套工具的結果：
 
-| 偏離 | Falco 說了什麼 | 怪到哪顆 pod | Tetragon 說了什麼 | 怪到哪顆 pod |
+| 偏離 | Falco 的告警 | 回報的行程所屬 Pod | Tetragon 的事件 | 回報的行程所屬 Pod |
 |---|---|---|---|---|
 | **A** `bash -c "…" & wait`（有 pty） | 2 筆：預設 `Terminal shell in container` 加自訂 `Shell spawned by non-runtime parent` | `baseline-nginx` ✓ | **18 筆**：3 exec、3 exit、12 kprobe。無規則名、無嚴重度 | `baseline-nginx` ✓ |
 | **B** 同上但**無終端機** | **1 筆**：只有自訂規則。預設規則靜音 | `baseline-nginx` ✓ | **18 筆，與 A 完全相同的組成** | `baseline-nginx` ✓ |
@@ -533,8 +639,6 @@ baseline-nginx                    ← hostname 回報的是被進入的那顆
 
 訊號本身沒有消失，只是標錯 pod。而 Tetragon 多給了一樣 Falco 沒有的東西：`nsenter` 這個指令連同完整參數，本身就是一筆事件，不需要任何策略或規則。Day 3 的 Falco 預設規則沒有一條在看 `nsenter`；Tetragon 不需要有人事先想到要看它。調查時拿到錯的 pod 名字之後，往上看父行程是 `/usr/bin/nsenter`，再看它的參數 `-t 21743`，真正的目標就在裡面。
 
-Tetragon 有一個 `enable-process-ns` 選項（預設關閉），開啟後事件會附上行程的命名空間資訊。它不會改事件的 pod 欄位；可能的用法是拿事件裡 mount、UTS 命名空間的 inode，跟目標容器主行程的比對，找出真正進入的是哪顆 pod。這個做法本課沒有驗證。
-
 ### A 和 B：有沒有終端機，Tetragon 分不出來 {#step-5-tty}
 
 A（有終端機）和 B（沒有終端機）在 Tetragon 的事件流裡組成完全一樣：各 3 筆 exec、3 筆 exit、12 筆 kprobe，程式、父行程、pod、參數全部相同，只有時間和 pid 不同。原因是事件的 `process` 結構裡根本沒有終端機這個欄位：
@@ -562,7 +666,7 @@ Day 4 用 `tty=0` 分辨「不是真人打的 `kubectl exec`」，這個訊號�
 
 MITRE T1059、T1555 是 MITRE ATT&CK 攻擊手法分類的編號，分別是「用命令列或腳本直譯器執行指令」和「從密碼儲存處取得憑證」。
 
-同樣四個動作，Tetragon 的事件數是 Falco 的 13 倍，而且每一筆都要人判斷。這還只是一條窄策略、四個動作、十秒鐘內的量；步驟 4 那 3000 次讀取的 6016 筆，才比較接近正式環境的規模。Falco 的告警帶規則名、嚴重度、MITRE 分類，看了就知道發生什麼事，但沒寫規則的事看不見。Tetragon 的事件帶執行了什麼、參數、父行程、哪顆 pod，是否可疑要另外判斷。
+同樣四個動作，Tetragon 的事件數是 Falco 的 13 倍，而且每一筆都要人判斷。這還只是一條窄策略、四個動作、十秒鐘內的量；步驟 4 的 3000 次讀取也說明，即使檔案路徑不符合策略，行程的 exec 與 exit 仍會產生事件。Falco 的告警帶規則名、嚴重度、MITRE 分類，看了就知道發生什麼事，但沒寫規則的事看不見。Tetragon 的事件帶執行了什麼、參數、父行程、哪顆 pod，是否可疑要另外判斷。
 
 ## 步驟 6: 資源用量
 
@@ -577,17 +681,15 @@ MITRE T1059、T1555 是 MITRE ATT&CK 攻擊手法分類的編號，分別是「�
 
 Tetragon 的 CPU 比 Falco 低。Falco 對每一個 `execve` 都要在使用者空間把 27 條規則跑一遍；Tetragon 沒有策略時，只是把事件搬出來。記憶體則是 Tetragon 稍高，它的行程表與核心裡的對照表都是預先配置的。另外再加上每條策略的核心記憶體，`lab-etc-read` 是 462.15 kB。
 
-上表排除了一顆 agent：它剛被 `tetra getevents` 連續收過兩輪事件，記憶體量到 163Mi，另外兩顆是 88Mi 與 120Mi，收完之後也沒有馬上降回來。`tetra getevents` 會吃 agent 的記憶體，在記憶體吃緊的節點上，對一顆 BestEffort 的 agent 開事件串流，可能讓它被 OOM kill。BestEffort 是怎麼來的，見[疑難排解：agent 是 BestEffort，節點吃緊時第一個被踢](#mine-8)。
+上表的閒置用量不含開過 `tetra getevents` 串流的 agent；該 agent 的記憶體量到 163Mi，串流結束後沒有立即下降。評估記憶體需求時，還要考慮收集串流期間的用量。QoS 設定見[疑難排解：BestEffort agent 在記憶體不足時的處理](#mine-8)。
 
 最後是閒置時的匯出量。零策略時，132 秒內 Tetragon 匯出 0 筆、Falco 0 筆告警。載入一條策略後再閒置 195 秒，Tetragon 匯出 4 筆、Falco 仍是 0 筆。那 4 筆來自查策略狀態時 `kubectl exec` 進 `tetragon` 命名空間的動作，這個命名空間不在預設的排除清單上；扣掉之後，兩種狀態都是零。但步驟 2 已經知道，這個零是排除清單丟掉的結果，agent 裡面每分鐘仍有 1915 筆。
 
 ## 疑難排解
 
-### `helm install --wait` 成功，套用策略卻找不到資源類型 {#mine-1}
+### CRD 的建立方式 {#mine-1}
 
-**症狀**：自動化流程裡 `helm install --wait` 回報成功，接著套用 TracingPolicy，可能失敗，說找不到這個資源類型。
-
-**原因**：Helm 只會自動安裝 chart 裡 `crds/` 目錄的 CRD，這個 chart 把 CRD 放在 `crds-yaml/`：
+Tetragon 1.7.0 chart 把 CRD 放在 `crds-yaml/`，由 operator 建立。以下是 chart 目錄與模板輸出的紀錄：
 
 ```console
 $ helm pull cilium/tetragon --version 1.7.0 --untar && ls tetragon/
@@ -598,7 +700,7 @@ $ helm template cilium/tetragon --version 1.7.0 --include-crds | grep -c CustomR
 0
 ```
 
-CRD 改由 operator 啟動後建立。一次安裝的時間順序：
+安裝紀錄中的兩個 CRD 都在 Helm 回報完成之前建立：
 
 ```text
 11:17:19  helm install 開始
@@ -607,9 +709,7 @@ CRD 改由 operator 啟動後建立。一次安裝的時間順序：
 11:17:40  helm 回 STATUS: deployed
 ```
 
-這次 CRD 剛好在 Helm 回報完成之前就建好了，但這不是保證：`--wait` 等的是 DaemonSet 與 Deployment 就緒，不是 CRD 存在。同樣的原因，`helm template --include-crds` 印不出這兩個 CRD，依 manifest 管理資源的 GitOps 工具不會管到它們，`helm uninstall` 也不會刪掉它們。
-
-**修法**：同一份自動化流程裡先裝 Tetragon、再套策略時，自己等 CRD 出現，不要只靠 `helm --wait`。
+這份紀錄沒有出現套用策略時找不到資源類型的錯誤。策略套用後的載入狀態，仍應用[步驟 4](#step-4) 的 `tetra tracingpolicy list` 確認。
 
 ### 匯出流閒置時幾乎沒有事件 {#mine-2}
 
@@ -624,15 +724,20 @@ $ ./tetra-events.sh --size
 events=23  total=101694 B  avg=4421 B/event  node_labels=2158 B/event (49%)
 ```
 
-（步驟 2 的腳本沒有 `--size` 這個選項。要自己量，把匯出流每一行 JSON 的長度，和其中 `node_labels` 欄位的長度分別加總，就得到上面的數字。）
+步驟 2 補上的驗證版腳本已包含 `--size`，會統計事件總大小、平均大小與 `node_labels` 的大小。
 
 **原因**：一筆平均 4421 B 的事件裡，2158 B 是 `node_labels`，也就是雲端供應商掛在節點上的四十幾個標籤，每筆事件都重複帶一次。照步驟 2 每分鐘 1915 筆的速率算，光節點標籤每天每節點就約 5.9 GB。標籤有多少由雲端供應商決定，不在你的設定檔裡；節點標籤少的叢集，同樣的事件會小很多，全部拿掉最多小將近一半。
 
 **修法**：匯出設定裡的 `field-filters` 可以拿掉指定欄位，但它的預設是空的，要自己寫欄位路徑清單，也沒有任何預設值或範例把 `node_labels` 列進去。這份設定的寫法，跟下面 resources 的補法一樣，本課都沒有驗證。
 
-### `kubectl apply` 成功，策略卻沒有載入 {#mine-4}
+### 確認策略已載入 {#mine-4}
 
-**症狀**：Kubernetes 這一側看起來一切正常。
+每次套用策略後，都用 `tetra tracingpolicy list` 確認 `STATE` 是 `enabled`。本章策略的指令與成功輸出見[步驟 4](#step-4)。Kubernetes 物件建立成功，只能確認 API server 接受了資源，仍需檢查 agent 是否載入策略。
+
+<details markdown="1">
+<summary>既有輸出：舊版策略的 load_error（不適用本章策略）</summary>
+
+以下保留舊版策略的指令與輸出供辨識錯誤；本章策略不含輸出中提到的 `returnArgAction`，不用依此修改 manifest。
 
 ```console
 $ kubectl apply -f tracingpolicy-file-open.yaml
@@ -644,8 +749,6 @@ $ kubectl -n ebpf-lab get tracingpolicynamespaced lab-etc-read -o json | jq .sta
 $ kubectl -n ebpf-lab describe tracingpolicynamespaced lab-etc-read | tail -1
 Events:  <none>                                             ← 沒有 event
 ```
-
-**原因**：這一版策略帶了 `returnArgAction: "Post"`，這是網路上檔案監控範例很常見的寫法，但 Tetragon 1.7.0 不接受。實際狀態只有 agent 知道：
 
 ```console
 $ kubectl -n tetragon exec <tetragon-pod> -c tetragon -- tetra tracingpolicy list
@@ -659,9 +762,7 @@ level=warn msg="adding tracing policy failed"
          omit returnArgAction or use 'TrackSock'/'UntrackSock'"
 ```
 
-CRD schema 裡，這個欄位的說明文字其實寫了可用的值，但欄位型別只宣告為字串，沒有列出允許值（`enum`），所以 API server 什麼字串都收。這跟 Day 4 的[「`evt.dir` 已經淘汰，規則照樣「載入成功」」](sprint2-day4-falco-custom-rules.md#mine-2)是同一類問題，而且更難發現：Falco 至少把警告印在 pod 自己的日誌裡；這裡的 CRD 不會有 status，GitOps 面板會顯示正常，`kubectl wait` 也沒有東西可以等。
-
-**修法**：拿掉 `returnArgAction`。它只接受 `TrackSock`、`UntrackSock`，這兩個值用來追蹤函式回傳的 socket，跟檔案監控無關。每次套用策略後，用 `tetra tracingpolicy list` 確認 `STATE` 是 `enabled`，見[步驟 4](#step-4)。
+</details>
 
 ### 只裝了一條很窄的策略，匯出量還是很大 {#mine-5}
 
@@ -675,7 +776,7 @@ Tetragon 用行程的 cgroup 決定 pod 名字，而 `nsenter` 只換命名空�
 
 Tetragon 事件的 `process` 結構沒有終端機欄位，有終端機的 shell 和 web shell 在事件流裡長得一樣。需要這個訊號時要靠 Falco。見[步驟 5 的 A 和 B](#step-5-tty)。
 
-### agent 是 BestEffort，節點吃緊時第一個被踢 {#mine-8}
+### BestEffort agent 在記憶體不足時的處理 {#mine-8}
 
 **症狀**：照 chart 預設安裝，agent 的 QoS 是 BestEffort。
 
@@ -692,7 +793,7 @@ chart 還設了 `tolerations: [{operator: Exists}]`，表示它可以排到任�
 
 把步驟 6 的表加起來，兩套工具每節點合計約 19–39m CPU、167–211Mi 記憶體，但向排程器宣告的 requests 只有 Falco 那一份，排程器在分配節點資源時算不到 Tetragon。
 
-agent 被踢掉之後，chart 1.7.0 的預設（`enableKeepSensorsOnExit: false`）會讓它在結束時卸載 BPF 程式。後果是在 DaemonSet 把 agent 重建起來之前，這個節點完全沒有 Tetragon 的監控。
+agent 結束時，chart 1.7.0 的預設（`enableKeepSensorsOnExit: false`）會讓它卸載 BPF 程式。在 DaemonSet 把 agent 重建起來之前，這個節點沒有 Tetragon 的監控。
 
 **修法**：在 chart values 裡自己補上 agent 的 `resources` 與 `priorityClassName`，數字可以參考步驟 6 的實測用量。
 

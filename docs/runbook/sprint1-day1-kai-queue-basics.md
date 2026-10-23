@@ -16,11 +16,11 @@
 2. **打分**：替剩下的節點排名，例如剩餘資源多、映像檔已經在本機的分數高。
 3. **繫結**：把 pod 寫到選中的節點上，接下來交給 kubelet。
 
-這套流程的決策單位是**一顆 pod**。它不知道「這三顆 pod 是同一份訓練工作」，也沒辦法表達「推論組保底一張卡、批次組保底一張卡，閒置時互相借」這種以「一組人」為單位的規則。原生的 PriorityClass 可以讓高優先權的 pod 擠掉低優先權的，但同樣是一顆對一顆。
+這套流程的決策單位是**一顆 pod**，不辨識訓練工作群組，也沒辦法表達「推論組保底一張卡、批次組保底一張卡，閒置時互相借」這種以「一組人」為單位的規則。原生的 PriorityClass 可以讓高優先權的 pod 搶占低優先權的 pod；搶占以單顆待排 pod 的需求決策，必要時會驅逐多顆低優先權 pod。
 
 排無狀態、彼此獨立的服務時，這樣就夠了。GPU 叢集要回答的卻是另一類問題：推論組跟批次組各該分到幾張卡？離峰時能不能讓批次多借兩張，尖峰再還回來？這些問題的主詞是「一個團隊」或「一份工作」，預設排程器沒有對應的概念。
 
-KAI Scheduler 就是為這類問題設計的排程器。它的前身是 Run:ai 的商用排程引擎，NVIDIA 在 2024 年收購 Run:ai 之後，2025 年把它以 Apache 2.0 授權開源，同年 12 月進入 CNCF sandbox（截至 2026-08 仍在 sandbox 階段）。
+KAI Scheduler 就是為這類問題設計的排程器。它的前身是 Run:ai 的商用排程引擎，NVIDIA 在 2024 年收購 Run:ai 之後，2025 年把它以 Apache 2.0 授權開源，同年 12 月進入 CNCF Sandbox。Sandbox 是 [CNCF 專案成熟度的初始階段](https://contribute.cncf.io/projects/lifecycle/)（截至 2026-08，KAI 仍在這個階段）。
 
 ## 讓 pod 改走 KAI
 
@@ -33,9 +33,9 @@ KAI Scheduler 就是為這類問題設計的排程器。它的前身是 Run:ai �
 1. 走 KAI 的 pod 會先被收成一個 **PodGroup**。PodGroup 是 KAI 排程的單位，就算送出的是一顆裸 Pod，KAI 也會自動替它建一個。
 2. KAI 把「決定放哪裡」和「真正綁上去」拆給 `kai-scheduler` 和 `binder` 兩個元件。所以 pod 的事件裡會多一則來自 binder 的 `Bound`。追一顆卡住的 GPU pod 時，看它停在 `Scheduled` 還是 `Bound`，就能分辨是排程決策沒過，還是資源綁定沒過。
 
-本課程用的是 KAI `v0.16.8`，叢集是 Day 0 建好的 AKS（Kubernetes 1.35.6），有兩張 T4 spot GPU。
+開始之前，你需要完成 Day 0 的 AKS 環境（Kubernetes 1.35.6），備妥兩個各有一張 T4 的 spot GPU 節點，並已安裝 NVIDIA device plugin。本章會安裝 KAI `v0.16.8`。
 
-## 步驟 1:把 GPU 節點拉起來
+## 步驟 1:啟動 GPU 節點
 
 GPU 節點池每次用完都縮到 0（做法見 [Day 0 步驟 8](sprint1-day0-azure-aks-foundation.md#step-8)），使用前先拉回 2 台:
 
@@ -111,7 +111,7 @@ podgroup-controller-8854fdc49-6grwf      1/1     Running             0          
 queue-controller-746cb94d99-tnsz5        0/1     ContainerCreating   0          9s
 ```
 
-帶了 `--wait` 卻等不到——因為 Helm 只認得它自己建立的 `kai-operator`,其餘六個是 operator 二次生出來的,不在等待範圍內。詳見[疑難排解：`helm --wait` 成功不代表已就緒](#mine-2)。安裝後補一道自己的等待條件:
+[Operator](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/) 是將維運邏輯寫成程式,依設定自動管理應用與元件的方式。KAI 的 `kai-operator` 會讀取 `Config` 物件,建立並維護其餘六個元件。Helm 的 `--wait` 只等待 chart 直接建立的資源,這六個元件不在等待範圍內。詳見[疑難排解：`helm --wait` 成功不代表已就緒](#mine-2)。安裝後補一道自己的等待條件:
 
 ```console
 $ kubectl -n kai-scheduler wait --for=condition=Available deploy --all --timeout=300s
@@ -194,7 +194,7 @@ train                     50           false            66s    PreemptLowerPrior
 KAI 的 **Queue**（佇列）是階層式的：上層是 parent，下面掛 leaf，workload 只能放在 leaf 上。每個 leaf 對每種資源設定三個數字：
 
 - **`quota`**：保底額度。這個佇列一定拿得到的量，其他佇列收不走。
-- **`limit`**：上限。`-1` 表示不設上限，可以在別人閒置時借用超過 quota 的部分。v0.16.8 的官方佇列文件寫「`0` 或不填 = 不准借用」，本課沒有實測不填的情況，所以想借用就明寫 `limit: -1`。
+- **`limit`**：上限。`-1` 表示不設上限，可以在其他佇列閒置時借用超過 quota 的部分。要允許借用，就明寫 `limit: -1`。
 - **`overQuotaWeight`**：queue priority 相同的佇列同時想借閒置的資源時，按這個比例分；priority 不同時，priority 高的先分。
 
 這一章建立的階層只有三個佇列：
@@ -405,7 +405,7 @@ TIME                   TYPE     REASON      FROM            MSG
 
 `Scheduled` 的來源是 `kai-scheduler` 而不是 `default-scheduler`,而且多了一則原生 K8s 沒有的 `Bound`——這就是前面那張圖多出來的那一站。
 
-送出去的是一顆裸 Pod,PodGroup 是自動長出來的:
+送出去的是一顆裸 Pod,PodGroup 由 KAI 自動建立:
 
 ```console
 $ kubectl -n kai-lab get podgroups -o json \
@@ -587,7 +587,7 @@ Resource division result for queue <Batch Eval>: Queue Priority: <100>,
 
 事件訊息列出了每個佇列的四個數字：`uses`（目前用了幾張）、`quota`（保底幾張）、`fair-share`（依權重算出該分到幾張）和 queue priority。看第一則：`batch-eval` 用了 2 張、保底 1 張，超出了自己的份額；`inference-prod` 用了 0 張、保底 1 張，所以 KAI 從 `batch-eval` 收回一張。不必翻日誌就能重建這次決定。
 
-排程器的日誌多了幾個欄位：`deserved` 是依 quota 該分到的量，`allocated` 是實際拿到的量。最後三行說明 KAI 為什麼不再替 `infer-claim-2` 搶卡：它試過了（`Attempting to preempt`），但搶到的話 `inference-prod` 會超過 quota（`would have placed the queue resources over quota`），所以放棄。這兩個決定為什麼跟直覺相反，疑難排解裡的[「queue priority 200 打不贏 quota 內的 100」](#mine-4)和[「`inference` 反而讓 pod 卡死」](#mine-5)有更完整的說明。
+排程器的日誌多了幾個欄位：`deserved` 是依 quota 該分到的量，`allocated` 是實際拿到的量。最後三行顯示，KAI 嘗試替 `infer-claim-2` 搶占資源（`Attempting to preempt`），但判定會讓 `inference-prod` 超過 quota（`would have placed the queue resources over quota`），因此沒有執行搶占。這兩個決定為什麼跟直覺相反，疑難排解裡的[「queue priority 無法回收其他佇列 quota 內的資源」](#mine-4)和[「`priorityClassName: inference` 反而讓 pod 卡住」](#mine-5)有更完整的說明。
 
 另外，每次建立 pod 都會先出現一則 `PodGrouperWarning ... Pod "batch-hog-2" not found` 事件。這是 pod-grouper 的快取還沒看到剛建立的 pod，1 秒後就正常排完，沒有影響——但把 `Warning` 事件一律當失敗處理的 CI 或告警規則會一直誤報。
 
@@ -650,6 +650,8 @@ preempt-victim-train          1/1     Running   0          29s   aks-gpuspot-212
 sed 's/preempt-victim-train/preempt-victim-train-2/' \
     05-preempt-victim-train.yaml > 07-preempt-victim-train-2.yaml
 ```
+
+執行下面的 `kubectl -n kai-lab get pods -o wide` 後,先確認 `preempt-victim-train` 與 `preempt-victim-train-2` 都達到 `1/1 Running`,且 `NODE` 欄顯示各佔一個不同的 GPU 節點。若尚未達到這個條件,就繼續用同一條指令查看;確認兩張卡都已佔用後,才執行 `kubectl apply -f 06-preempt-preemptor-inference.yaml` 提交搶占者。
 
 ```console
 $ kubectl -n kai-lab delete pod preempt-preemptor-inference
@@ -752,7 +754,7 @@ $ kubectl -n kai-scheduler wait --for=condition=Available deploy --all --timeout
 
 **修法**:要不可被搶占就明寫 `priorityClassName: inference`(或 `build`)。佇列名稱只是給人看的,不影響優先權——`inference-prod` 這個名字對排程器毫無意義。
 
-### queue priority 200 打不贏 quota 內的 100 {#mine-4}
+### queue priority 無法回收其他佇列 quota 內的資源 {#mine-4}
 
 **症狀**:`inference-prod` 佇列優先權 200、`batch-eval` 只有 100,兩顆 inference pod 卻只有一顆跑得起來,另一顆無限 Pending。直覺會以為優先權高就該把兩張卡都拿過來。
 

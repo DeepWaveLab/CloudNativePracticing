@@ -8,7 +8,7 @@
 
 ## Matchmaking 與 allocation 是兩件事
 
-先看玩家名單。Nakama 內建的 **matchmaker** 負責配對：把符合條件的玩家湊成一組，讓每個 client 都收到同一場配對成立的事件。Agones 負責分配 server：從 Ready pool 裡挑一顆 `GameServer`，把它轉成 `Allocated`，並回傳玩家可以連線的 address:port。只完成湊人，玩家還不知道要連去哪裡；只做 allocation，平台也不知道這顆 server 要交給哪一組玩家。兩者中間要有一段程式把它們接起來。
+先看玩家名單。Nakama 內建的 **matchmaker** 負責配對：把符合條件的玩家湊成一組，讓每個 client 都收到同一場配對成立的事件。Agones 負責分配 server：從 Ready pool 裡挑一顆 `GameServer`，把它轉成 `Allocated`，並回傳玩家可以連線的 address:port。只完成湊人，玩家還不知道要連去哪裡；只做 allocation，分配結果尚未對應玩家名單。兩者中間要有一段程式把它們接起來。
 
 配對一成立就要執行分配，所以需要能在 Nakama 裡執行的自訂程式，稱為 **server runtime module**。它是跑在 Nakama 裡的自訂後端邏輯，可以用 Lua、Go 或 JavaScript/TypeScript 寫；module 在 Nakama 啟動時載入，用 **hook** 註冊事件發生時要執行的函式。`matchmaker_matched` hook 剛好是接 Agones 的位置：Nakama 已經決定哪些玩家湊成同一組，但 client 還需要同一組遊戲伺服器 endpoint。
 
@@ -27,7 +27,7 @@ client 完成 Day 5 的登入後，先開 realtime WebSocket，再送 `matchmake
 - **`matchmaker_matched`**：Nakama 內建的配對成立事件，列出同組有哪些玩家。
 - **code `6006` 的 notification**：本章 Lua hook 自己送出的通知，內容是 Agones 分配到的 `address`、`port` 與 `GameServer` 名稱。`6006` 是本章自訂的通知代碼，client 靠它分辨「這是 server endpoint」。
 
-把 endpoint 送回 client 還有另一種做法：client 收到 `matchmaker_matched` 後，主動呼叫一支自訂 RPC 去問「我該連哪裡」。這裡選 notification，因為配對成立的時間點由 server 決定，由 server 主動推比 client 事後來問少一次來回；notification 標成 persistent 時會保存，官方也提供列出通知的 API；本章只測即時接收，尚未測重連後補取。
+把 endpoint 送回 client 還有另一種做法：client 收到 `matchmaker_matched` 後，透過 RPC（呼叫後端自訂函式）查詢「我該連哪裡」。這裡選 notification，因為配對成立的時間點由 server 決定，由 server 主動推比 client 事後來問少一次來回。
 
 `matchmaker_matched` 裡也有一個 `token` 欄位，但它和 Day 4 的 Quilkin routing token 無關。這個 token 是給 Nakama 自己的多人對戰（client relayed match）用的，client 拿它呼叫 match join，就能加入一場由 Nakama 轉送訊息的對戰。對戰跑在 Agones 的 dedicated game server 上時，不走 Nakama match，這個 token 用不到，client 真正要用的是 notification 裡的 address:port。
 
@@ -173,7 +173,10 @@ spec:
           readOnly: true
 ```
 
-`automountServiceAccountToken: true` 要寫在 pod spec，因為 Day 5 的 ServiceAccount 關掉了自動掛載；漏掉會撞到[token 掛載失敗](#mine-1)。用 `subPath` 是為了避免 Nakama 掃到 ConfigMap 投影目錄裡的同一份 Lua 檔兩次，見[module 重複載入](#mine-2)。
+<a id="mine-1"></a>
+<a id="mine-2"></a>
+
+`automountServiceAccountToken: true` 要寫在 pod spec，因為 Day 5 的 ServiceAccount 關掉了自動掛載，需要在這裡覆蓋設定，Pod 才會掛載 Kubernetes API token。用 `subPath` 是為了避免 Nakama 掃到 ConfigMap 投影目錄裡的同一份 Lua 檔兩次。
 
 先套用完整 `nakama-module-configmap.yaml`，再套用 `nakama-deployment.yaml`，讓新的 Pod 掛到 module。這份 Deployment 已包含 module revision annotation；之後若只修改 ConfigMap，還要觸發新的 Pod，不能期待 `subPath` 掛載的檔案自動更新。
 
@@ -192,11 +195,26 @@ $ kubectl -n nakama logs deployment/nakama -c nakama --tail=120
 {"level":"info","ts":"2026-09-05T05:18:33.313Z","caller":"main.go:243","msg":"Startup done"}
 ```
 
-要看的是 `count=1`。若顯示 `count=2` 並載入兩次同名 module，通常是整個 ConfigMap 目錄被掛進 runtime path。Nakama rollout 之後，先前的 port-forward 可能還指向已刪除的 Pod。請在另一個終端機重新執行 `kubectl -n nakama port-forward svc/nakama 7350:7350` 並保持它開著，再測 client；原因見[rollout 後的連線失效](#mine-3)。
+<a id="mine-3"></a>
+
+要看的是 `count=1`。若顯示 `count=2` 並載入兩次同名 module，通常是整個 ConfigMap 目錄被掛進 runtime path。Nakama rollout 之後，先前的 port-forward 可能還指向已刪除的 Pod。請在另一個終端機重新執行 `kubectl -n nakama port-forward svc/nakama 7350:7350` 並保持它開著，再測 client。
 
 ## 步驟 4:送兩個 realtime client 進 matchmaker
 
 配對成立時 hook 要分配一顆 server，所以 `simple-game-server` Fleet 至少要有 1 顆 Ready。
+
+本機需先安裝 Python 3.12，以下在 `labs/sprint5/day6/` 目錄使用 bash／zsh 操作。
+
+先建立並啟用虛擬環境，安裝 `websockets==17.1` 並檢查能否匯入（依官方文件補上，本課沒有實跑；參考 [Python 3.12 虛擬環境與套件安裝](https://docs.python.org/3.12/tutorial/venv.html)、[websockets 17.1 安裝文件](https://websockets.readthedocs.io/en/17.1/intro/index.html)）：
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install "websockets==17.1"
+python -c "import websockets"
+```
+
+後續的 `python3 mm_client.py` 請在同一個已啟用虛擬環境的終端機執行。
 
 測試 client（[mm_client.py](https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day6/mm_client.py)）做三件事：REST device auth、WebSocket 送 `matchmaker_add`、等待 `matchmaker_matched` 與 code `6006` notification。它用 Python 的 `websockets` 套件開 realtime socket（沿用已安裝 `websockets` 的 Python 環境），下面只列等待訊息的迴圈。結束條件要兩者都滿足：
 
@@ -216,19 +234,35 @@ while time.monotonic() < deadline and (endpoint is None or matched is None):
             endpoint = content
 ```
 
-只等 notification 就離線的話，會漏掉配對事件，見[等待兩種訊息](#mine-4)。
+<a id="mine-4"></a>
 
-Nakama hook 收到配對事件後建立 allocation：
+client 必須同時收到 `matchmaker_matched` 與 code `6006` 通知才結束，不能依賴兩者的先後順序；只等 notification 就離線，可能漏掉配對事件。
+
+先查詢 `default` namespace 的 GameServer 狀態，把 `<context>` 換成你的 Kubernetes context。下面的 `simple-game-server-ql5ws-qknrb` 還是 Ready，port 是 7170；輸出中的 `20.89.45.184` 對應 client 與 hook 範例裡的 `<NODE-IP>`。
 
 ```text
-$ kubectl -n nakama logs deployment/nakama -c nakama --since=3m | grep 'sprint5-day6'
-{"level":"info","ts":"2026-09-05T05:18:32.962Z","caller":"server/runtime_lua_nakama.go:2373","msg":"sprint5-day6 Agones matchmaker module loaded","runtime":"lua"}
-{"level":"info","ts":"2026-09-05T05:19:17.964Z","caller":"server/runtime_lua_nakama.go:2370","msg":"sprint5-day6 matchmaker_matched users=2","runtime":"lua","mode":"matchmaker"}
-{"level":"info","ts":"2026-09-05T05:19:18.203Z","caller":"server/runtime_lua_nakama.go:2370","msg":"sprint5-day6 allocation response {\"address\":\"<NODE-IP>\",\"gameserver\":\"simple-game-server-ql5ws-qknrb\",\"port\":7170,\"state\":\"Allocated\"}","runtime":"lua","mode":"matchmaker"}
-{"level":"info","ts":"2026-09-05T05:19:18.211Z","caller":"server/runtime_lua_nakama.go:2370","msg":"sprint5-day6 allocated gameserver=simple-game-server-ql5ws-qknrb endpoint=<NODE-IP>:7170 users=2","runtime":"lua","mode":"matchmaker"}
+$ kubectl --context <context> -n default get gs -o wide
+NAME                             STATE       ADDRESS        PORT   NODE                              AGE
+simple-game-server-ql5ws-b5xr7   Allocated   20.89.45.184   7499   aks-gamesrv-18046246-vmss000003   5d2h
+simple-game-server-ql5ws-jkzn4   Allocated   20.89.45.184   7441   aks-gamesrv-18046246-vmss000003   3d3h
+simple-game-server-ql5ws-khc5t   Allocated   20.89.45.184   7107   aks-gamesrv-18046246-vmss000003   5d2h
+simple-game-server-ql5ws-qknrb   Ready       20.89.45.184   7170   aks-gamesrv-18046246-vmss000003   2m19s
+simple-game-server-ql5ws-w46dh   Ready       20.89.45.184   7122   aks-gamesrv-18046246-vmss000003   3m49s
 ```
 
-兩個 client 都收到同一組 endpoint，summary 顯示 `same_endpoint=true`：
+接著執行 `python3 mm_client.py`。下表整理兩個 client 收到的事件與分配結果，省略身分、session、ticket、token 與通知時間等欄位；完整輸出保留在下方。
+
+| 比較項目 | client-a | client-b |
+|---|---|---|
+| 配對事件 | 收到 `matchmaker_matched` | 收到 `matchmaker_matched` |
+| 分配通知 | 收到 code `6006` | 收到 code `6006` |
+| GameServer | `simple-game-server-ql5ws-qknrb` | `simple-game-server-ql5ws-qknrb` |
+| endpoint | `<NODE-IP>:7170` | `<NODE-IP>:7170` |
+
+兩人的 GameServer 名稱與 endpoint 都相同，`SUMMARY` 的 `same_endpoint` 也為 `true`。
+
+<details markdown="1">
+<summary>client 執行指令與完整輸出</summary>
 
 ```text
 $ python3 mm_client.py
@@ -243,43 +277,36 @@ client-a: ws {"matchmaker_matched": {"self": {"presence": {"session_id": "<sessi
 SUMMARY {"endpoint": "<NODE-IP>:7170", "results": [{"allocation": {"address": "<NODE-IP>", "endpoint": "<NODE-IP>:7170", "gameserver": "simple-game-server-ql5ws-qknrb", "port": 7170}, "client": "client-a", "matched": {"self": {"presence": {"session_id": "<session-a>", "user_id": "<user-a>", "username": "MXqRJCrXaj"}}, "ticket": "<ticket-a>", "token": "<redacted>", "users": [{"presence": {"session_id": "<session-b>", "user_id": "<user-b>", "username": "WxTuzBAMQU"}}, {"presence": {"session_id": "<session-a>", "user_id": "<user-a>", "username": "MXqRJCrXaj"}}]}, "notifications_count": 1, "user_id": "<user-a>"}, {"allocation": {"address": "<NODE-IP>", "endpoint": "<NODE-IP>:7170", "gameserver": "simple-game-server-ql5ws-qknrb", "port": 7170}, "client": "client-b", "matched": {"self": {"presence": {"session_id": "<session-b>", "user_id": "<user-b>", "username": "WxTuzBAMQU"}}, "ticket": "<ticket-b>", "token": "<redacted>", "users": [{"presence": {"session_id": "<session-b>", "user_id": "<user-b>", "username": "WxTuzBAMQU"}}, {"presence": {"session_id": "<session-a>", "user_id": "<user-a>", "username": "MXqRJCrXaj"}}]}, "notifications_count": 1, "user_id": "<user-b>"}], "same_endpoint": true}
 ```
 
+</details>
+
 注意 notification 比 `matchmaker_matched` 先到：hook 在 Nakama 送出 matched 事件之前執行，所以 client 不能假設先後順序。
 
-跑完後用 `kubectl get gs -o wide` 對照通知中的 GameServer 名稱。這次實測裡，它從 Ready 轉成 Allocated，位址與 port 也和兩個 client 收到的一致；沿用的 buffer autoscaler 另外補出一顆 Ready。這些證據分別回答「分給誰」與「容量是否補足」。
+再查 Nakama hook log，對照配對人數、分配到的 GameServer 與 endpoint：
 
-## 疑難排解
+```text
+$ kubectl -n nakama logs deployment/nakama -c nakama --since=3m | grep 'sprint5-day6'
+{"level":"info","ts":"2026-09-05T05:18:32.962Z","caller":"server/runtime_lua_nakama.go:2373","msg":"sprint5-day6 Agones matchmaker module loaded","runtime":"lua"}
+{"level":"info","ts":"2026-09-05T05:19:17.964Z","caller":"server/runtime_lua_nakama.go:2370","msg":"sprint5-day6 matchmaker_matched users=2","runtime":"lua","mode":"matchmaker"}
+{"level":"info","ts":"2026-09-05T05:19:18.203Z","caller":"server/runtime_lua_nakama.go:2370","msg":"sprint5-day6 allocation response {\"address\":\"<NODE-IP>\",\"gameserver\":\"simple-game-server-ql5ws-qknrb\",\"port\":7170,\"state\":\"Allocated\"}","runtime":"lua","mode":"matchmaker"}
+{"level":"info","ts":"2026-09-05T05:19:18.211Z","caller":"server/runtime_lua_nakama.go:2370","msg":"sprint5-day6 allocated gameserver=simple-game-server-ql5ws-qknrb endpoint=<NODE-IP>:7170 users=2","runtime":"lua","mode":"matchmaker"}
+```
 
-### ServiceAccount 關閉 automount 時 pod 內沒有 token 檔 {#mine-1}
+`users=2` 對應這次配對的兩位玩家；allocation 回應的 `simple-game-server-ql5ws-qknrb` 與 `<NODE-IP>:7170` 也和兩個 client 收到的一致。
 
-**症狀**：改完 Deployment 後 Nakama pod 進入 `CrashLoopBackOff`；container log 只有 `cat: /var/run/secrets/kubernetes.io/serviceaccount/token: No such file or directory`。
+最後再查一次 GameServer 狀態，和執行 client 前的輸出比較：
 
-**根因**：Day 5 的 `ServiceAccount nakama` 設定 `automountServiceAccountToken: false`。Deployment 沒有覆蓋時，pod 不會掛 Kubernetes API token，hook 因此拿不到 token 傳給 Lua runtime。
+```text
+$ kubectl --context <context> -n default get gs -o wide
+NAME                             STATE       ADDRESS        PORT   NODE                              AGE
+simple-game-server-ql5ws-8rhnv   Ready       20.89.45.184   7295   aks-gamesrv-18046246-vmss000003   8s
+simple-game-server-ql5ws-b5xr7   Allocated   20.89.45.184   7499   aks-gamesrv-18046246-vmss000003   5d2h
+simple-game-server-ql5ws-jkzn4   Allocated   20.89.45.184   7441   aks-gamesrv-18046246-vmss000003   3d3h
+simple-game-server-ql5ws-khc5t   Allocated   20.89.45.184   7107   aks-gamesrv-18046246-vmss000003   5d2h
+simple-game-server-ql5ws-qknrb   Allocated   20.89.45.184   7170   aks-gamesrv-18046246-vmss000003   2m38s
+simple-game-server-ql5ws-w46dh   Ready       20.89.45.184   7122   aks-gamesrv-18046246-vmss000003   4m8s
+```
 
-**修法**：保留 ServiceAccount 本身較安全的預設，在 Nakama 的 pod spec 明確加上 `automountServiceAccountToken: true`。只有需要 in-cluster API 呼叫的 workload 才開 token mount。
-
-### ConfigMap 整個目錄掛 runtime path 會讓 Lua 載入兩次 {#mine-2}
-
-**症狀**：Nakama 可啟動，但 log 出現兩次 `sprint5-day6 Agones matchmaker module loaded`；`Found runtime modules` 顯示 `count=2`，包含 ConfigMap timestamp 目錄下的 `main.lua`。
-
-**根因**：Kubernetes ConfigMap volume 以 symlink 與 timestamp 目錄實作更新。Nakama runtime 掃描 `/nakama/data/modules` 時，把投影目錄裡的實體檔也納入，導致同一份 Lua 被掃到兩次。
-
-**修法**：用 `subPath` 將 ConfigMap 的 `main.lua` 掛成單一檔案到 `/nakama/data/modules/main.lua`，並用 Deployment annotation 變更觸發 rollout。凡是 runtime 會掃整個目錄的系統，都要小心 ConfigMap 投影目錄。
-
-### rollout 後舊 port-forward 會綁到已關閉的 pod {#mine-3}
-
-**症狀**：client REST device auth 失敗，錯誤為 `Remote end closed connection without response`；port-forward log 顯示 `network namespace ... is closed`。
-
-**根因**：port-forward 在 Deployment rollout 前建立，底層連到已被刪除的舊 pod。Service 名稱沒變，不代表既有 port-forward session 會自動換到新 pod。
-
-**修法**：每次 Nakama rollout 後重開 `kubectl -n nakama port-forward svc/nakama 7350:7350`。client 失敗時先看 port-forward session，再追 Nakama API。
-
-### client 只等 notification 會漏掉配對事件 {#mine-4}
-
-**症狀**：兩個 client 都印出 allocation 通知，輸出裡卻沒有 `matchmaker_matched` 事件。
-
-**根因**：client 腳本收到 allocation 通知後立刻離線，沒有等待 matchmaker 的配對事件；通知又比配對事件先到。這樣只能證明 hook 送過通知，不能證明 client 端真的收到配對成立訊號。
-
-**修法**：client 的結束條件改成同時收到 `matchmaker_matched` 與 code `6006` 通知才結束，不依賴兩者的先後順序。
+`simple-game-server-ql5ws-qknrb` 從 Ready 轉成 Allocated，位址與 port 維持 `20.89.45.184:7170`。原本已有的三顆 Allocated 沒有改變，這次只新增一次 allocation；沿用的 buffer autoscaler 另補出一顆 Ready 的 `simple-game-server-ql5ws-8rhnv`。
 
 ## 想一想
 

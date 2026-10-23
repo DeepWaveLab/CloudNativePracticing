@@ -6,11 +6,13 @@
 
 ## 準備可執行 Kata 的節點
 
+延續 [Day 5](sprint4-day5-confidential-concepts.md) 的威脅模型，本章處理的是不受信任工作負載影響宿主機的風險。一般容器共享宿主核心；Kata 在工作負載與宿主機之間加入 VM 邊界，降低不受信任程式利用共享核心影響宿主機的風險。[AKS Pod Sandboxing 隔離機制](https://learn.microsoft.com/en-us/azure/aks/use-pod-sandboxing#how-it-works)
+
 前面已學過 RuntimeClass → handler → containerd runtime → shim 的關係。這次使用的 RuntimeClass 是 `kata-vm-isolation`，handler 是 `kata`；它會透過 Kata 建立具有自身核心的輕量 VM。
 
-本章採用 AKS Pod Sandboxing，節點池使用 Azure Linux 與支援巢狀虛擬化的 VM。**巢狀虛擬化**讓本身已是 VM 的 AKS 節點，仍能建立 Kata 的 guest VM。這組驗證使用 `Standard_D4s_v3`；可用 SKU 與限制應依[AKS 官方文件](https://learn.microsoft.com/en-us/azure/aks/use-pod-sandboxing)及目標區域確認。
+本章採用 AKS Pod Sandboxing，節點池使用 Azure Linux 與支援巢狀虛擬化的第 2 代 VM。**巢狀虛擬化**讓本身已是 VM 的 AKS 節點，仍能建立 Kata 的 guest VM。可選用 `Standard_D4s_v3` 作為練習機型；若要換成其他 SKU（雲端機型代碼），也須符合上述條件，並依[AKS 官方文件](https://learn.microsoft.com/en-us/azure/aks/use-pod-sandboxing)確認目標區域的可用機型與限制。
 
-以下命令會新增一個計費節點池。`<resource-group>` 與 `<cluster>` 請使用現有練習叢集的資源群組與名稱；這裡沿用前幾章的自管 Cilium 網路。`--os-sku AzureLinux` 與 `--workload-runtime KataVmIsolation` 都是這個配置的必要設定：
+以下命令會新增一個計費節點池。`<resource-group>` 與 `<cluster>` 請使用現有練習叢集的資源群組與名稱；這裡沿用前幾章的自管 Cilium 網路。AKS Pod Sandboxing 只支援 Azure Linux，因此 `--os-sku AzureLinux` 與 `--workload-runtime KataVmIsolation` 都是這個配置的必要設定：
 
 ```bash
 az aks nodepool add -g <resource-group> --cluster-name <cluster> \
@@ -20,6 +22,8 @@ az aks nodepool add -g <resource-group> --cluster-name <cluster> \
 ```
 
 節點建立後，先核對節點 Ready、Cilium 是否涵蓋新節點，以及節點公布的 runtime handler。以下是觀測結果；`<kata-node>` 指新 Kata 節點，最後一個 jsonpath 以省略號表示欄位摘要，不是可直接執行的完整查詢：
+
+清單中的 `kata-cc` 是供機密容器使用的 handler，本章使用的是 `kata`。列出 `kata-cc` 不代表節點具備機密運算硬體，相關要求見[進入 Day 7 前的硬體條件](#day7-hardware)。
 
 ```console
 $ kubectl get nodes -o wide
@@ -34,8 +38,6 @@ kata kata-cc runc untrusted   ← 注意這一行,連 kata-cc 都預先在了
 ```
 
 Azure Linux 與 Ubuntu 節點在同一個叢集共存，各自有不同核心與 containerd 版本。Cilium desired 與 ready 都是 3，表示 DaemonSet 已涵蓋新節點，但應用的網路是否通仍要另外測試。
-
-`runtimeHandlers` 列出的 `kata-cc` 暫時只當作設定資訊。它不代表這台節點具備機密運算硬體，見[疑難排解：有 handler 卻沒有對應硬體](#mine-2)。
 
 ## 把 Pod 核心與它所在的宿主機比較
 
@@ -83,6 +85,8 @@ Ping 兩次成功，表示選定的跨節點路徑可達；DNS 回覆 Service IP
 
 最後要確認 `kata` handler 如何對應到 runtime。下列節錄是在 Kata 節點上的檢查 Pod 讀取宿主機設定；`/host` 是該檢查 Pod 掛載的宿主檔案系統。一般應用 Pod 不會自動擁有這個掛載或權限。
 
+節錄也包含供 Day 7 對照的 `kata-cc` 設定。其中 `snapshotter` 指定管理容器檔案系統快照的元件，`tardev` 是此設定選用的元件名稱；本章只需確認 `kata` 的對應關係。[containerd snapshotter 說明](https://github.com/containerd/containerd/blob/main/docs/snapshotters/README.md)
+
 ```console
 $ grep -nE "kata|runtime_type" /host/etc/containerd/config.toml
 [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata]
@@ -99,15 +103,9 @@ $ grep -nE "kata|runtime_type" /host/etc/containerd/config.toml
 
 `runtimes.kata-cc` 則使用另一個 runtime type、snapshotter 與配置檔。這只代表映像準備了設定；是否能執行仍取決於節點硬體與完整配置。
 
-## 疑難排解
+## 進入 Day 7 前的硬體條件 {#day7-hardware}
 
-### 建立 Kata 節點池時 OS SKU 不符合要求 {#mine-1}
-
-這組 AKS Pod Sandboxing 配置要求 Azure Linux。若沿用 Ubuntu 設定而建立失敗，先核對前面的 `--os-sku AzureLinux`。節點就緒後，檢查設定應以實際節點版本為準，不能只因同屬一個叢集，就複製另一種節點的 containerd 路徑。
-
-### 有 kata-cc handler，卻沒有對應硬體 {#mine-2}
-
-驗證中的一般 Kata 節點已列出 `kata-cc`，但 `Standard_D4s_v3` 不具備下一章需要的機密容器硬體條件。handler 清單與配置檔不能替代硬體驗證；要執行 kata-cc，必須依 [Day 7](sprint4-day7-katacc.md) 的節點要求建立環境，並檢查 RuntimeClass 與平台設定。
+本章只要求執行 `kata-vm-isolation`，不需要機密運算硬體。進入 [Day 7](sprint4-day7-katacc.md) 執行 `kata-cc` 前，須依該章的節點要求準備硬體，並檢查 RuntimeClass 與平台設定。`Standard_D4s_v3` 不具備下一章需要的機密容器硬體條件；即使 handler 清單與配置檔已有 `kata-cc`，仍不能取代硬體驗證。
 
 ## 想一想
 

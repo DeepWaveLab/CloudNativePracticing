@@ -24,12 +24,9 @@ Agones 在本課解決的是後者：`GameServerAllocation` 選取 Ready server 
 
 不要只用「卡牌」或「射擊」決定。回合制遊戲也可能有綁定程序的房間狀態；即時遊戲也可能採用不同的分散方式。先追一場對戰的狀態在哪裡，以及移除程序會失去什麼，再選管理方式。[Fleet 規格](https://agones.dev/site/docs/reference/fleet/) 可以用來核對 replicas 與分配的關係。
 
-| 需要回答的問題 | 本課的證據 | 對設計的影響 |
-|---|---|---|
-| 何時能接新對戰？ | Day 1–3 的 Ready 與 allocation | 把「可分配」當成明確狀態 |
-| 分配後還剩多少空位？ | Day 7 兩次分配用完兩顆 Ready | 固定 replicas 不會因分配自動增加；容量補足另行規劃 |
-| 對戰結束時誰釋放程序？ | Day 8 的 EXIT、Day 9 的 BYE 後 Shutdown | 遊戲需要主動回報結束，也要處理玩家未到或失聯 |
-| 伺服器失效後誰恢復對戰？ | Day 8 補 Ready 後舊探測仍失敗 | Fleet 補容量；對戰恢復需另做設計 |
+回到開場的卡牌遊戲：若每次出牌後都把完整對戰狀態寫回資料庫，下一次請求也能由任一副本處理，最少可以先沿用帳號服務，以一般 Deployment 執行遊戲 API，搭配保存對戰狀態的資料庫。這個設計沒有必須分配給某場對戰的專用程序，可以先不導入 Agones；如果出牌也透過 API 完成，就沒有本課的 UDP 路由需求，也不用追加 Quilkin。這是依需求推導的起點，本課沒有實作這套卡牌服務。
+
+若後來改成每個房間都要由固定程序持續保存狀態，才把 Agones 納入選項。此時要一起設計可分配容量、對戰結束回報，以及玩家未到或失聯時的處理；固定 replicas 不會因為分配而自動增加。若還要求程序失效後能接續原局，就得另做狀態保存與恢復。增加 GameServer 生命週期管理，並不會省掉這些遊戲設計工作。
 
 ## 判斷是否需要 Quilkin：看入口與路由需求
 
@@ -45,11 +42,9 @@ Day 5 用 Nakama 處理登入與 storage，Day 6 用 matchmaker 湊齊玩家，�
 
 反過來，如果這些功能還沒建立，Nakama 提供了可一起使用的 API 與 server runtime；代價是需要理解它的資料模型、資料庫與維運方式。本課驗過 migration、單一玩家 storage，以及兩位玩家的配對，尚未涵蓋 PostgreSQL 高可用、備份還原、正式金鑰與多節點行為。選它之前，要把這些需求納入試作。[Nakama 官方文件](https://heroiclabs.com/docs/nakama/) 可用來查各項功能與部署條件。
 
-| 團隊已有的能力 | 可評估的接法 | 還要驗證什麼 |
-|---|---|---|
-| 已有帳號與配對服務 | 既有服務在配對成立後建立 allocation | 授權、重試不重複分配、失敗如何回報玩家 |
-| 尚缺登入、storage 與配對 | 以 Nakama 串接這些功能 | 權限拒絕、並行寫入、資料庫維運與對外入口 |
-| 配對通知可能漏接 | 保存 assignment，提供主動查詢 | 舊 assignment 何時失效，如何避免把玩家送回失效 server |
+開場只說帳號服務已存在，還不能據此決定是否採用 Nakama。先確認卡牌遊戲是否需要自動配對，以及既有後端能否提供它；若能提供，就沿用既有服務。只有在前面選了專用遊戲程序時，配對成立後才需要接上 allocation，並處理授權、重試不重複分配及失敗回報。若缺的是配對或 storage，就比較擴充既有後端與導入 Nakama 的工作量；採用 Nakama 仍須驗證權限拒絕、並行寫入、資料庫維運與對外入口，不能只因它提供登入功能就取代已有的帳號服務。
+
+選了專用程序後，若還要讓漏接配對通知的玩家重新取得連線位置，可以保存 assignment 並提供查詢；同時要決定它何時失效，避免把玩家送回已失效的 server。
 
 Day 7 已驗證 notification 與 RPC 回傳同一份 assignment，但沒有演練完整重連。`get_assignment` 只讀資料，不會檢查伺服器是否仍存活。需要重連的服務，不能把「查得到」當成「還能連」。
 
@@ -57,11 +52,9 @@ Day 7 已驗證 notification 與 RPC 回傳同一份 assignment，但沒有演�
 
 Day 9 換成 Unity SDK 後，登入、配對與 UDP 的分工沒有改變。真正讓兩位玩家看見彼此的，是 GameServer 由 echo 改成 relay。這提供一個清楚的驗證順序：先測路徑能通，再測資料會送到其他玩家，最後才檢查遊戲規則與同步品質。
 
-| 程序的行為 | 本課已證明 | 尚不能據此推論 |
-|---|---|---|
-| echo 回覆發送者 | 封包可以往返 | 玩家收到彼此資料 |
-| relay 轉送玩家位置 | 兩個視窗與 log 顯示雙向位置資料 | 網路零丟包、位置合法、無作弊 |
-| server 驗證輸入並計算狀態 | 本課未實作 | 已有權威遊戲邏輯或完整同步機制 |
+對開場的卡牌遊戲，如果勝負必須由後端判定，遊戲 API 就要檢查出牌是否合法並計算結果；即使沒有專用 GameServer，這項責任仍然存在。若改做持續傳送位置的遊戲，試作連線時可以先用 echo 檢查封包往返，再用 relay 檢查玩家是否收到彼此資料；做到這裡仍不能判斷位置是否合法或是否有人作弊，也不能保證網路零丟包。
+
+當需求進一步要求 server 驗證輸入並計算遊戲狀態，就需要實作權威遊戲邏輯，由 server 決定有效結果。這會增加遊戲程式與同步機制的工作，無法只靠換上 Agones、Quilkin 或 Nakama 完成；本課的 relay 尚未實作這一段。
 
 本章提到的 relay 是 Agones 上的獨立 UDP 程序。Nakama 另有透過自身 realtime socket 轉送的 [client relayed multiplayer](https://heroiclabs.com/docs/nakama/concepts/multiplayer/relayed/)，兩者的封包路徑與生命週期不同，不能只因名字相同就互換。
 
@@ -73,7 +66,14 @@ Day 8 的時間線顯示：主動結束與程序崩潰後，很快就觀察到 G
 
 以下幾項沒有在本課驗證，若需求包含它們，就應列入下一次試作：
 
-- **不同玩家的網路條件**：跨網路的延遲、遺失與亂序，以及 client 的插值、預測與延遲補償。Day 9 的兩個 player 都在同一台 Mac 上。
+- **不同玩家的網路條件**：跨網路的延遲、封包遺失與亂序。Day 9 的兩個 player 都在同一台 Mac 上，client 收到遠端位置便直接更新畫面，尚未實作下列同步機制。
+
+    插值是在已收到的兩份狀態之間算出中間畫面，讓其他玩家的移動較平順；通常需要先暫存狀態，以增加一些顯示延遲換取平順度。可接著讀 Gaffer On Games 的 [Snapshot Interpolation](https://gafferongames.com/post/snapshot_interpolation/)。
+
+    Client 預測是先在本機依玩家輸入計算動作，不必等 server 回覆才顯示移動；收到 server 的權威狀態後，還要修正預測誤差。Gaffer On Games 的 [Networked Physics（Client-Side Prediction）](https://gafferongames.com/post/networked_physics_2004/#client-side-prediction) 說明了輸入保存與修正方式。
+
+    延遲補償處理的是操作送達時，server 狀態已與玩家操作當下所見不同的問題。以射擊命中判定為例，server 可依操作時間回查歷史位置，再判斷是否命中；這也可能讓已躲入掩體的玩家仍被判定中彈。Gabriel Gambetta 的 [Lag Compensation](https://www.gabrielgambetta.com/lag-compensation.html) 用射擊情境說明這項取捨。
+
 - **不同中斷來源**：節點 drain、Spot 回收通知、更新與故障切換，不能直接沿用手動關機的結果。
 - **多區域與入口**：區域選擇、跨區分配、Nakama 對外 TLS，以及 proxy 容量與可用性。
 - **長期資料與身分**：資料庫還原、預設金鑰替換、配對資格驗證，以及憑證更新。

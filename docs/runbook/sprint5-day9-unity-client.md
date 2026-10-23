@@ -2,7 +2,7 @@
 
 ![Nakama 官方標誌](../assets/logos/nakama-icon-color.png){ align=right width="72" }
 
-你把 Python client 換成 Unity，兩位玩家都收到 `ACK`，畫面卻只有自己的角色在移動。連線明明成功了，還少了什麼？
+你把 Python client 換成用 Unity 製作的 client。Unity 是遊戲引擎，負責場景、畫面與遊戲邏輯；但兩位玩家都收到 `ACK`，畫面卻只有自己的角色在移動。連線明明成功了，還少了什麼？
 
 少的是把 A 的位置交給 B、把 B 的位置交給 A 的遊戲程式。本章先用 Nakama 官方 SDK 重做登入與配對，再把只會回覆發送者的測試伺服器換成 relay server。你會用兩個視窗、雙方 log 與 GameServer 狀態，分別判斷「連得上」「收到對方資料」與「對戰正常結束」，而不把一個 `ok=true` 當成全部成功。
 
@@ -45,7 +45,7 @@ Unity 有兩種執行檔角色：**Editor** 負責建置專案，**player** 是�
 
 Part 1 需要 Day 7 的演練環境：演練節點池、`nakama-lab`（含 `get_assignment` 的 module）與 `lab-game-server` Fleet。如果 Day 8 已拆除環境，先依 [Day 7](sprint5-day7-python-client-e2e.md) 重建到 module 載入、Fleet Ready 與 healthcheck 成功；若已保留，仍需確認這些條件。Part 2 再部署 relay Fleet，並把 allocation selector 切到 relay。
 
-本章的實測平台是 macOS，使用 Unity 6000.3.19f1、已啟用的 Unity 授權，以及 nakama-unity v3.22.0；下方路徑與建置目標都是 macOS standalone。Part 2 另外需要一個叢集拉得到 image 的 container registry；image 在 ACR 上 build，本機不需要 Docker。完整檔案在 [labs/sprint5/day9/](https://github.com/DeepWaveLab/CloudNativePracticing/tree/main/labs/sprint5/day9)。
+本章需要 macOS、Unity 6000.3.19f1、已啟用的 Unity 授權，以及 nakama-unity v3.22.0；下方路徑與建置目標都是 macOS standalone。Part 2 另外需要 Azure Container Registry（ACR），也就是 Azure 用來儲存與提供 container image 的服務，並讓叢集有權限拉取 image。本章透過 ACR Tasks 在雲端 build image，本機不需要 Docker。完整檔案在 [labs/sprint5/day9/](https://github.com/DeepWaveLab/CloudNativePracticing/tree/main/labs/sprint5/day9)。
 
 先在課程儲存庫的 `labs/sprint5/day9/` 目錄操作。本章會在這裡建立 `cnp-day9-unity` 子目錄；後續 `$UNITY`、`$APP` 與相對路徑沿用同一個 shell。完整 C# 檔案才包含輔助函式與模式切換，不能只用下方節錄建置。
 
@@ -156,7 +156,7 @@ public static void BuildMac()
 }
 ```
 
-兩個 material（材質資產）決定第二部分方塊的顏色，也讓建置保留需要的 shader（繪製物體的程式），原因見[方塊顯示洋紅色的說明](#mine-1)。`runInBackground` 要打開，否則兩個視窗同時跑時，失去焦點的那個會暫停更新。
+兩個 material（材質資產）決定第二部分方塊的顏色，也讓建置保留需要的 shader（繪製物體的程式）。完整腳本的 `CreateMaterial()` 會建立使用 Standard shader 的材質，再指派給場景中 `Day9Client` 的欄位，讓建置時保留被引用的 shader；client 在執行期用 `sharedMaterial` 將材質套到方塊上。這樣可避免 Standard shader 因未被引用而遭建置剝除，導致方塊顯示代表 shader 錯誤的洋紅色。`runInBackground` 要打開，否則兩個視窗同時跑時，失去焦點的那個會暫停更新。
 
 ```console
 $ $UNITY -batchmode -nographics -projectPath cnp-day9-unity -executeMethod Day9Build.BuildMac -logFile day9-build.log
@@ -170,7 +170,7 @@ Build Finished, Result: Success.
 [day9-build] result=Succeeded size=107192976 errors=0
 ```
 
-log 裡可能出現 `Error: Access token is unavailable; failed to update`。這次仍產生 `Succeeded`、`errors=0` 與可執行 player；不能只看到授權類型就忽略其他建置錯誤，仍要以自己的建置結果與產物為準。
+建置成功時，log 應顯示 `Build Finished, Result: Success.`、`result=Succeeded` 與 `errors=0`，並產生可執行的 `Build/Day9Client.app`。若 log 出現 `Error: Access token is unavailable; failed to update`，仍須確認上述結果與產物，不能只憑授權類型判斷建置成功。
 
 ### 步驟 4:跑兩個 player
 
@@ -218,7 +218,7 @@ $ kubectl logs lab-game-server-4f7v7-ddw75 -c simple-game-server | grep 'Receive
 2026/09/29 05:02:25 Received UDP: hello-unity-a
 ```
 
-再執行一次配對，這次分到另一顆 Ready 的 GameServer，兩個 player 一樣是 `RESULT ok=true`。player A 視窗的截圖：
+player A 視窗會顯示登入、配對、RPC 比對與 UDP 測試的結果。下圖可對照各階段狀態及最後的 `RESULT ok=true`；GameServer 名稱與 token 以各次配對收到的值為準：
 
 ![Unity player A 的畫面：依序列出登入、matchmaker ticket、配對成立、6006 通知的 GameServer 與 token、RPC 比對結果、UDP 經 Quilkin 收到 ACK、錯誤 token 無回應，以及 RESULT ok=true](../assets/screenshots/sprint5-day9/sdk-flow-player-a.png)
 
@@ -363,6 +363,7 @@ Avatar(f[1], false).transform.position = new Vector3(x, 0.5f, z);
 確認 Nakama 的 selector 已指向 `lab-relay-server`，且 relay Fleet 有 Ready 後，回到前面的 Unity 專案上層目錄執行。這一步兩個 player 都開視窗，各自每 0.25 秒存一張畫面；若重跑，先換用新的畫面輸出目錄，避免混入前一次結果：
 
 ```console
+$ mkdir -p frames-a frames-b
 $ $APP -logFile relay-a.log -player unity-a -nakamaPort 17350 -relay 10 -frames frames-a -screenshot relay-a.png \
     -screen-width 960 -screen-height 540 -screen-fullscreen 0 &
 $ $APP -logFile relay-b.log -player unity-b -nakamaPort 17350 -relay 10 -frames frames-b -screenshot relay-b.png \
@@ -372,7 +373,7 @@ $ $APP -logFile relay-b.log -player unity-b -nakamaPort 17350 -relay 10 -frames 
 兩個 player 都以 exit code 0 結束：
 
 ```console
-$ grep -hF '[day9]' relay-a.log relay-b.log | grep -E 'notification|rpc|JOIN|RELAY|RESULT'
+$ grep -hF '[day9]' relay-a.log relay-b.log | grep -E 'notification|JOIN|RELAY|RESULT'
 [day9] unity-a: notification 6006 gameserver=lab-relay-server-zn6v7-hbck9 token=sa4
 [day9] unity-a: rpc get_assignment found=True matches_notification=True
 [day9] unity-a: relay JOIN with wrong token -> (no reply)
@@ -444,16 +445,6 @@ relay 在對戰結束時會自己呼叫 `Shutdown()`，不需要手動刪 GameSe
 $ az aks nodepool delete -g <RESOURCE-GROUP> --cluster-name <CLUSTER> -n gslab
 ```
 
-## 疑難排解
-
-### 執行期建立的方塊在 player build 裡變成洋紅色 {#mine-1}
-
-**症狀**：用 `GameObject.CreatePrimitive(PrimitiveType.Cube)` 在執行期建出方塊，再設定 `material.color`，build 出來的 player 裡方塊全部顯示成洋紅色，顏色設定沒有作用。
-
-**根因**：這是 built-in render pipeline 的專案，build 時 Unity 只打包場景與資產實際引用到的 shader。場景裡沒有任何物件用到 Standard shader，它就被剝掉了；執行期才建的方塊找不到 shader，顯示成 Unity 代表「shader 錯誤」的洋紅色。
-
-**修法**：在 build script 裡用 `new Material(Shader.Find("Standard"))` 建成 material 資產，指派給場景中 `Day9Client` 的序列化欄位，讓 Standard shader 因為被引用而打包進去；執行期改用 `sharedMaterial` 套上這兩個 material。另一個做法是把 shader 加進 Graphics Settings 的 [Always Included Shaders](https://docs.unity3d.com/6000.3/Documentation/Manual/class-GraphicsSettings.html)。
-
 ## 想一想
 
 1. 兩位玩家都收到 echo 的 ACK，為什麼還不能證明他們收到彼此的位置？
@@ -468,7 +459,7 @@ SDK 改變的是 client 呼叫 API 的方式；玩家是否收到彼此資料，
 
 WebGL、iOS、Android 的網路 API 限制各不相同，要上這些平台得分別驗證。Nakama 要有對外入口與 TLS，不能靠 port-forward。兩個 player 在同一台機器上時網路條件相同，收發數字不能代表真實玩家的網路狀況。
 
-relay 是純轉發：不驗證位置是否合理，也不檢查 `JOIN` 的玩家是不是這場配對名單上的人。後續需要在加入時驗證配對資格；例如設計 server-to-server RPC 查詢名單，但本章沒有實作這支驗證 API。client 也要補上玩家輸入、插值、預測與延遲補償。
+relay 是純轉發：不驗證位置是否合理，也不檢查 `JOIN` 的玩家是不是這場配對名單上的人。後續需要在加入時驗證配對資格；例如設計 server-to-server RPC 查詢名單，但本章沒有實作這支驗證 API。client 也要補上玩家輸入與位置更新處理：插值是在已收到的位置之間計算中間位置，讓移動平順；預測是在伺服器回覆前，先依本機輸入計算角色動作，減少操作等待。延遲補償則依網路延遲調整事件判定，例如伺服器回看玩家發出射擊時的狀態來判斷是否命中。本章沒有實作這些功能。
 
 要阻止 client 任意宣告不合理位置，server 需要驗證輸入與遊戲規則，必要時自行計算權威狀態；單純轉發做不到這件事。一個做法是用 Unity 做 dedicated server build（需要另外安裝 Dedicated Server Build Support 模組），搭配 Agones 的 Unity SDK 呼叫 `Ready()`、`Health()`、`Shutdown()`。
 

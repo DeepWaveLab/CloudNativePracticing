@@ -22,20 +22,11 @@
 
 ![Agones 與 ConfigMap 分別提供 endpoints 及 filters](../assets/diagrams/s5d4-xds-sources.svg)
 
-少其中一類設定，就不能完成預定的 token 路由。正文會直接使用已補齊兩個 provider 的配置，故障例留在[疑難排解：錯誤 token 仍有回應](#mine-3)。
+少其中一類設定，就不能完成預定的 token 路由。正文會直接使用已補齊兩個 provider 的配置，再透過[對照實驗](#mine-3)觀察移除其中一個 provider 後的封包回應。
 
-本章使用 Quilkin image `ghcr.io/embarkstudios/quilkin:0.10.0-3d8eaef`，也就是官方 xDS 範例指定的版本。此映像使用 flag 形式的 CLI；對應範例與 image 必須一起核對，不能混用舊子指令。用這版 image 起一顆一次性 pod 執行 `--help`，會看到子指令只剩三個，其餘功能全部是 `--service.*` 與 `--provider.*` flag（下面節錄 Commands 段）：
+本章使用 Quilkin image `ghcr.io/embarkstudios/quilkin:0.10.0-3d8eaef`，也就是官方 xDS 範例指定的版本。
 
-```console
-$ kubectl run quilkin-help --rm -i --restart=Never \
-    --image=ghcr.io/embarkstudios/quilkin:0.10.0-3d8eaef -- --help
-Commands:
-  generate-config-schema  Generates JSON schema files for known filters
-  qcmp
-  help
-```
-
-這裡用 xDS 架構：一顆 `quilkin-manage-agones` 提供 xDS，三顆 `quilkin-proxies` 對外收 UDP。原驗證也檢查過另一套 relay 範例，發現 label 與 CLI 不一致，見[Service 選到不提供服務的 Pod](#mine-1)與[映像不接受子指令](#mine-2)。這裡的步驟只部署 xDS 配置。
+這裡用 xDS 架構：一個 `quilkin-manage-agones` control plane 提供 xDS，三個 `quilkin-proxies` UDP proxy 對外收 UDP。
 
 ## 步驟 1:部署 Quilkin xDS control plane
 
@@ -180,33 +171,21 @@ $ printf 'Hello999' | nc -u -w3 <LB-IP> 7777
 
 驗證中等待期間沒有收到回應，stdout 為空。不同 nc 實作的 UDP 等待行為可能不同；無回應要與剛才相同路徑的正例及已載入的 filters 一起判讀，不能單獨當成網路一定被政策拒絕的證據。
 
-正向與負向兩個測試都要做。只驗 `ACK` 會漏掉最嚴重的失效模式：proxy 仍然轉發 UDP，但 TokenRouter 根本沒有載入（[疑難排解：錯誤 token 仍有回應](#mine-3)）。
+正向與負向兩個測試都要做。只驗 `ACK` 會漏掉最嚴重的失效模式：proxy 仍然轉發 UDP，但 TokenRouter 根本沒有載入（[對照實驗：錯誤 token 仍有回應](#mine-3)）。
 
-## 疑難排解
+## 對照實驗：正確與錯誤 token 都收到原樣回應 {#mine-3}
 
-### Service 選到不提供目標連接埠的 Pod {#mine-1}
+步驟 1 已啟用兩個 provider。完成步驟 4 後，可以刻意移除其中一個，觀察 endpoints 與 filters 不完整時的差別。
 
-**症狀**：照官方 relay quickstart 部署時，proxies 連 `quilkin-relay-agones:7800` 出現 transport error；用 `kubectl logs deploy/quilkin-relay-agones` 看到的可能是 agent log，訊息包含 `Found 2 pods, using pod/quilkin-agones-agent…`。
-
-**根因**：`relay-control-plane.yaml` 裡 relay 與 agent 兩個 Deployment 都貼 `role: xds`，Service selector 也是 `role: xds`。agent 不聽 7800/7900，卻被放進 endpoint。
-
-**修法**：relay 與 agent 用不同 label，例如 `role: relay` 與 `role: agent`，Service 只選 relay。xDS 範例只有一個 `role: xds` Deployment，沒有這個問題。
-
-### Pod 回報 unrecognized subcommand {#mine-2}
-
-**症狀**：relay 與 agent pod 進入 `CrashLoopBackOff`，log 顯示 `error: unrecognized subcommand 'relay'` 或 `error: unrecognized subcommand 'agent'`。
-
-**根因**：`relay-control-plane.yaml` 還在用舊式子指令，但同一份範例指定的 image `0.10.0-3d8eaef` 已改成 flag 式 CLI，`quilkin --help` 只剩 `generate-config-schema`、`qcmp`、`help` 三個子指令。
-
-**修法**：改用 `examples/agones-xonotic-xds/`，或把 relay/agent manifest 改成 `--service.*` 與 `--provider.*` flags。Quilkin pre-1.0 的範例與 CLI 需要一起驗，不只看 image tag。
-
-### 正確與錯誤 token 都收到原樣回應 {#mine-3}
+在工作目錄的 `xds-control-plane.yaml` 中，只移除 control plane Deployment args 裡的 `--provider.k8s`，保留 `--service.xds` 與 `--provider.k8s.agones`，ConfigMap 不變。沿用步驟 1 的 `kubectl apply -f xds-control-plane.yaml` 重新套用，等 control plane Pod 回到 `1/1 Running`、proxy 連上 xDS，再重做步驟 4 的兩次封包測試。
 
 **症狀**：pod 全 Ready、endpoint 也有 token，UDP 封包能通；但 `Hello456` 回 `ACK: Hello456`，代表 token 沒被剝掉，`Hello999` 也回 `ACK: Hello999`，代表錯 token 也被放行。整個過程沒有錯誤訊息。
 
-**根因**：官方 xDS 範例的 `xds-control-plane.yaml` 只帶 `--service.xds --provider.k8s.agones`。這會 watch `GameServer` 產生 endpoint，但不讀 filter ConfigMap，proxy `/config` 會看到 `FILTERS []`。反過來只開 `--provider.k8s` 則有 filters、沒有 endpoint。兩者要同時開。
+**根因**：移除旗標後，control plane args 只剩 `--service.xds --provider.k8s.agones`。這會 watch `GameServer` 產生 endpoint，但不讀 filter ConfigMap，proxy `/config` 會看到 `FILTERS []`。反過來只開 `--provider.k8s` 則有 filters、沒有 endpoint。兩者要同時開。
 
-**修法**：control plane args 改成 `--service.xds --provider.k8s --provider.k8s.agones`。驗收時 proxy `/config` 必須同時有 endpoints 與 filters，並且一定要做負向測試：錯誤 token 必須無回應。
+測試後，在同一份檔案補回 `--provider.k8s`，將 control plane args 還原成 `--service.xds --provider.k8s --provider.k8s.agones`，再執行 `kubectl apply -f xds-control-plane.yaml`。等 control plane Pod 回到 `1/1 Running`、proxy 連上 xDS，重做步驟 4：`Hello456` 應收到 `ACK: Hello`，`Hello999` 應無回應。
+
+驗收時 proxy `/config` 必須同時有 endpoints 與 filters，並且一定要做負向測試：錯誤 token 必須無回應。
 
 ## 這個測試還沒有涵蓋什麼？
 
@@ -230,7 +209,6 @@ Quilkin 的控制面要同時提供 endpoints 與 filters，proxy 才能依 toke
 
 - **[Quilkin Agones Provider](https://embarkstudios.github.io/quilkin/main/book/providers/agones.html)** —— 查 `quilkin.dev/tokens` annotation、Agones endpoint 與 filter ConfigMap 的來源。
 - **[Quilkin with Agones and Xonotic xDS quickstart](https://embarkstudios.github.io/quilkin/main/book/deployment/quickstarts/agones-xonotic-xds.html)** —— 對照本章的 xDS control plane、proxy `/config` 與 token routing 流程。
-- **[Quilkin changelog](https://github.com/EmbarkStudios/quilkin/blob/main/CHANGELOG.md)** —— 對照 `relay`、`agent`、`proxy`、`manage` 子指令移除後的 CLI 變更。
 - **[Agones third party examples: Quilkin](https://agones.dev/site/docs/third-party-content/examples/)** —— Agones 官方把 Quilkin 放在第三方整合案例，說明它在 dedicated game server 路由與存取控制中的位置。
 
 ---

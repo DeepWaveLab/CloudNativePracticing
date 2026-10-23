@@ -49,6 +49,8 @@ we will not allow this default to take effect until KEP 5004 has reached GA in u
 
 ### 開池，驗四項隔離
 
+你需要一座 AKS 叢集，以及一個沒有 device plugin 的專用 GPU 節點池。`dra-driver-nvidia-gpu` v0.4.1 要求 Kubernetes ≥ 1.34.2、開啟 `DynamicResourceAllocation` 功能、NVIDIA driver ≥ 565，以及 container runtime 啟用 CDI。CDI（Container Device Interface）是一種讓 container runtime 照宣告檔把裝置放進容器的格式，步驟 4 會實際看到。官方文件還要求有元件替 GPU 節點貼上識別標籤；本章改用 `pool=gpudra`，步驟 2 會設定對應的 selector。
+
 ```bash
 az aks nodepool add -g <resource-group> --cluster-name <cluster> -n gpudra \
   --subscription <subscription-id> \
@@ -59,7 +61,7 @@ az aks nodepool add -g <resource-group> --cluster-name <cluster> -n gpudra \
 
 `--priority Spot` 跟 Day 0 的 `gpuspot` 一樣，用的是 Azure 的 Spot VM：用剩餘容量計價、比較便宜，但 Azure 需要容量時可以隨時收回，AKS 也因此會在節點上加 `kubernetes.azure.com/scalesetpriority=spot` 這個 taint。
 
-這座叢集是 Day 0 建的 AKS，Kubernetes 1.35.6；新節點的 container runtime 是 containerd 2.3.2，開機映像內建 NVIDIA driver 580.159.04。後面步驟 4 判斷 CDI 能不能用，會用到 containerd 的版本。
+用 `kubectl get nodes` 查看節點的 Kubernetes 版本。以下輸出的實測版本是 Kubernetes 1.35.6、containerd 2.3.2、NVIDIA driver 580.159.04，供比對參考，不是最低版本要求。runtime 是否啟用 CDI，還要確認生效設定，見步驟 4。
 
 GPU 節點開機比一般 CPU 節點慢幾分鐘，多出來的時間花在 driver 安裝和裝置初始化。節點 `Ready` 之後，先驗四件事，全部成立才往下走。
 
@@ -94,11 +96,9 @@ $ kubectl get node <gpudra-node> -o jsonpath='{.status.allocatable}'
 
 一台插著實體 T4 的機器，`allocatable` 裡沒有 `nvidia.com/gpu`，因為這台節點上沒有 device plugin 回報它。用 DRA 時，卡會出現在 ResourceSlice 裡，不會出現在這裡。
 
-除了部署位置，driver 的文件還列了五項叢集要先滿足的前置條件：Kubernetes ≥ 1.34.2、`DynamicResourceAllocation` 功能開啟、NVIDIA driver ≥ 565、container runtime 啟用 CDI，以及有元件替 GPU 節點貼上識別標籤。其中 CDI（Container Device Interface）是一種讓 container runtime 照宣告檔把裝置放進容器的格式，步驟 4 會實際看到。前四項 AKS 都符合，第五項不符合，步驟 2 處理。
-
 ## 步驟 2:安裝 driver
 
-### 讀 chart：三件事決定值檔怎麼寫
+### 讀 chart：三件事決定值檔怎麼寫 {#mine-2}
 
 **第一，GPU 功能的總開關**。`values.yaml` 裡 `resources.gpus.enabled` 預設就是 `true`，但被 `gpuResourcesEnabledOverride: false` 壓著。真正要打開的是後者，也就是步驟 1 那段錯誤訊息要你加的值。
 
@@ -135,7 +135,7 @@ nvidiaDriverRoot: /                  # AKS ships the driver in the host root via
 logVerbosity: "4"
 
 kubeletPlugin:
-  affinity: null                     # see mine 1: {} would be coalesced back to the default
+  affinity: null
   nodeSelector:
     pool: gpudra
   tolerations:
@@ -152,56 +152,30 @@ EOF
 
 `nvidiaDriverRoot` 指的是主機上 NVIDIA driver 裝在哪裡。AKS 的 GPU 節點開機映像（VHD）已經把 driver 裝在主機根目錄，所以維持預設的 `/` 就對了。文件另外提醒，GKE 要改成 `/home/kubernetes/bin/nvidia`，由 GPU Operator 管理 driver 的叢集要改成 `/run/nvidia/driver`。
 
-值檔裡 `affinity: null` 那行註解寫的 `see mine 1`，指的是本章的疑難排解，見[疑難排解：helm 說 deployed，DaemonSet 卻是 `DESIRED 0`](#mine-1)。下一小節先把它從頭走一遍。
+### 安裝並確認 kubelet plugin 狀態 {#mine-1}
 
-### 為什麼是 `affinity: null` 而不是 `{}`
+`affinity: null` 會刪掉 chart 預設的 affinity，讓 `nodeSelector: pool=gpudra` 決定部署位置。不要換成 `{}`：helm 對 map（鍵值對）逐鍵合併，空 map 不會覆蓋任何預設值。
 
-值檔裡最容易寫錯的是 `affinity: null` 這一行。直覺上，想清掉一組設定會寫 `affinity: {}`。如果這樣寫，helm 會說安裝成功：
+使用上面的值檔安裝：
 
 ```console
 $ helm install dra-driver-nvidia-gpu oci://registry.k8s.io/dra-driver-nvidia/charts/dra-driver-nvidia-gpu \
     --version 0.4.1 --create-namespace --namespace dra-driver-nvidia-gpu \
     -f 01-dra-nvidia-values.yaml --wait --timeout 6m
-STATUS: deployed   REVISION: 1
+```
 
+安裝後查詢 DaemonSet 和 pod。以下是修正值檔後留下的查詢紀錄，並非首次安裝的輸出：
+
+```console
 $ kubectl -n dra-driver-nvidia-gpu get ds
 NAME                                   DESIRED  CURRENT  READY  NODE SELECTOR
-dra-driver-nvidia-gpu-kubelet-plugin   0        0        0      pool=gpudra
-```
-
-
-`--wait --timeout 6m` 很快就回報 `deployed`，可是 DaemonSet 的 `DESIRED` 是 0。`DESIRED` 是「符合條件、應該跑一顆 pod 的節點數」，0 表示沒有任何節點符合，也就沒有 kubelet plugin 在跑。三個 DeviceClass（`gpu.nvidia.com`、`mig.nvidia.com`、`vfio.gpu.nvidia.com`）倒是建出來了，ResourceSlice 卻一份都沒有，因為沒有人去寫。
-
-把 DaemonSet 的 pod template 讀回來，看三個欄位：
-
-```console
-$ kubectl -n dra-driver-nvidia-gpu get ds dra-driver-nvidia-gpu-kubelet-plugin \
-    -o jsonpath='{.spec.template.spec.affinity}'
-{"nodeAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":{"nodeSelectorTerms":[
-  {"matchExpressions":[{"key":"feature.node.kubernetes.io/pci-10de.present",…}]}, … 五條原封不動 … ]}}}
-
-$ …'{.spec.template.spec.nodeSelector}'   →  {"pool":"gpudra"}                        ← 生效了
-$ …'{.spec.template.spec.tolerations}'    →  [{"key":"nvidia.com/gpu",…}, …]          ← 也生效了
-```
-
-
-`nodeSelector` 和 `tolerations` 都換成了值檔裡的內容，只有 `affinity` 還是 chart 原本那五條。差別在型別。helm 把你的值和 chart 的預設值合併時，遇到 **map**（鍵值對，例如 `affinity`）是逐鍵合併：`{}` 裡一個鍵都沒有，等於什麼都不覆蓋，預設值原封不動留下來。遇到 **list**（例如 `tolerations`）則是整份取代。要刪掉一整組 map 型的預設值，只能寫 YAML 的 `null`，helm 把 `null` 當成「刪除這個鍵」。
-
-`--wait` 為什麼沒擋下來？它等的是「該就緒的 pod 都就緒」，`DESIRED` 是 0 時，0 顆 pod 全部就緒在計數上成立，helm 就回報成功。所以裝完 DaemonSet 型的元件，要自己看一次 `DESIRED` 是不是你預期的數字。
-
-改成 `affinity: null` 再升級：
-
-```console
-$ helm upgrade dra-driver-nvidia-gpu … -f 01-dra-nvidia-values.yaml
-REVISION: 2
-
-NAME                                   DESIRED  CURRENT  READY  NODE SELECTOR
 dra-driver-nvidia-gpu-kubelet-plugin   1        1        0      pool=gpudra
-pod 1/1 Running
+
+$ kubectl -n dra-driver-nvidia-gpu get pods
+dra-driver-nvidia-gpu-kubelet-plugin-r4ntp   1/1   Running
 ```
 
-
-`DESIRED` 變成 1，kubelet plugin 起來了。它是 `1/1` 而不是文件範例裡的 `2/2`，因為 ComputeDomain 關掉了，pod 裡只剩 `gpus` 這個容器。
+`DESIRED` 是符合部署條件的節點數，本章只有一台 `gpudra` 節點，所以應該是 1。查詢 DaemonSet 時 `READY` 還是 0，稍後的 pod 查詢已是 `1/1 Running`。它是 `1/1` 而不是文件範例裡的 `2/2`，因為 ComputeDomain 關掉了，pod 裡只剩 `gpus` 這個容器。不能只看 helm 的成功訊息：`DESIRED` 是 0 時，`--wait` 也會回報成功。
 
 ## 步驟 3:讀 ResourceSlice，看真卡宣告了什麼
 
@@ -244,23 +218,13 @@ spec:
 寫選擇器時，NVIDIA 自己的屬性掛在 driver 名稱底下，例如 `device.attributes['gpu.nvidia.com'].productName`；容量是 `device.capacity['gpu.nvidia.com'].memory`；`pciBusID` 這種各廠商通用的鍵則掛在 `device.attributes['resource.kubernetes.io'].pciBusID`。
 
 寫第一條選擇器之前，有三個值要先看清楚：
+{#mine-6}
 
-1. `driverVersion` 是 `580.159.4`，不是 `nvidia-smi` 印的 `580.159.04`。driver 把 NVML 回傳的字串轉成 semver（「主版本.次版本.修訂號」三段數字的版本格式）再轉回字串，前導零就不見了，見[疑難排解：照 `nvidia-smi` 版本號寫的選擇器永遠不成立](#mine-6)。
+1. `driverVersion` 是 `580.159.4`，不是 `nvidia-smi` 印的 `580.159.04`。driver 把 NVML 回傳的字串轉成 semver（「主版本.次版本.修訂號」三段數字的版本格式）再轉回字串，前導零就不見了。
 2. `cudaComputeCapability` 是三段式的 `7.5.0`；NVML 給的是兩段的 `7.5`，同樣被補了一段。這兩個屬性都是 version 型，CEL 裡要用版本比較，不要用字串相等。
 3. `memory` 是整數的 `16Gi`，來自 NVML 回報的總量（16384 MiB），沒有先扣掉保留區。
 
-還有一個屬性不在清單上：`pcieRoot`。PCIe Root Complex（PCIe 根節點）是 CPU 這一側連出 PCIe 匯流排的起點，`pcieRoot` 標出這張卡掛在哪一個根節點底下，多卡機器上可以用它把兩張卡配在同一條 PCIe 路徑下。整份 plugin log 只有一行警告，講的就是這件事：
-
-```text
-W0805 08:45:31.616654 nvlib.go:543] error getting PCIe root for device 0, continuing without attribute:
-  failed to resolve PCIe Root Complex for PCI Bus ID 0001:00:00.0:
-  symlink target for PCI Bus ID 0001:00:00.0 is invalid: it must start with devices/pci:
-  devices/LNXSYSTM:00/LNXSYBUS:00/ACPI0004:00/MSFT1000:00/47505500-…/pci0001:00/0001:00:00.0
-```
-
-
-driver 讀 `/sys` 底下的路徑來找 PCIe 根節點，而且要求路徑以 `devices/pci` 開頭。Azure 的 GPU 虛擬機透過 VMBus（Hyper-V 在主機與虛擬機之間傳遞裝置的通道）把實體卡交給虛擬機，路徑的開頭變成 `devices/LNXSYSTM:00/…`，解析就失敗了。driver 印一行警告後繼續執行，不影響整張卡的配置；受影響的只有多卡機器上依 PCIe 拓樸挑卡的選擇器，這類選擇器在 Azure 的 N 系列機型上寫不出來。
-{#mine-4}
+這份 ResourceSlice 沒有 `pcieRoot` 屬性，無法用它寫依 PCIe 拓樸挑卡的選擇器，但不影響本章的整卡配置。原因見[延伸閱讀：PCIe 拓樸屬性為什麼缺少](#mine-4)。
 
 ## 步驟 4:送出一顆沒寫 `nvidia.com/gpu` 的 pod
 
@@ -605,7 +569,7 @@ GPU-bf5809e7-…, Tesla T4, 16384 MiB
 
 兩顆 pod 同時在跑，印出同一個 UUID。claim 的 `reservedFor` 有兩筆，`share-a` 和 `share-b` 各一筆；claim 上沒有 ownerReference（物件上記錄「我屬於誰」的欄位，主人被刪時物件會跟著被回收），因為具名 claim 不屬於任何一顆 pod。
 
-這件事用 device plugin 寫不出來：`nvidia.com/gpu: 1` 是整數計數，兩顆 pod 各要 1，就是要兩張卡。
+只有在 device plugin 未啟用共享、以整張實體 GPU 配置的設定下，兩顆 pod 各要求 `nvidia.com/gpu: 1` 才會需要兩張卡。NVIDIA device plugin 也支援共享，詳見[官方共享設定文件](https://github.com/NVIDIA/k8s-device-plugin#shared-access-to-gpus)；不能把整卡配置的限制概括成 device plugin 無法共卡。
 
 共享在實作上是什麼？回頭看步驟 4 那張圖：宣告檔是一個 claim 一份，以 claim UID 命名。兩顆 pod 共用一個 claim，節點上的 `/var/run/cdi` 也確實只有一份檔案，同一份宣告檔被注入兩個容器。
 
@@ -692,11 +656,11 @@ kubelet plugin 這一側的收回只有一行 log：`Unprepare: regular GPU: noo
 
 這一段要用到空著的卡。步驟 7 已經刪掉 `share-a`、`share-b` 和 `owner-tmpl`，`shared-t4` 雖然還在，配置已經被收回；開始前可以再用 `kubectl get resourceclaims -A` 確認，沒有任何 claim 是 `allocated,reserved`。
 
-兩顆 pod 共用一張卡時，卡上的運算怎麼輪流，可以交給 driver 設定。v0.4.1 支援的共享策略（TimeSlicing、MPS）是透過 claim 的 **opaque config** 指定的：claim 除了寫「我要一顆裝置」，還可以附上一段只有該廠商 driver 看得懂的參數，Kubernetes 不解讀，直接轉交給 driver。
+兩顆 pod 共用一張卡時，卡上的運算怎麼輪流，可以交給 driver 設定。v0.4.1 支援 TimeSlicing 和 MPS（Multi-Process Service，NVIDIA 讓多個程序同時共用一張卡的服務）。這些共享策略是透過 claim 的 **opaque config** 指定的：claim 除了寫「我要一顆裝置」，還可以附上一段只有該廠商 driver 看得懂的參數，Kubernetes 不解讀，直接轉交給 driver。
 
 這條管道被 driver 自己的 **feature gate**（功能開關）擋著。`TimeSlicingSettings`、`MPSSupport` 這幾個開關都還在 alpha 階段，預設關閉。
 
-這裡要分清楚兩種開關。Day 6 的[「做出裝置差異的設定都依賴被關掉的 alpha 功能」](sprint1-day6-dra-simulated-devices.md#mine-1)說的是 Kubernetes API server 的開關，AKS 不讓使用者改。driver 的開關則是 driver 程式自己讀的設定，在 chart 裡就是一個值，想開就開。用 `helm upgrade … --set featureGates.TimeSlicingSettings=true` 升級之後，plugin log 裡的 `Feature gates: map[string]bool{…, "TimeSlicingSettings":true, …}` 確認開關生效。
+這裡要分清楚兩種開關。Day 6 的[「把差異做在 driver 這一層」](sprint1-day6-dra-simulated-devices.md#mine-1)說的是 Kubernetes API server 的開關，AKS 不讓使用者改。driver 的開關則是 driver 程式自己讀的設定，在 chart 裡就是一個值，想開就開。用 `helm upgrade … --set featureGates.TimeSlicingSettings=true` 升級之後，plugin log 裡的 `Feature gates: map[string]bool{…, "TimeSlicingSettings":true, …}` 確認開關生效。
 
 接著 claim 就可以帶著參數送出去（`day7-manifests/04-timeslicing-config.yaml`）：
 
@@ -773,7 +737,7 @@ Default
 ```
 
 
-設定被接受，兩顆 pod 都起來，plugin log 沒有錯誤。容器裡看到的 `compute_mode` 是 `Default`，這是預期的：TimeSlicing 的 `interval` 調的是 GPU 在不同程序之間切換的時間片長度，不會改 compute mode。compute mode 要開 MPS（Multi-Process Service，NVIDIA 讓多個程序同時共用一張卡的服務）或設成 EXCLUSIVE_PROCESS（一張卡只准一個程序使用）才會改變；MPS 需要 driver 在節點上另外起一個背景程式，本章沒有示範。
+設定被接受，兩顆 pod 都起來，plugin log 沒有錯誤。容器裡看到的 `compute_mode` 是 `Default`，這是預期的：TimeSlicing 的 `interval` 調的是 GPU 在不同程序之間切換的時間片長度，不會改 compute mode。compute mode 要開 MPS 或設成 EXCLUSIVE_PROCESS（一張卡只准一個程序使用）才會改變；MPS 需要 driver 在節點上另外起一個背景程式，本章沒有示範。
 
 從 driver 這一側看共享，plugin log 最清楚。同一個 claim 的第二顆 pod 進來時，driver 不會重新準備裝置，直接回傳第一次準備好的結果：
 
@@ -784,9 +748,9 @@ Default
 ```
 
 
-這組範例說明的是：opaque config 在 AKS 上是通的，claim 帶著廠商參數送進 driver，driver 收得到也認得。device plugin 只能在 DaemonSet 的設定裡做整台節點一致的設定，沒辦法讓兩顆 pod 各用不同的共享策略。
+這組範例說明的是：opaque config 在 AKS 上是通的，claim 帶著廠商參數送進 driver，driver 接受並解析參數。device plugin 只能在 DaemonSet 的設定裡做整台節點一致的設定，沒辦法讓兩顆 pod 各用不同的共享策略。
 
-## 步驟 8:舊寫法的相容設定在 AKS 上不存在
+## 步驟 8:舊寫法的相容設定在 AKS 上不存在 {#mine-3}
 
 步驟 5 看到，DRA 配出去的卡不會出現在節點的 `nvidia.com/gpu` 上。chart 替還在用舊寫法的工作負載準備了一個相容設定：在 `resource.k8s.io/v1` 的叢集上，它會在 `gpu.nvidia.com` 這個 DeviceClass 上多寫一個 `extendedResourceName: nvidia.com/gpu`，讓還在寫 `resources.limits: nvidia.com/gpu: 1` 的 pod 也能由 DRA 配卡。這就是步驟 1 錯誤訊息裡 KEP 5004 要做的事。它需要 API server 開啟 `DRAExtendedResource` 這個 alpha 開關，而 AKS 上這個開關是關的。
 
@@ -808,7 +772,7 @@ $ kubectl get deviceclass extres-probe.example.com -o jsonpath='{.spec}'
 ```
 
 
-物件建立成功，沒有任何警告，但讀回來時 `extendedResourceName` 不在了。API server 對「所屬功能沒開的欄位」的處理方式是直接拿掉，不報錯。chart 寫進 `gpu.nvidia.com` 的那個欄位也會遇到同樣的事，所以在 AKS 上，改用 DRA 的工作負載都要改寫成 `resourceClaims`，不能新舊寫法並行。在開了 `DRAExtendedResource` 的叢集上，欄位會留下來，這個限制就不存在。要確認一個欄位有沒有留下來，唯一的辦法是建完之後讀回來比對。
+物件建立成功，沒有任何警告，但讀回來時 `extendedResourceName` 不在了。API server 對「所屬功能沒開的欄位」的處理方式是直接拿掉，不回報錯誤。chart 寫進 `gpu.nvidia.com` 的那個欄位也會遇到同樣的事，所以在 AKS 上，改用 DRA 的工作負載都要改寫成 `resourceClaims`，不能新舊寫法並行。在開了 `DRAExtendedResource` 的叢集上，欄位會留下來，這個限制就不存在。要確認一個欄位有沒有留下來，唯一的辦法是建完之後讀回來比對。
 
 ## 步驟 9:卸載與刪池
 
@@ -843,26 +807,6 @@ $ kubectl get nodes  →  只剩 system 節點池的節點
 
 ## 疑難排解
 
-### helm 說 deployed，kubelet plugin 的 DaemonSet 卻是 `DESIRED 0` {#mine-1}
-
-步驟 2 的值檔已經寫了 `affinity: null` 和 `nodeSelector`，照做過就不會遇到。用自己的值檔、或在別的平台上安裝時，可能會看到下面的情況。
-{#mine-2}
-
-**症狀**：`helm install --wait` 很快回報 `STATUS: deployed`，DeviceClass 也建好了，但 kubelet plugin 的 DaemonSet 是 `DESIRED 0`，ResourceSlice 一份都沒有，也沒有錯誤訊息、Pending 的 pod 或事件。
-
-**原因**：兩件事疊在一起。
-
-- chart 的 nodeAffinity 只認五種標籤：四種 NFD 標籤（`feature.node.kubernetes.io/pci-10de.present` 這一類）和 GPU Operator 的 `nvidia.com/gpu.present`。AKS 的 GPU 節點只有 `accelerator=nvidia` 與 `kubernetes.azure.com/accelerator=nvidia`，不在其中，所以沒有節點符合。
-- 想用 `affinity: {}` 清掉這組條件也沒用：helm 對 map 是逐鍵合併，`{}` 等於什麼都不改；list（例如 `tolerations`）才是整份取代。而 `DESIRED` 是 0 時，`--wait` 認為「0 顆都就緒」，照樣回報成功。
-
-**修法**：二選一。把 affinity 改成 `null`，再用自己的 `nodeSelector` 指定節點（本章的做法，搭配專用節點池）；或者裝 NFD，讓五個條件之一成立。不論哪一種，裝完都要自己看一次 `DESIRED`。Day 0 的[「device plugin 的 desired 是 0,節點沒有 `nvidia.com/gpu`」](sprint1-day0-azure-aks-foundation.md#mine-1)是同一類問題。
-
-### 舊寫法 `nvidia.com/gpu: 1` 的 pod 一直 Pending {#mine-3}
-
-**症狀**：DRA driver 裝好，DeviceClass 也在。這時把 `resources.limits: nvidia.com/gpu: 1` 舊寫法的 pod 送進只有 DRA 的節點，預期會看到它停在 Pending、事件是 `Insufficient nvidia.com/gpu`；把 `gpu.nvidia.com` 這個 DeviceClass 讀回來，預期會看到沒有 `extendedResourceName` 欄位。本章實際驗證的是步驟 8 那個測試用 DeviceClass，這兩個現象是依它推得的結果，沒有實際送舊寫法的 pod。
-
-**原因與修法**：見步驟 8 的「舊寫法的相容設定在 AKS 上不存在」。只會發生在 API server 關著 `DRAExtendedResource` 的叢集上，AKS 就是這種情況。要確認時，讀回來比對：`kubectl get deviceclass gpu.nvidia.com -o jsonpath='{.spec}'`。
-
 ### Job 跑完之後查不到它用過哪張卡 {#mine-5}
 
 **症狀**：一次性的 pod（`restartPolicy: Never`）跑完變成 `Completed`，pod 物件還在，但 `kubectl -n dra-gate get resourceclaims` 已經是 `No resources found`。pod 的 `status.resourceClaimStatuses` 還留著 claim 的名字（`gate-smi-gpu-pcq9k`），claim 本身卻不存在。
@@ -870,14 +814,6 @@ $ kubectl get nodes  →  只剩 system 節點池的節點
 **原因**：這是 Kubernetes 本身的行為，跟 driver 無關。kube-controller-manager 裡負責 ResourceClaim 的 controller 會在 pod 進入結束狀態時，主動刪掉 template 產生的 claim，好讓卡盡快被收回，不等 pod 物件被刪。
 
 **修法**：想留下「這個工作當時用了哪張卡」，有三種做法：在 pod 還在跑的時候查；改用具名 claim，它不會隨 pod 消失；或從容器裡把裝置身分印進 log，本章每顆 pod 都跑 `nvidia-smi -L` 就是這個用途。Job 和 CronJob 跑完之後，沒辦法再用 `kubectl get resourceclaim` 事後查核。用 device plugin 時，pod 的 `resources` 欄位會跟著 pod 物件留下來，這一點 DRA 反而比較難查。
-
-### 照 `nvidia-smi` 版本號寫的選擇器永遠不成立 {#mine-6}
-
-**症狀**：`nvidia-smi` 印的 driver 版本是 `580.159.04`，ResourceSlice 上的 `driverVersion` 卻是 `580.159.4`。用 `== '580.159.04'` 寫的選擇器永遠不成立，pod 停在 Pending，事件只有那句不說原因的 `cannot allocate all claims`。
-
-**原因**：driver 把 NVML 回傳的字串轉成 semver 再轉回字串（`cmd/gpu-kubelet-plugin/deviceinfo.go`），前導零被拿掉了。`cudaComputeCapability` 也一樣，`7.5` 變成 `7.5.0`。
-
-**修法**：這兩個屬性都是 version 型，CEL 裡用版本比較，不要用字串相等。寫任何屬性選擇器之前，先把 ResourceSlice 印出來，照上面的值寫，不要照 `nvidia-smi` 的輸出寫。
 
 ## 想一想
 
@@ -890,6 +826,22 @@ $ kubectl get nodes  →  只剩 system 節點池的節點
 DRA 的 driver 做兩件事：把節點上的卡寫成 ResourceSlice，以及在 pod 啟動前把配到的卡準備好。這一章在一張 T4 上把這兩件事都看了一遍。driver 的 kubelet plugin 要部署到節點上，靠的是節點標籤，標籤對不上時 DaemonSet 的 `DESIRED` 會是 0，而 helm 不會告訴你；ResourceSlice 上的屬性是寫選擇器唯一的依據，版本號被正規化過，要照它寫；卡進到容器靠的是 CDI 宣告檔，不是 `NVIDIA_VISIBLE_DEVICES`。之後 DRA 要卡失敗時，可以照這個順序查：DaemonSet 有沒有跑起來、claim 有沒有配到裝置、節點上有沒有宣告檔、容器裡有沒有裝置檔。另外要記得，DRA 的卡不會出現在 `describe node` 上，template 產生的 claim 在 pod 結束時就被刪掉，所有依賴 `nvidia.com/gpu` 的工具在 DRA 節點上都看不到卡。
 
 ## 延伸閱讀
+
+### PCIe 拓樸屬性為什麼缺少 {#mine-4}
+
+步驟 3 的 ResourceSlice 沒有 `pcieRoot` 屬性。PCIe Root Complex（PCIe 根節點）是 CPU 這一側連出 PCIe 匯流排的起點，`pcieRoot` 標出這張卡掛在哪一個根節點底下，多卡機器上可以用它把兩張卡配在同一條 PCIe 路徑下。plugin log 的警告如下：
+
+```text
+W0805 08:45:31.616654 nvlib.go:543] error getting PCIe root for device 0, continuing without attribute:
+  failed to resolve PCIe Root Complex for PCI Bus ID 0001:00:00.0:
+  symlink target for PCI Bus ID 0001:00:00.0 is invalid: it must start with devices/pci:
+  devices/LNXSYSTM:00/LNXSYBUS:00/ACPI0004:00/MSFT1000:00/47505500-…/pci0001:00/0001:00:00.0
+```
+
+
+driver 讀 `/sys` 底下的路徑來找 PCIe 根節點，而且要求路徑以 `devices/pci` 開頭。Azure 的 GPU 虛擬機透過 VMBus（Hyper-V 在主機與虛擬機之間傳遞裝置的通道）把實體卡交給虛擬機，路徑的開頭變成 `devices/LNXSYSTM:00/…`，解析就失敗了。driver 印一行警告後繼續執行，不影響整張卡的配置；受影響的只有多卡機器上依 PCIe 拓樸挑卡的選擇器，這類選擇器在 Azure 的 N 系列機型上寫不出來。
+
+### 參考文件
 
 想再深入，可以從這幾份開始：
 

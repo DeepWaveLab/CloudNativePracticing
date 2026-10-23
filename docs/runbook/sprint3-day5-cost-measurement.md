@@ -2,15 +2,17 @@
 
 ![WebAssembly 官方標誌](../assets/logos/webassembly-icon-color.svg){ align=right width="95" }
 
-你大概讀過這類說法：「wasm 冷啟動比容器快一個數量級」「wasm 比容器輕」。想在自己的叢集上驗證，最直接的做法是拿同一支程式，一次編成 wasm 交給 Day 4 裝好的 wasmedge shim，一次編成一般執行檔交給 runc，各啟動 50 次。結果出來，wasmedge 的中位數是 167 毫秒，runc 是 173.5 毫秒。可以說 wasm 快了 6.5 毫秒嗎？再跑一批，換成快 10.5 毫秒，但這次差值的信賴區間不再包含 0。
+你大概讀過這類說法：「wasm 冷啟動比容器快一個數量級」「wasm 比容器輕」。想在自己的叢集上驗證，最直接的做法是拿同一支程式，一次編成 wasm 交給 Day 4 裝好的 wasmedge shim，一次編成一般執行檔交給 runc，各啟動 50 次。結果出來，wasmedge 的中位數是 167 毫秒，runc 是 173.5 毫秒。可以說 wasm 快了 6.5 毫秒嗎？再跑一批，換成快 10.5 毫秒。這點差距是否只是量測的波動？
 
 這一章在一顆節點上比較容器建立、執行到清理的總時間與記憶體，再說明映像大小的比較條件，重點放在每個數字量完之後要問的問題：量具本身有多少雜訊，差距有沒有大過雜訊，兩個數字是不是在同一個條件下量的。讀完之後，拿到兩組啟動時間或記憶體讀數時，你能判斷差距能不能拿來排名，也能說出 wasm 容器在節點上的記憶體花在哪裡。
 
 ## 步驟 1: 先確認 Day 4 的 shim 還在不在 {#step-1}
 
-Day 4 在節點上裝了 109 MiB 的 wasmedge shim、在 containerd 設定裡加了 8 行，也建了 `wasmedge` 這個 RuntimeClass。如果兩章之間你把叢集停掉再啟動（`az aks stop`／`start`），可能遇到節點 VM 被替換，寫在舊 VM 磁碟上的東西就跟著消失。動手量之前，先確認節點現在的狀態。
+Day 4 在節點上裝了 109 MiB 的 wasmedge shim、在 containerd 設定裡加了 8 行，也建了 `wasmedge` 這個 RuntimeClass。動手量之前，先在本機執行 `kubectl get node -o jsonpath='{.items[0].status.runtimeHandlers[*].name}'`。這個完整 JSONPath 取自重裝腳本 `42-reinstall-wasmedge.sh` 第 55 行；`runtimeHandlers` 是 kubelet 回報節點有哪些 handler 的欄位。
 
-做法是照 [Day 1 步驟 3](sprint3-day1-three-generations.md) 存基準的同一套指令，再存一份目前的節點狀態（檔名用 `day5-s0-` 開頭），跟 Day 1 的基準比對；`runtimeHandlers` 是 kubelet 回報「這顆節點實際能跑哪些 handler」的欄位，Day 1 看過：
+如果清單裡有 `wasmedge`，再照 [Day 1 步驟 3](sprint3-day1-three-generations.md) 的方式確認 shim 檔案與 containerd 設定仍在；三者都正常就直接進入步驟 2。若有缺失，再依本步驟末尾的 Day 4 連結補齊缺少的部分，不要重複加入已存在的設定。
+
+如果兩章之間節點 VM 被替換，寫在舊 VM 磁碟上的安裝與設定可能消失。以下保留一組缺失時的對照紀錄：用 Day 1 的指令將目前狀態存成 `day5-s0-` 開頭的檔案，再與基準比對。區塊裡的 `{…runtimeHandlers}` 是不可照打的簡寫，查詢時請使用上方的完整 JSONPath。
 
 ```console
 $ diff <Day1 基準>/baseline-containerd-config.toml day5-s0-containerd-config.toml
@@ -25,7 +27,7 @@ $ kubectl get node -o jsonpath='{…runtimeHandlers}'
 ['', 'runc', 'untrusted']                      ← wasmedge 不在了
 ```
 
-三處都回到 Day 1 的樣子：containerd 設定和基準逐字相同，shim 檔案不在，`runtimeHandlers` 裡也沒有 `wasmedge`。Day 4 在節點上做的改動，全部隨舊 VM 消失。
+這組紀錄中，containerd 設定和 Day 1 基準逐字相同，shim 檔案不在，`runtimeHandlers` 裡也沒有 `wasmedge`。遇到這三項都缺失的情況，才需要重做完整安裝。
 
 再看叢集這一側：
 
@@ -49,7 +51,7 @@ wasmtime-spin-v2    wasmtime-spin-v2
 
 這個結果也影響 [Day 8](sprint3-day8-reversibility.md) 的做法。Day 8 要移除 SpinKube，再把節點的 containerd 設定和 Day 1 的基準逐字比對，確認拆得乾淨。如果比對期間換了 VM，結果相同也可能只是新節點沒有安裝過那些元件。所以 Day 8 的移除和比對要在同一個 VM 生命週期內做完，中間不能停機。
 
-要量 wasmedge，就得先把 shim 裝回去：重做 Day 4 的[安裝 shim](sprint3-day4-wasmedge.md#install-shim)、[設定 handler](sprint3-day4-wasmedge.md#configure-handler)與[映像解包設定](sprint3-day4-wasmedge.md#run-images)。RuntimeClass 還在時，不必重建它。裝完在本機執行完整指令 `kubectl get node -o jsonpath='{.items[0].status.runtimeHandlers}'`，`runtimeHandlers` 裡應該又出現 `wasmedge`。
+需要補回缺失項目時，依序參照 Day 4 的[安裝 shim](sprint3-day4-wasmedge.md#install-shim)、[設定 handler](sprint3-day4-wasmedge.md#configure-handler)與[映像解包設定](sprint3-day4-wasmedge.md#run-images)。RuntimeClass 還在時，不必重建它。裝完在本機執行完整指令 `kubectl get node -o jsonpath='{.items[0].status.runtimeHandlers}'`，`runtimeHandlers` 裡應該又出現 `wasmedge`，確認後進入步驟 2。
 
 ## 步驟 2: 一份原始碼，三個目標
 
@@ -179,7 +181,24 @@ oras push "${R}-comp:1h" \
   payload.wasm:application/wasm
 ```
 
-映像大小這一欄，本課的驗證沒有留下成品的大小紀錄，所以本章不給數字。自己做的話，在 `/out` 裡跑 `ls -l` 看三個檔案的大小，再用 `crane manifest` 看每個映像的 layer 大小；比較時記得只拿 `-wasm` 和 `-native-scratch` 這兩個打包方式相同的映像來比。
+比較大小時，分別記錄三個成品的檔名、位元組數與 SHA-256，以及每個映像的 reference、各 layer 的大小與 digest。檔案大小和映像 layer 大小分開記錄；映像只拿 `-wasm` 和 `-native-scratch` 這兩個打包方式相同的版本來比。
+
+在 builder pod 裡執行以下指令，保存 `ls -l` 的檔案大小欄位，雜湊會寫入 `/out/sha256.txt`。這三行取自建置腳本 `43-build-one-source.sh` 第 60–62 行：
+
+```bash
+cd /out
+ls -l
+sha256sum payload-* > /out/sha256.txt
+```
+
+接著沿用打包時的 `R`，讀取各映像的 manifest 並存成 JSON；從 `layers` 裡記下 `size` 與 `digest`。以下逐字取自 `45-package-and-push.sh` 第 45–48 行：
+
+```bash
+for n in wasm native-scratch native-debian comp; do
+  echo "=== ${R}-${n}:1h"
+  crane manifest "${R}-${n}:1h" | tee "/out/manifest-${n}.json"; echo
+done
+```
 
 ## 步驟 3: 先量量具本身的雜訊
 
@@ -196,7 +215,7 @@ kubectl -n wasmlab exec -it "$NODE_SHELL_POD" -- nsenter -t 1 -m -- bash
 
 在開始量之前，要先回答一個問題：計時這件事本身要花多少時間、會晃動多少？`ctr` 每次要啟動一個新的行程、連到 containerd 再回來，這段時間不管跑什麼容器都會付。單一樣本的波動不能直接當成兩組差值的判定門檻，後面會用重抽樣估計差值的不確定性。
 
-所以先量一組**對照組**（null control）：用同一支 `ctr` 下一個什麼都不做的指令 `ctr version`，只問 containerd 的版本，不建立任何容器。這組數字讓我們知道基本命令往返的耗時；它不是 runtime 差距必須超過的門檻。下面保留歷史採樣程式，先量 50 次對照組，再交錯量兩個 runtime。這份程式沒有檢查每次命令是否成功，失敗也會記下時間，因此不能直接拿來收集新的有效樣本：
+所以先量一組**對照組**（null control）：用同一支 `ctr` 下一個什麼都不做的指令 `ctr version`，只問 containerd 的版本，不建立任何容器。這組數字讓我們知道基本命令往返的耗時；它不是 runtime 差距必須超過的門檻。下面的採樣程式依驗證時的 `48-measure-node.sh` 改寫成直接展開的形式（改寫版本本課沒有實跑），先量 50 次對照組，再交錯量兩個 runtime。這份程式沒有檢查每次命令是否成功，失敗也會記下時間，因此不能直接拿來收集新的有效樣本：
 
 ```bash
 W=ttl.sh/<prefix>-wasm:1h
@@ -270,7 +289,7 @@ runc       50   148.0   165.0   171.5   181.8   255.0    16.8
 <text x="530" y="186" font-size="13" font-weight="600" fill="var(--md-default-fg-color)">171.5</text>
 </svg>
 
-wasmedge 和 runc 的長條幾乎一樣長，兩者都遠高於 16 毫秒的地板。兩批的中位數都是 wasmedge 略低，分別低 6.5 和 10.5 毫秒。問題在於：wasmedge 自己的 IQR 就有 15 到 22.5 毫秒，差 6.5 毫秒會不會只是這一批剛好抽到比較快的幾次？
+wasmedge 和 runc 的長條幾乎一樣長，兩者都遠高於 16 毫秒的版本查詢對照值。兩批的中位數都是 wasmedge 略低，分別低 6.5 和 10.5 毫秒。問題在於：wasmedge 自己的 IQR 就有 15 到 22.5 毫秒，差 6.5 毫秒會不會只是這一批剛好抽到比較快的幾次？
 
 ### 用 bootstrap 估計差距的範圍
 
@@ -294,18 +313,18 @@ verdict: measurable
 
 畫在一條數線上，橘色虛線是「差距為 0」：
 
-![數線上兩條信賴區間：批次 A 從 -16.0 到 +1.0 毫秒，觀察值 -6.5，跨過 0；批次 B 從 -16.5 到 -5.0 毫秒，觀察值 -10.5，沒有跨過 0。對照之下，wasmedge 減地板的區間落在 +141 到 +157 毫秒](../assets/diagrams/s3d5-ci.svg)
+![數線上兩條信賴區間：批次 A 從 -16.0 到 +1.0 毫秒，觀察值 -6.5，跨過 0；批次 B 從 -16.5 到 -5.0 毫秒，觀察值 -10.5，沒有跨過 0。對照之下，wasmedge 減版本查詢對照值的區間落在 +141 到 +157 毫秒](../assets/diagrams/s3d5-ci.svg)
 
 照著圖看兩件事。第一，批次 A 的區間剛好越過 0，批次 B 的區間停在 -5，兩批的點估計都偏向 wasmedge 較短，區間也大幅重疊；差別是 A 包含 0、B 不包含 0，不能說效果方向相反。第二，就算採信批次 B，差距也在 5 到 16.5 毫秒之間，跟一次啟動的 160 多毫秒比，約占數個百分點，還要看這個差距對應用是否有實際影響。
 
-同樣的方法拿來比 wasmedge 和地板：
+同樣的方法拿來比 wasmedge 和版本查詢對照值：
 
 ```text
 wasmedge vs harness   批次 A CI = [+144.0, +157.0] ms   measurable
                       批次 B CI = [+141.0, +149.5] ms   measurable
 ```
 
-wasmedge 比地板多出約 150 毫秒，兩批都很明確。
+wasmedge 比版本查詢對照值多出約 150 毫秒，兩批都很明確。
 
 ### 這組數字能說什麼
 
@@ -313,7 +332,7 @@ wasmedge 比地板多出約 150 毫秒，兩批都很明確。
 
 wasmedge 比版本查詢多出的約 150 毫秒，包含好幾個階段。本課沒有分段計時，不能判定其中多少來自 cgroup、shim、程式本身或清理。若要比較純啟動或 HTTP 可用時間，必須另選一致的開始與結束條件。
 
-增加樣本與批次可讓估計更有依據，但不保證某一種判定一定成立。本課沒有跑第三批。
+要檢查結果是否穩定，可在相同條件下增加獨立批次。每批維持相同的暖機、版本查詢與交錯採樣方式，依步驟 3 的要求保留退出碼與錯誤；把各批有效樣本分開保存，再用相同統計程式重算中位數、IQR 與差值的信賴區間。增加樣本與批次可讓估計更有依據，但不保證某一種判定一定成立。
 
 ## 步驟 5: 記憶體
 
@@ -369,19 +388,56 @@ runc      常駐  0.1 MiB  +4.5 MiB/容器  1 行程/容器
 <text x="207" y="211" font-size="12.5" font-weight="600" fill="var(--md-default-fg-color)">13.6</text>
 </svg>
 
-圖上是直接量到的 PSS：1–3 個容器時，wasmedge 約 48–67 MiB，runc 約 4.6–13.6 MiB。這組樣本中，wasmedge 每個容器有 4 個 shim 行程，runc 有 1 個；但資料沒有把每一頁記憶體的用途分開，不能把推估的固定項全歸給執行期程式碼。
+圖上是直接量到的 PSS：1–3 個容器時，wasmedge 約 48–67 MiB，runc 約 4.6–13.6 MiB。這組樣本中，wasmedge 每個容器有 4 個 shim 行程，runc 有 1 個；這是本次樣本的正常觀察，不是故障。計數使用 `pgrep -fc 'containerd-shim.*cnp5'`，取自並行取樣腳本第 43 行，只計入命令列帶 `cnp5` 的 shim。同時跑 3 個容器時，兩種 runtime 分別數到 12 與 3 個行程；直接用 `pgrep -fc containerd-shim` 會混入其他 namespace 的容器。但資料沒有把每一頁記憶體的用途分開，不能把推估的固定項全歸給執行期程式碼。
 
 固定項加上容器數乘以增量，可以作為這組樣本的近似模型。要用於更大規模的容量規劃，還要在目標容器數與工作負載下取樣；shim 檔案大小也不等於執行時的實體記憶體用量。
 
 ### 容器自己的記憶體
 
-shim 之外，容器裡的程式自己用多少？cgroup v2 是 Linux 用來分組計帳與限制資源的機制，每個容器在它底下有自己的目錄，其中 `memory.current` 是目前算在這個容器頭上的記憶體，包含它與子 cgroup 的計帳用量及檔案快取等項目；它不是記憶體限制或峰值，也不能直接當作 RSS。以下是建立與讀值的簡寫。實際採樣在啟動後等 5 秒，從容器 PID 的 `/proc/<pid>/cgroup` 取得路徑，再讀 `memory.current`；不能假設每個節點都會使用下面簡寫的固定路徑。完整程序見[記憶體取樣腳本](../assets/labs/s3d5/51-measure-memory.sh)：
+shim 之外，容器裡的程式自己用多少？cgroup v2 是 Linux 用來分組計帳與限制資源的機制，每個容器在它底下有自己的目錄，其中 `memory.current` 是目前算在這個容器頭上的記憶體，包含它與子 cgroup 的計帳用量及檔案快取等項目；它不是記憶體限制或峰值，也不能直接當作 RSS。
+
+以下保留原有簡寫供核對，請勿照打。固定的 cgroup 路徑應改成先查容器 PID，再從 `/proc/<pid>/cgroup` 取得路徑；這段簡寫修正後的寫法本課沒有實跑。要重現既有量測，請使用後面從驗證素材逐字補入的完整程序：
 
 ```bash
 ctr -n cnp5 run -d --runtime io.containerd.wasmedge.v1 "$W" memw /payload.wasm stay 120
 ctr -n cnp5 run -d "$C" memc /payload stay 120
 cat /sys/fs/cgroup/cnp5/memw/memory.current /sys/fs/cgroup/cnp5/memc/memory.current
 ```
+
+以下取自[記憶體取樣腳本](../assets/labs/s3d5/51-measure-memory.sh)第 12、19–40、48–51 行，在步驟 3 的節點 shell 執行，沿用已設定的 `W`、`C`。先定義讀值函式，再啟動容器、等 5 秒，查 PID 與 cgroup 路徑，讀值後清理：
+
+```bash
+NSP=cnp5
+report() {
+  local id="$1" label="$2"
+  local pid cg path
+  pid=$(ctr -n $NSP task ls | awk -v i="$id" '$1==i{print $2}')
+  cg=$(cat /proc/"$pid"/cgroup | head -1 | cut -d: -f3)
+  path=/sys/fs/cgroup${cg}
+  echo "--- $label  container=$id  pid=$pid"
+  echo "    cgroup            = $cg"
+  echo "    memory.current    = $(cat "$path"/memory.current) bytes"
+  echo "    memory.peak       = $(cat "$path"/memory.peak 2>/dev/null || echo n/a) bytes"
+  echo "    anon              = $(awk '$1=="anon"{print $2}' "$path"/memory.stat) bytes"
+  echo "    file              = $(awk '$1=="file"{print $2}' "$path"/memory.stat) bytes"
+  echo "    procs in cgroup   = $(wc -l < "$path"/cgroup.procs)"
+  ps -o pid,rss,comm -p "$pid"
+}
+
+ctr -n $NSP run -d --runtime io.containerd.wasmedge.v1 "$W" memw /payload.wasm stay 120
+ctr -n $NSP run -d "$C" memc /payload stay 120
+sleep 5
+
+report memw wasmedge
+report memc runc
+
+ctr -n $NSP task kill -s SIGKILL memw 2>/dev/null
+ctr -n $NSP task kill -s SIGKILL memc 2>/dev/null
+sleep 3
+ctr -n $NSP c rm memw memc 2>/dev/null
+```
+
+以下保留原章節的讀值摘要；`mem.txt` 第 13–30 行記錄了對應的 PID、cgroup 路徑與讀值：
 
 ```text
 --- wasmedge
@@ -475,12 +531,6 @@ wasmcloud_ready  n=20  min 1422  p25 1979.5  median 2302  p75 5049.2  max 12699 
 **原因**：RuntimeClass 存在 etcd，handler 的實作（containerd 設定和 shim 檔案）寫在 VM 的磁碟上，換了 VM 只剩前者，見[步驟 1](#step-1)。
 
 **修法**：用 `kubectl get node -o jsonpath='{.items[0].status.runtimeHandlers}'` 確認 handler 不在之後，照 Day 4 的安裝 shim、設定 handler 與映像解包設定重裝。手動對節點做的任何改動，都要假設下一次換 VM 時會消失。
-
-### 節點上的 shim 行程數是容器數的 4 倍 {#mine-2}
-
-**症狀**：節點上同時跑 3 個 wasm 容器，`pgrep -fc containerd-shim` 數到 12 個行程；同樣 3 個原生容器只有 3 個。節點的記憶體也比用 wasm 檔案大小估的多。
-
-**原因**：runwasi 的 wasmedge shim 每個容器開 4 個行程，本課 1–3 個容器樣本的 PSS 也較高，見[步驟 5](#shim-memory)。38.8 MiB 與 9.3 MiB 是樣本推估的固定項與增量，外推前要再驗證。
 
 ### 乾淨的 host 一直分不到 workload {#mine-3}
 

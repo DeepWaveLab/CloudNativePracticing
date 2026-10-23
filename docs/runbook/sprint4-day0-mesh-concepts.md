@@ -2,7 +2,9 @@
 
 ![Kubernetes 官方標誌](../assets/logos/kubernetes-icon-color.svg){ align=right width="80" }
 
-購物網站已經能從瀏覽器打開，訂單服務也能呼叫付款服務。但團隊提出兩個新要求：入口要支援 HTTP/3，內部服務則要驗證彼此身分，避免任何能連到付款服務的程式都能送出請求。這兩件事發生在不同的連線上，更換入口元件不會自動完成內部驗證。讀完這章，你要能沿著請求路徑，判斷需求應由入口閘道、服務網格，還是 Pod 網路處理。
+購物網站已經能從瀏覽器打開，訂單服務也能呼叫付款服務。但團隊提出兩個新要求：入口要支援 [HTTP/3](https://www.rfc-editor.org/rfc/rfc9114.html)（HTTP 的第三版，用來傳送網頁請求與回應），內部服務則要驗證彼此身分，避免任何能連到付款服務的程式都能送出請求。這兩件事發生在不同的連線上，更換入口元件不會自動完成內部驗證。
+
+前一個 Sprint 探討 WebAssembly（wasm）程式如何執行，本章接著處理服務之間如何通訊。讀完這章，你要能沿著請求路徑，判斷需求應由入口閘道、服務網格，還是 Pod 網路處理。
 
 ## 先找出要管理的是哪一段連線
 
@@ -22,7 +24,7 @@ Gateway 把請求交給訂單服務後，訂單服務仍可能另外呼叫付款
 
 **mTLS（雙向 TLS）**讓連線兩端都出示憑證並驗證對方，同時加密連線。服務網格可以替應用程式處理這件事，但你仍要決定哪些身分有權存取哪些服務。加密、身分驗證與授權是相關但不同的要求：連線已加密，不表示來源已獲准執行所有操作。
 
-[Day 2](sprint4-day2-istio-ambient.md) 會用 Istio ambient 觀察服務身分；[Day 3](sprint4-day3-cilium-mesh.md) 則會分別檢查 WireGuard 加密與 HTTP 存取規則。比較時必須分開這些證據，不能用「都有加密」直接判定功能相同。
+[Istio ambient](https://istio.io/latest/docs/ambient/overview/) 是 Istio 不需在每個應用 Pod 內放代理的服務網格模式；[WireGuard](https://www.wireguard.com/) 則用來建立加密的網路通道。[Day 2](sprint4-day2-istio-ambient.md) 會用 Istio ambient 觀察服務身分；[Day 3](sprint4-day3-cilium-mesh.md) 則會分別檢查 WireGuard 加密與 HTTP 存取規則。比較時必須分開這些證據，不能用「都有加密」直接判定功能相同。
 
 ## 不在每個 Pod 放代理，可以怎麼做？
 
@@ -32,7 +34,7 @@ Istio ambient 將工作拆成兩部分：每個節點的 **ztunnel** 處理服�
 
 Cilium 則以 eBPF 處理網路轉送與部分網路政策，並可整合核心的 WireGuard 加密功能。需要檢查 HTTP 方法或路徑時，流量會導向 Envoy。WireGuard 執行加密與 eBPF 導引封包，是不同的工作。
 
-因此，選擇不使用 sidecar，仍然要問代理部署在哪裡，以及哪些請求會經過代理。本課不以某種部署方式判定所有情境的效能，也不把 sidecar 描述成已經不能使用。
+因此，選擇不使用 sidecar，仍然要問代理部署在哪裡，以及哪些請求會經過代理。
 
 ## 看到 HTTP 規則，就找出誰會解析 HTTP
 
@@ -46,7 +48,7 @@ Cilium 則以 eBPF 處理網路轉送與部分網路政策，並可整合核心�
 | 內部服務的 HTTP 連線限制 | Istio ambient | waypoint 的 Envoy |
 | Cilium 網路政策中的 HTTP 方法與路徑限制 | Cilium | Cilium 管理的 Envoy |
 
-Cilium 同時提供 CNI、服務通訊與 Gateway API 相關功能，因此會在多個需求中出現。Istio ambient 也可以使用 Cilium 提供的 Pod 網路。比較產品前，先確認比較的是入口、服務身分、HTTP 政策，還是底層網路，才能避免把不同範圍的功能放在一起。
+[Gateway API](https://gateway-api.sigs.k8s.io/docs/introduction/) 是 Kubernetes 用來設定閘道與流量路由的一組 API。Cilium 同時提供 CNI、服務通訊與 Gateway API 相關功能，因此會在多個需求中出現。Istio ambient 也可以使用 Cilium 提供的 Pod 網路。比較產品前，先確認比較的是入口、服務身分、HTTP 政策，還是底層網路，才能避免把不同範圍的功能放在一起。
 
 ## 想一想
 
@@ -59,8 +61,6 @@ Cilium 同時提供 CNI、服務通訊與 Gateway API 相關功能，因此會�
 先沿著請求找出管理範圍，再選元件：Gateway 處理外部入口，mesh 處理內部服務通訊，CNI 提供 Pod 網路。接著把加密、身分驗證與 HTTP 政策分別列出，確認誰在什麼位置執行它們。[Day 1](sprint4-day1-envoy-gateway.md) 會先完成入口路由，再驗證用戶端到 Envoy 的 HTTP/3 連線。
 
 ## 延伸閱讀
-
-想再深入，可以從這幾份開始：
 
 - [Istio ambient 架構](https://istio.io/latest/docs/ambient/architecture/)：ztunnel 與 waypoint 的責任。
 - [Cilium Service Mesh](https://docs.cilium.io/en/stable/network/servicemesh/)：Cilium 的服務通訊功能與資料路徑。

@@ -2,7 +2,7 @@
 
 ![Agones 官方標誌](../assets/logos/agones-icon-color.svg){ align=right width="90" }
 
-平台準備了兩台空閒遊戲伺服器，其中一台被刪除後，如果沒有人補建，下一組玩家就少了一個可用選擇。這章會用 Fleet 宣告兩個副本，再比較刪除前後的名稱、狀態與埠，判斷控制器補出的是新實例，還是原實例重新啟動。
+平台準備了兩台空閒遊戲伺服器，其中一台被刪除後，如果沒有人補建，下一組玩家就少了一個可用選擇。上一章手動建立單一 GameServer，這章改由 Fleet 持續維持數量。我們會宣告兩個副本，再比較刪除前後的名稱、狀態與埠，判斷控制器補出的是新實例，還是原實例重新啟動。
 
 ## Fleet 維持副本，Ready 表示是否能分配
 
@@ -10,7 +10,7 @@
 
 新伺服器需要排程、取得映像、啟動遊戲程式並回報 Ready。預先準備可以減少玩家等待，但 Fleet 的固定 replicas 是總副本目標，並不自動代表固定的空閒容量。這章尚未分配任何伺服器，所以兩個副本最後都是 Ready；下一章配置一個之後，就會看出總數與可用數的差異。
 
-在 `Fleet` 裡，`Scheduled` 表示 Agones 已經替 `GameServer` 建立 pod 並安排到節點；`Ready` 表示遊戲程式已透過 SDK 告訴 Agones 可以接玩家；`Allocated` 表示已被 allocation 分配；本課的一場對戰一台伺服器模式不會再把它作為 Ready 候選；`Shutdown` 則是遊戲結束或控制面收掉時的狀態。
+在 `Fleet` 裡，`Scheduled` 表示 Agones 已經替 `GameServer` 建立 pod 並安排到節點；`Ready` 表示遊戲程式已透過 SDK 告訴 Agones 可以接玩家。
 
 下面先列出要觀察的變化。刪除後應該有一個新名稱，而未刪除的實例保持原樣；稍後會用實際輸出核對。
 
@@ -92,17 +92,24 @@ simple-game-server-ql5ws-qdsfl   Scheduled   7358    ← Fleet 新建的，正�
 
 被刪的 `cmk28` 消失；沒被刪的 `fbkn4` 名稱與 port 都沒變；Fleet controller 建立一顆新的 `qdsfl` 補回 desired replicas，它先進 `Scheduled`，再轉成 `Ready`。這次建立的是新的 GameServer，並沒有復原被刪除實例中的遊戲記憶體狀態。
 
-Fleet 維持的是副本數，補回來的實例會換一個新名稱；沒被刪的 server 也不會因為補位而被重建。這組測試觀察到另一個 Ready 實例沒有被替換；它沒有測試活躍對戰的連線不中斷，也不能推廣成任意更新與故障下都不受影響。
+保留的 `fbkn4` 名稱與埠未變，只能確認這個實例沒有被替換，不能據此判定連線是否中斷，也不能推廣成任意更新與故障下都不受影響。
 
-要精準量補位時間時，不要只看一次 `kubectl wait --for=jsonpath readyReplicas=2` 的結果。刪除的瞬間，終止中的那顆可能還算在 ready 數裡，所以 wait 會短暫命中 2，接著才掉到 1，再由新 server 補回。改用連續取樣。
+最後再次查詢 GameServer 與 Fleet，確認補位的新名稱仍在清單中、兩個實例都 Ready，且 Fleet 的 `CURRENT` 回到 2：
 
-最後再次確認兩個實例都 Ready，且 Fleet 的 current 回到 2。只看到一筆 Scheduled，還沒有完成補足可用容量的檢查。驗證紀錄確認新實例後續轉為 Ready；上面的輸出則保留了中間狀態。
+```console
+$ kubectl get gameserver
+$ kubectl get fleet simple-game-server -o wide
+```
+
+如果新實例仍是 Scheduled，就等它完成準備後再查詢；只看到一筆 Scheduled，還沒有完成補足可用容量的檢查。
+
+判讀總數與可用數時，還要區分 `Allocated`：它表示已分配給玩家。在本課一場對戰一台伺服器的模式下，這台仍算在總副本數內，但不再是 Ready 候選，所以 `replicas: 2` 不代表隨時有兩台 Ready。
 
 ## 想一想
 
 1. Fleet 的 current 已是 2，但其中一台還是 Scheduled，可以說有兩台可立刻分配嗎？
 2. 新 GameServer 有不同名稱與埠，是否表示原對戰的記憶體狀態已恢復？
-3. `replicas: 2` 的 Fleet 有一台 Allocated，還能否期待自動維持兩台 Ready？下一章需要增加哪類機制？
+3. `replicas: 2` 的 Fleet 有一台 Allocated，還能否期待自動維持兩台 Ready？
 
 ## 小結
 

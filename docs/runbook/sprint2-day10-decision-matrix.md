@@ -96,27 +96,27 @@ Hubble 是看這些流量的工具。它的資料來自每顆節點上 Cilium ag
 
 ### 指令回報成功，工具卻沒有在做事
 
-`kubectl apply` 回 `created`、`helm upgrade` 回 `deployed`、DaemonSet 顯示 `READY 3/3`、pod 是 `Running`，工具卻沒有照你以為的方式運作。這個 sprint 裡出現過七次，可以分成三類。
+`kubectl apply` 回 `created`、`helm upgrade` 回 `deployed`、DaemonSet 顯示 `READY 3/3`、pod 是 `Running`，工具卻沒有照你以為的方式運作。檢查時可以分成三類。
 
 第一類是 DaemonSet 或 pod 看起來正常，節點上的 agent 卻沒在工作。Day 3 有一顆 Falco 被搶占，重新排回來之前那顆節點沒有監控，DaemonSet 卻一直顯示 `READY 3/3`；Day 6 的 Tetragon agent 冷啟動時退出過一次，pod 仍是 `Running`，`RESTARTS` 只多了一個 1，那段時間節點上沒有任何攔截（見 [Day 3](sprint2-day3-falco-basics.md#mine-1)、[Day 6](sprint2-day6-tetragon-enforcement.md#mine-1) 的疑難排解）。
 
-第二類是設定送進去了，執行者沒有照做。Day 4 的規則用了已淘汰的 `evt.dir`，`helm upgrade` 照樣回 `deployed`，寫成 `evt.dir = >` 的規則永遠不會觸發；Day 5 的 TracingPolicy `kubectl apply` 回 `created`，策略卻沒有載入；Day 8 的 CiliumNetworkPolicy 同樣回 `created`，政策無效，流量照常放行；Day 7 的 `az aks nodepool update` 回 `Succeeded`，taint 一點都沒改（見 [Day 4](sprint2-day4-falco-custom-rules.md#mine-2)、[Day 5](sprint2-day5-tetragon-basics.md#mine-4)、[Day 8](sprint2-day8-cilium-network-policy.md#mine-3)、[Day 7](sprint2-day7-cilium-kubeproxy.md#mine-7) 的疑難排解）。
+第二類是設定送進去了，政策卻沒有生效。Day 8 的 CiliumNetworkPolicy 回 `created`，政策無效，流量照常放行（見 [Day 8](sprint2-day8-cilium-network-policy.md#mine-3) 的疑難排解）。套用後仍要檢查工具的載入狀態，查詢方式見下方。
 
 第三類是工具照設計運作，應用卻壞了。Day 6 那條少了 `head` 的允許清單，讓應用的 pod 在 `1/1 Running`、零重啟、沒有新事件的狀態下輸出錯了 82 秒（Day 6 的[步驟 5](sprint2-day6-tetragon-enforcement.md#step-5)）。
 
-原因都一樣：這些回傳值和狀態來自管理平面，也就是 API server 上的物件和 DaemonSet 的計數，只代表指令被接受、pod 有在跑。規則或策略有沒有真的載入，只有節點上的 agent 和核心裡的 BPF 程式知道。下面這張圖由上往下是一個設定從你下指令到真正執行會經過的四層。
+原因都一樣：這些回傳值和狀態來自管理平面，也就是 API server 上的物件和 DaemonSet 的計數，只代表指令被接受、pod 有在跑。規則或策略有沒有真的載入，要查節點上的 agent 日誌、策略狀態與核心裡的 BPF policy map。下面這張圖由上往下是一個設定從你下指令到真正執行會經過的四層。
 
 ![四層由上往下：你下的指令（kubectl apply、helm upgrade，回報 created、deployed）、API 物件與 DaemonSet（kubectl get 看到 READY 3/3、Running、RESTARTS 0），這兩層屬於管理平面，全綠時下面兩層照樣可能沒在做事；虛線以下是執行者：節點上的 agent（以橘框強調，規則、策略真的載入了嗎）與核心裡的 BPF 程式與 map。右側列出往下問執行者的方法：Falco 看啟動日誌的 warning，Tetragon 看 tetra tracingpolicy list 的 STATE 欄，Cilium 看 cilium-dbg endpoint list 與 bpf policy get](../assets/diagrams/s2d10-ask-executor.svg)
 
 照著圖上的虛線看，驗收要問虛線以下的執行者。下面的指令都在前幾章跑過，`<tetragon-pod>`、`<endpoint-id>`、`<ns>` 換成你自己叢集裡的值：pod 名稱用 `kubectl -n tetragon get pods` 查，endpoint id 是 `cilium-dbg endpoint list` 第一欄的數字。
 
-Falco 看 pod 的啟動日誌，載入規則那一段不能有 warning 區塊：
+Falco 看 pod 的啟動日誌，必須看到 `Loading rules from:` 與預期載入的規則檔，而且不能有 warning 區塊；空輸出不算通過。下方保留原查詢指令，但帶 `-l` selector 時預設只取最後十行，可能漏掉規則載入段。正確寫法是在 `-c falco` 後、管線 `|` 前加上 `--tail=-1`，讀取所有可取得的日誌；修正後的寫法本課沒有實跑。參數行為見 [kubectl logs 官方文件](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_logs/)。
 
 ```bash
 kubectl -n falco logs -l app.kubernetes.io/name=falco -c falco | sed -n '/Loading rules from/,/syscall buffer/p'
 ```
 
-Tetragon 看 `STATE` 欄要是 `enabled`；冷啟動之後，再確認 `RESTARTS` 與 agent 日誌裡有沒有 `Loading sensor name=__base__`：
+Tetragon 看 `STATE` 欄要是 `enabled`；若是 `load_error`，代表策略載入失敗，要查 agent 日誌。冷啟動之後，再確認 `RESTARTS` 與 agent 日誌裡有沒有 `Loading sensor name=__base__`：
 
 ```bash
 kubectl -n tetragon exec <tetragon-pod> -c tetragon -- tetra tracingpolicy list
@@ -134,7 +134,7 @@ kubectl get cnp -n <ns>
 
 ### 監控元件被擠掉或掛掉，沒有任何指標會叫
 
-四套工具的 chart 裡，只有 Cilium 的 agent 與 `cilium-envoy` 設了 `priorityClassName`（`system-node-critical`），因為 agent 掛掉整顆節點就斷網。其他元件的 priority 都是 0，在滿載的節點上，排程器要騰出空間時最先被搶占的就是它們。沒設 resources 的那幾個還是 BestEffort，節點記憶體不夠時最先被 OOM 結束。被擠掉的時候，各自的後果不同：
+四套工具的 chart 裡，只有 Cilium 的 agent 與 `cilium-envoy` 設了 `priorityClassName`（`system-node-critical`）。Cilium agent 停止會影響政策更新等管理功能，但不代表整顆節點立即斷網：持久保留在 BPF 檔案系統中的 eBPF 資源，可讓既有資料平面在 agent 重啟或升級期間繼續運作（見 [Cilium 官方文件](https://docs.cilium.io/en/stable/operations/system_requirements/#mounted-ebpf-filesystem)）。其他元件的 priority 都是 0，在滿載的節點上，排程器要騰出空間時最先被搶占的就是它們。沒設 resources 的那幾個還是 BestEffort，節點記憶體不夠時最先被 OOM 結束。被擠掉的時候，各自的後果不同：
 
 - **Falco**：那顆節點少看到事件，DaemonSet 照樣顯示 `READY 3/3`（Day 3 的[「Falco pod 被搶佔，DaemonSet 卻顯示全部就緒」](sprint2-day3-falco-basics.md#mine-1)）。它的 requests 是 `100m/512Mi`，實際只用十幾到二十幾 m 的 CPU，在小節點上更容易排不進去（Day 3 的[「節點的 CPU 實際用量不高，Falco 卻排不進去」](sprint2-day3-falco-basics.md#mine-7)）。
 - **Falcosidekick**：事件照抓，但告警送不出去，Falco 這一側全部正常（Day 4 的[「sidekick 預設兩份副本、不給 resources，還會擠在同一顆節點」](sprint2-day4-falco-custom-rules.md#mine-6)）。
@@ -151,13 +151,17 @@ kubectl get cnp -n <ns>
 
 **Falco 的 incubating 與 sandbox 規則。** Day 3 量到預設只有 stable 的 25 條。官方規則庫另外有 incubating 與 sandbox 兩級，要自己裝。裝上之後重跑一次 Day 3 的閒置量測，就能知道多出來的規則在你的工作負載上會產生多少告警。
 
-**Falcosidekick 的 Web UI。** 它會另外建一個 Redis 和一個 UI 的 Deployment，Day 4 的叢集節點資源已經很緊，課程裡沒有任何步驟需要它，所以跳過了。
+**Falcosidekick 的 Web UI。** 它讓你在瀏覽器裡查看告警列表，啟用時會另外建立 Redis 與 UI 的 Deployment。需要用網頁瀏覽告警時，可以評估加入這個介面，並把兩個元件算進部署與容量規劃；本課沒有部署 Web UI。
 
 **Cilium 的 `ingressDeny`／`egressDeny`。** 前面講過多條政策取聯集，只會越加越寬。Cilium 有一組 deny 規則，可以表達「即使有其他政策允許也要擋」，課程沒有測。寫法見 Cilium 官方文件的網路政策章節。
 
 **Tetragon 的 `Signal` 配 `Override`。** 這是官方對「要確保操作不完成」建議的寫法，課程分別測了兩個動作，沒有測併用。Day 6 的結論只涵蓋掛在操作之前的檢查點；掛在其他位置時，照官方建議併用兩個動作。
 
-**host firewall、DNS 外送與 Hubble 匯出。** 這三件事在課程的環境裡都沒有處理。本課保留本機 host 的預設放行，hostNetwork pod 因而能連到同節點上受本課政策保護的目標。要堵這個洞，先限制誰能建立 hostNetwork pod：Kubernetes 內建的 Pod Security 標準裡，Baseline 等級就不允許 hostNetwork，一般工作負載的命名空間可以套用它，真正需要 hostNetwork 的系統元件另外放行。接著依流量路徑評估政策：本機 host 到 endpoint 的預設放行由 `--allow-localhost=policy` 交給 endpoint 政策控制；主機網路流量則另行評估 host firewall 與使用 `nodeSelector` 的叢集範圍政策。兩種設定不能混為一談，本課未驗證改動後的連通性或 Hubble 紀錄。FQDN 政策（用網域名稱而不是 IP 寫的對外連線規則）擋掉的域名照樣會被解析，要關掉這條路得把 DNS 比對樣式收成明確清單（Day 8 的[「被擋掉的網域照樣查得到、進了快取」](sprint2-day8-cilium-network-policy.md#mine-6)）。Hubble 的 flow 也沒有匯出到儲存，所以「接出去之後歷史有多深、成本多少」沒有實測答案。
+**host 網路政策。** 本課保留本機 host 的預設放行，hostNetwork pod 因而能連到同節點上受本課政策保護的目標。要限制這條路徑，先限制誰能建立 hostNetwork pod：Kubernetes 內建的 Pod Security 標準裡，Baseline 等級就不允許 hostNetwork，一般工作負載的命名空間可以套用它，真正需要 hostNetwork 的系統元件另外放行。接著依流量路徑評估政策：本機 host 到 endpoint 的預設放行由 `--allow-localhost=policy` 交給 endpoint 政策控制；主機網路流量則另行評估 host firewall，也就是針對節點本身網路流量的防火牆。這類叢集範圍政策用 `nodeSelector` 按節點標籤選出要套用的節點。兩種設定不能混為一談，可分別閱讀[本機 host 與 endpoint 的政策](https://docs.cilium.io/en/stable/security/policy/layer3/#access-to-from-local-host)與 [Host Policies](https://docs.cilium.io/en/stable/security/policy/host/)；本課未驗證改動後的連通性或 Hubble 紀錄。
+
+**DNS 查詢限制。** FQDN 政策是用網域名稱寫的對外連線規則，但限制連線目的地不等於限制 DNS 查詢。本課政策不允許連線的網域名稱，仍可透過 DNS 解析（Day 8 的[「被擋掉的網域照樣查得到、進了快取」](sprint2-day8-cilium-network-policy.md#mine-6)）。若要限制可查詢的名稱，還要把 DNS 比對樣式收成明確清單。可從官方的 [DNS 政策說明](https://docs.cilium.io/en/stable/security/dns/)閱讀 `toFQDNs` 與 `rules.dns` 的分工；本課未驗證收緊查詢清單後的行為。
+
+**Hubble flow 保存。** 需要事後查詢流量時，要把 flow 匯出並保存。Hubble exporter 是將 flow 寫成日誌的元件，可再由日誌收集系統送往儲存服務，設定入口見 [Configuring Hubble exporter](https://docs.cilium.io/en/stable/observability/hubble/configuration/export/)。保存前也要處理前面提到的 HTTP 敏感標頭。本課沒有匯出到儲存，所以可保存多久、儲存成本多少，都沒有實測答案。
 
 **規模與長時間運行。** Day 8、Day 9 是單節點，所以 Hubble relay 最主要的功能，也就是跨節點彙整，等於沒有測；規則與政策的數量也都在個位數，規則變多之後成本怎麼成長還看不出來。最長的連續攔截只跑了十幾分鐘，記憶體隨時間的變化只觀察了幾小時。延遲方面，Day 7 換掉 kube-proxy 之後的延遲改善沒有可信的結論（負載不對等，雜訊大於差距），Day 8 的 L7 政策成本則量得出來（[Day 8 步驟 6](sprint2-day8-cilium-network-policy.md#step-6)）。
 
@@ -173,7 +177,7 @@ kubectl get cnp -n <ns>
 
 ## 小結
 
-這個 sprint 的四套工具，差別在它們把程式掛在哪裡、用什麼認人，以及最後交出什麼：bpftrace 交原始事件給正在看的人，適合診斷；Falco 在使用者空間比對規則，交出有名字的告警；Tetragon 在核心的掛勾點上過濾，能在操作發生前把它擋下；Cilium 在 pod 的網路介面上決定誰能連誰，Hubble 讓你看到這些連線。依 cgroup 認人的工具會被 `nsenter` 騙過，依網路介面認人的工具不會被繞過，卻說不出是哪個行程。之後遇到一套新的執行期安全或網路工具，先問它的執行點在哪裡，就能推出它的盲點；裝好之後，記得去問節點上的執行者，而不是只看 `kubectl` 的回傳。
+這個 sprint 的四套工具，差別在它們把程式掛在哪裡、用什麼認人，以及最後交出什麼：bpftrace 交原始事件給正在看的人，適合診斷；Falco 在使用者空間比對規則，交出有名字的告警；Tetragon 在核心的掛勾點上過濾，能在操作發生前把它擋下；Cilium 在 pod 的網路介面上決定誰能連誰，Hubble 讓你看到這些連線。行程執行 `nsenter` 後，依 cgroup 判定事件歸屬的工具仍會將事件歸在原 cgroup；若行程不在攔截策略的範圍內，就不受該策略攔截。依網路介面套用的政策仍會限制經過該介面的連線，但 Hubble 的 flow 說不出是哪個行程發起。之後遇到一套新的執行期安全或網路工具，先問它的執行點在哪裡，就能推出它的盲點；裝好之後，記得去問節點上的執行者，而不是只看 `kubectl` 的回傳。
 
 ## 延伸閱讀
 

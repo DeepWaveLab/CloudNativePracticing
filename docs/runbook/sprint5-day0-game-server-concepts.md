@@ -2,15 +2,15 @@
 
 ![Agones 官方標誌](../assets/logos/agones-icon-color.svg){ align=right width="90" }
 
-四名玩家正在同一個房間對戰，伺服器記憶體裡保存著角色位置與剩餘時間。這時 Pod 被替換，新 Pod 很快就 Running，副本數也恢復了，但原本那場對戰沒有回來。這章會從玩家與伺服器的關係出發，判斷單純維持 Pod 數量還缺哪些遊戲生命週期資訊。
+四名玩家正在同一個房間對戰，伺服器記憶體裡保存著角色位置與剩餘時間。這時 Pod 被替換，新 Pod 很快就 Running，副本數也恢復了，但原本那場對戰沒有回來。前面 Sprint 1–4 已走過排程、觀測、執行期、服務網格與機密運算，這章接著從執行環境轉向遊戲對戰的生命週期，判斷單純維持 Pod 數量還缺哪些資訊。
 
 ## 先分清楚伺服器副本與進行中的對戰
 
 **dedicated game server** 是專門執行遊戲對戰的伺服器程式。玩家共同參與的這段遊戲活動稱為 **session**；在本課的模型中，一場 session 的即時狀態保存在分配到的伺服器內。
 
-Kubernetes 可以執行有狀態工作負載，但一般 Deployment 不知道哪一台已分配給玩家、哪一台仍空閒，也不會自動把記憶體中的對戰狀態搬到另一個副本。因此「Pod 數量足夠」與「原對戰仍持續」是不同的要求。
+Kubernetes 可以執行有狀態工作負載，但一般 Deployment 未記錄伺服器是否已分配給玩家，也不會自動把記憶體中的對戰狀態搬到另一個副本。因此「Pod 數量足夠」與「原對戰仍持續」是不同的要求。
 
-**Agones** 在 Kubernetes 上增加遊戲伺服器的管理語意。它管理可分配與已分配的伺服器，讓更新和擴縮容能考慮這些狀態；它不會自動替任意遊戲實作斷線重連、對戰狀態複寫或災難恢復。
+**Agones** 在 Kubernetes 上增加遊戲伺服器的管理語意。它管理可分配與已分配的伺服器，讓更新和擴縮伺服器數量時能考慮這些狀態；它不會自動替任意遊戲實作斷線重連、對戰狀態複寫或災難恢復。
 
 ## 用三種物件表達不同的管理問題
 
@@ -18,7 +18,7 @@ Kubernetes 可以執行有狀態工作負載，但一般 Deployment 不知道哪
 
 GameServer 的 Pod 內會加入 **SDK sidecar**，讓遊戲程式回報健康狀態、準備完成與結束。這些訊號補上一般 Pod Running 沒有表達的資訊。例如程式已啟動，但地圖還在載入時，還不該把玩家分過去。
 
-下面把平台分配與玩家遊戲封包分開。上排決定誰取得哪一台伺服器，下排才是進行中的對戰流量。
+**hostPort** 是節點上對應到 Pod 容器連接埠的入口。下面把平台分配與玩家遊戲封包分開。上排決定誰取得哪一台伺服器，下排才是進行中的對戰流量。
 
 ![配對與伺服器分配使用控制流程，對戰封包走選定的伺服器](../assets/diagrams/s5d0-player-path.svg)
 
@@ -26,7 +26,7 @@ GameServer 的 Pod 內會加入 **SDK sidecar**，讓遊戲程式回報健康狀
 
 ## 本課先使用 UDP 直連
 
-**hostPort** 是節點上對應到 Pod 容器連接埠的入口。本課 Agones 範例讓用戶端連向節點外部 IP 與動態 hostPort，沒有在中間使用 Kubernetes Service。以下是官方 quickstart 的 UDP echo 互動範例，不是本章另做的實測：
+本課 Agones 範例讓用戶端連向節點外部 IP 與動態 hostPort，沒有在中間使用 Kubernetes Service。以下是官方 quickstart 的 UDP echo 互動範例，不是本章另做的實測：
 
 ```console
 $ nc -u <node-ip> 7190
@@ -40,20 +40,13 @@ ACK: Hello World !
 
 ## 登入、配對與遊戲連線是不同階段
 
-後續會加入 **Nakama**，提供玩家登入與即時配對等後端功能。玩家先透過 HTTP／gRPC 登入取得 session token，再以 WebSocket 維持配對連線；配對完成後，由後端要求 Agones 分配伺服器，再把連線資訊交給玩家。
+後續會加入 **Nakama**，提供玩家登入與即時配對等後端功能。玩家先透過 HTTP／gRPC 登入；用戶端呼叫登入 API 時使用的 **server key** 是伺服器設定值，放在用戶端裡不等於能證明用戶端未被修改。登入成功後取得的 **session token** 是玩家的登入憑證，用於後續 API 呼叫；這裡的 session 指登入狀態，與前面所說的一場對戰活動不同。
+
+配對時，用戶端帶著 session token 建立 **WebSocket** 長連線，送出配對請求後，持續在同一條連線等待伺服器主動推送配對結果。Nakama 回傳的 **matchmaker ticket** 代表一筆仍在排隊的配對請求，取消配對時用它指定要取消哪一筆。配對完成後，由後端要求 Agones 分配伺服器，再把連線資訊交給玩家。
 
 配對決定「哪些玩家一起玩」，allocation 決定「這組玩家使用哪台伺服器」。Agones 不會僅因收到 allocation 就替你完成玩家技能分組。
 
 [Day 4](sprint5-day4-quilkin-udp-proxy.md) 還會加入 **Quilkin**，也就是遊戲用 UDP proxy。用戶端可以先連 proxy，再由 proxy 把封包轉到選定 GameServer。此時 **routing token** 是選擇後端的資料，不能直接當成玩家身分或防作弊保證。
-
-幾種容易混淆的值可依用途區分：
-
-| 值 | 使用位置 | 代表什麼 |
-|---|---|---|
-| server key | Nakama 登入 API | 用戶端呼叫所需的伺服器設定值；放在 client 裡不等於能證明 client 未被修改 |
-| session token | 登入後 API 與 WebSocket | 已驗證的玩家 session |
-| matchmaker ticket | 配對流程 | 一筆仍在排隊的配對請求，可用來取消 |
-| routing token | 經 Quilkin 的 UDP 封包 | proxy 用來選擇目的 GameServer 的路由資料 |
 
 ## 從 Ready 與 Allocated 開始讀狀態
 
@@ -73,14 +66,6 @@ spec.sdkServer:
 ```
 
 `periodSeconds` 與 `failureThreshold` 影響健康回報缺失如何被判定；9357、9358 是 SDK 通訊入口，不是玩家要連的遊戲埠。不要把 SDK port 與 GameServer status 中的動態 hostPort 混用。
-
-## 疑難排解
-
-### Repository 有新 PR，卻查不到近期正式版本 {#mine-1}
-
-開放的 PR 或分支推送，可能只是相依套件更新，不能單獨證明核心功能持續維護。採用專案前，應一起查看主分支有效提交、正式版本、維護者公告，以及你要使用功能的相容性。
-
-本課準備時曾用 Open Match 的 PR 活動與發版紀錄做對照。這些資訊會變動，因此這裡不把歷史快照當成永久的「可用／不可用」清單。只有發版少也不必然代表專案停止維護；需要回到官方說明判斷。
 
 ## 想一想
 

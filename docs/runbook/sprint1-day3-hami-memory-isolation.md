@@ -15,11 +15,11 @@
 對一份吃得下整張卡的訓練工作，這樣剛好；對只要 2 GB 的推論服務，就是開場那種浪費。要讓多個容器共用一張卡，下面兩件事必須同時成立：
 
 1. **排程時看得懂 VRAM。** 排程器得知道「這張卡已經配出去多少 VRAM、還剩多少」，才不會把第五顆各要 4 GB 的 pod 也塞進一張 16 GB 的卡。
-2. **執行時真的擋得住。** 只在排程時記帳沒有用。容器跑起來之後，CUDA 程式（CUDA 是 NVIDIA 的 GPU 程式開發平台，PyTorch 這類框架都透過它使用 GPU）看到的是整張實體卡。有些框架會依卡的總容量決定要佔多少：TensorFlow 預設一啟動就佔用看得到的幾乎全部 VRAM，vLLM 依 `gpu_memory_utilization`（預設 0.9）佔用總容量的一個比例。看到 16 GB 就照 16 GB 佔，第一個這樣的容器就會讓同一張卡上的鄰居沒有 VRAM 可用。
+2. **執行時真的擋得住。** 只在排程時記帳沒有用。容器跑起來之後，CUDA 程式（CUDA 是 NVIDIA 的 GPU 程式開發平台，PyTorch 這類框架都透過它使用 GPU）看到的是整張實體卡。有些框架會依卡的總容量決定要佔多少：TensorFlow 是用來訓練與執行機器學習模型的框架，預設一啟動就佔用看得到的幾乎全部 VRAM；vLLM 是提供大型語言模型推論服務的框架，依 `gpu_memory_utilization`（預設 0.9）佔用總容量的一個比例。看到 16 GB 就照 16 GB 佔，第一個這樣的容器就會讓同一張卡上的鄰居沒有 VRAM 可用。
 
 **HAMi**（Heterogeneous AI Computing Virtualization Middleware）兩件都做。它帶著自己的 device plugin 和排程元件，在排程時記 VRAM 的帳，在容器裡攔下超過配額的配置。接下來的步驟會一件一件看到它們。
 
-本課程用的是 HAMi chart／appVersion `2.9.0`，叢集是 Day 0 建好的 AKS（Kubernetes 1.35.6），兩台 GPU 節點各有一張 16 GB 的 T4（spot）。Day 1 裝的 KAI Scheduler v0.16.8 保留著，前五步不會用到它。開始之前，照 Day 1 步驟 1 的方式把 GPU pool 拉回 2 台，並建立 `hami-lab` namespace，這一章的測試 pod 都放在這裡：
+開始之前，準備好 Day 0 建立的 AKS（Kubernetes 1.35.6），並照 Day 1 步驟 1 的方式把 spot GPU pool 啟動至 2 台，每台各有一張 16 GB 的 T4。本章會安裝 HAMi chart／appVersion `2.9.0`；保留 Day 1 安裝的 KAI Scheduler v0.16.8，供步驟 6 測試兩套排程器共存時的行為。接著建立 `hami-lab` namespace，這一章的測試 pod 都放在這裡：
 
 ```console
 $ kubectl create namespace hami-lab
@@ -27,7 +27,15 @@ $ kubectl create namespace hami-lab
 
 ## 準備：用 prepuller 先把測試映像拉到 GPU 節點上 {#prepuller}
 
-後面的測試 pod 都用 `pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime`，這個映像有好幾 GB，每台節點第一次拉取都要等好幾分鐘。可以先放一個 DaemonSet，在每台 GPU 節點上各跑一顆只用來拉映像的 pod（這種用途的 DaemonSet 常叫 prepuller）。它不要任何 GPU 資源，所以不受接下來拆裝 device plugin 的影響：
+<span id="mine-3"></span>
+
+後面的測試 pod 都用 `pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime`。要使用 HAMi 的 VRAM 配額，映像需提供 glibc（C 標準函式庫）及 `libvgpu.so` 所需的 `libdl.so.2`；本章指定的 PyTorch 映像符合這個條件。缺少 `libdl.so.2` 的映像會在容器啟動時失敗，錯誤輸出如下：
+
+```text
+sh: error while loading shared libraries: libdl.so.2: cannot open shared object file: No such file or directory
+```
+
+這個 PyTorch 映像有好幾 GB，每台節點第一次拉取都要等好幾分鐘。可以先放一個 DaemonSet，在每台 GPU 節點上各跑一顆只用來拉映像的 pod（這種用途的 DaemonSet 常叫 prepuller）。它不要任何 GPU 資源，所以不受接下來拆裝 device plugin 的影響：
 
 ```bash
 cat > 00-image-prepuller.yaml <<'EOF'
@@ -191,6 +199,45 @@ NOTES:
 Resource name: nvidia.com/gpu
 ```
 
+沿用剛加入的 Helm repository 與 `01-hami-values.yaml`，用 [Helm 3 的 `template`](https://helm.sh/docs/v3/helm/helm_template/) 預覽 HAMi 2.9.0 在 Kubernetes 1.35.6 下的完整映像名稱（依官方文件補上，本課沒有實跑）：
+
+```bash
+helm template hami hami-charts/hami \
+  --version 2.9.0 \
+  --namespace kube-system \
+  --kube-version 1.35.6 \
+  -f 01-hami-values.yaml |
+  grep 'image:'
+```
+
+若確認拉取失敗的是預設 registry 的 kube-scheduler 映像，依 [HAMi v2.9.0 的映像參數](https://github.com/Project-HAMi/HAMi/blob/v2.9.0/charts/hami/README.md#kube-scheduler-configuration)與 [Helm 3 的 `upgrade`](https://helm.sh/docs/v3/helm/helm_upgrade/) 保留既有設定，改用 [Kubernetes v1.35.6 官方映像清單](https://github.com/kubernetes/kubernetes/blob/release-1.35/CHANGELOG/CHANGELOG-1.35.md#v1356)列出的映像（依官方文件補上，本課沒有實跑）：
+
+```bash
+helm upgrade hami hami-charts/hami \
+  --version 2.9.0 \
+  --namespace kube-system \
+  --reuse-values \
+  --set-string scheduler.kubeScheduler.image.registry=registry.k8s.io \
+  --set-string scheduler.kubeScheduler.image.repository=kube-scheduler \
+  --set-string scheduler.kubeScheduler.image.tag=v1.35.6 \
+  --wait --timeout 5m
+```
+
+安裝或更新後，用 Kubernetes 1.35 的 [`rollout status`](https://v1-35.docs.kubernetes.io/docs/reference/kubectl/generated/kubectl_rollout/kubectl_rollout_status/) 等待 Deployment 就緒，再用 [`get`](https://v1-35.docs.kubernetes.io/docs/reference/kubectl/generated/kubectl_get/) 查看各容器的映像、`ready` 與 `imageID`（依官方文件補上，本課沒有實跑）：
+
+```bash
+kubectl -n kube-system rollout status deployment/hami-scheduler --timeout=300s
+
+kubectl -n kube-system get pods \
+  -l app.kubernetes.io/instance=hami,app.kubernetes.io/component=hami-scheduler \
+  -o json |
+  jq '.items[] | {
+    pod: .metadata.name,
+    images: [.spec.containers[] | {name, image}],
+    status: [.status.containerStatuses[]? | {name, ready, imageID}]
+  }'
+```
+
 一兩分鐘後，三顆 pod 全部 Running：
 
 ```text
@@ -217,8 +264,10 @@ hami-scheduler-6cb48464bb-g8swb   2/2   Running   0   73s   aks-system-35459509-
 
 一張實體 T4 變成 10 份 `nvidia.com/gpu`。這個 10 就是 `deviceSplitCount`，意思是「這張卡最多分給幾個容器」，跟 VRAM 無關。HAMi 另外定義了兩種資源：`nvidia.com/gpumem`（VRAM 配額，單位 MiB）和 `nvidia.com/gpucores`（算力配額，百分比）。這兩個名字都沒有出現在節點的資源裡，而是記在節點的 annotation 上：
 
+先用 `kubectl get nodes -l pool=gpu -o jsonpath='{.items[0].metadata.name}'` 取得一台 GPU 節點名稱，再填入下方的 `<node-name>` 查詢 annotation。修正後的寫法本課沒有實跑；下方保留原查詢的輸出。
+
 ```console
-$ kubectl get node aks-gpuspot-21249019-vmss000009 -o json \
+$ kubectl get node <node-name> -o json \
     | jq '.metadata.annotations|with_entries(select(.key|test("hami")))'
 {
   "hami.io/node-handshake": "Requesting_2026-08-04 03:12:22",
@@ -362,8 +411,6 @@ node 00000a:  nvidia.com/gpu  0  (完全沒用到)
 
 四顆全部疊在同一張 T4 上，另一台節點完全沒用到。這是 chart 的預設策略：節點層級是 `binpack`（先把一台塞滿，再換下一台），同一台有多張卡時，卡的層級是 `spread`（把 pod 分散到不同卡上）。集中的好處是空出來的節點可以縮掉；代價是風險也集中，那台 spot 節點被回收，四個服務一起停。想要分散，就把 `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy` 改成 `spread`。
 
-這組測試用的是 `pytorch/pytorch` 映像。如果換成 busybox 這類輕量映像，四顆 pod 會排上節點後立刻失敗，原因見[疑難排解：busybox、alpine 一啟動就 exit 127](#mine-3)。
-
 ## 兩道關卡
 
 到這裡，HAMi 在兩個時間點各擋了一件事。把一顆 pod 從送出到程式配置 VRAM 的過程畫成一條線：
@@ -496,7 +543,7 @@ setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.
 
 先看 `[HAMI-core ERROR ...]` 那一行，這是 `libvgpu.so` 印的（HAMi-core 是它的專案名稱）。分母 `4294967296` 正好是 4 GiB，也就是配額；分子 `4401922048` 約 4.10 GiB，是這次請求之後的累計量。拒絕這次配置的是攔截層，不是 GPU 驅動。
 
-再看下面 PyTorch 的訊息：`GPU 0 has a total capacity of 4.00 GiB`。PyTorch 完全相信自己在一張 4 GB 的卡上，給的建議（調整 `expandable_segments`）也是照 4 GB 的卡給的。程式不需要知道自己被分到的只是一部分。
+再看下面 PyTorch 的訊息：`GPU 0 has a total capacity of 4.00 GiB`。PyTorch 依回報容量產生訊息，顯示的總容量是 4.00 GiB，並附上調整 `expandable_segments` 的建議。程式不需要另外判斷這個容量是否來自 HAMi 配額。
 
 還有一個數字要注意：實際拿到的是 3584 MiB（7 塊 512 MiB），第 8 塊就被擋了。HAMi 算的用量除了程式配置的資料，還包含 **CUDA context**：程式第一次使用 GPU 時，CUDA 會替這個 process 在卡上建立一份執行環境，這份環境本身就要佔 VRAM。從上面的數字推算，被拒絕時累計是 4401922048 bytes，約 4198 MiB，扣掉已配置的 3584 MiB 和這次要的 512 MiB，context 大約 100 MiB。3584 + 約 100 + 512 超過 4096，所以第 8 塊放不進去；主要原因是每次要 512 MiB 這個單位太大，context 本身不大。規劃配額時，在模型需要的量之外多留約 100–200 MiB 給 context。
 
@@ -568,7 +615,7 @@ $ sed "s/NODE_PLACEHOLDER/$NODE/" 04-hog-slow.yaml | kubectl apply -f -
 [11:17:14] 實體卡 used=3193 MiB | hog: HOG: exception text = CUDA out of memory ...
 ```
 
-看倒數第二行：hog 被拒絕時，實體卡用了 6879 / 16384 MiB，還空著約 9.5 GB，它還是拿不到下一塊 512 MiB。上限來自容器自己的配額，卡上還剩多少跟它無關，這就是上一節圖上的第二道關卡。少了這一層，這顆 pod 會一路用到 16 GB。最後一行 hog 退出後，用量掉回 3193 MiB（holder 的 3 GiB 加上它的 CUDA context），hog 用過的 VRAM 都釋放了。
+看倒數第二行：hog 被拒絕時，實體卡用了 6879 / 16384 MiB，還空著約 9.5 GB，它還是拿不到下一塊 512 MiB。上限來自容器自己的配額，卡上還剩多少跟它無關，這就是上一節圖上的第二道關卡。若沒有配額限制，程式會繼續嘗試配置，目標為 8 GiB。最後一行 hog 退出後，用量掉回 3193 MiB（holder 的 3 GiB 加上它的 CUDA context），hog 用過的 VRAM 都釋放了。
 
 ### 鄰居不受影響
 
@@ -620,7 +667,7 @@ Events:
 
 ![三種 pod 寫法的去向：沒有 GPU 資源請求的 pod，依設計兩邊都不接手，由 default-scheduler 照一般 pod 排；要 gpumem 且沒寫 schedulerName 的，HAMi webhook 改成 hami-scheduler，切分與隔離生效；要 gpumem 但寫了 kai-scheduler 的，HAMi 不碰，KAI 接手後找不到 gpumem，永遠 Pending](../assets/diagrams/s1d3-scheduler-name.svg)
 
-我們可以從圖上看到，HAMi 的 webhook 只改沒寫 `schedulerName`、或寫的是 `default-scheduler` 的 pod。寫了其他排程器（例如 `kai-scheduler`）的 pod，HAMi 不會去搶，所以兩套系統裝在一起，並不會自動合作。要用 HAMi 切分的 pod 就不要寫 `schedulerName`，讓 HAMi 的 webhook 去改；要走 KAI 佇列的 pod 照 KAI 的方式寫，兩邊不交集。
+我們可以從圖上看到，HAMi 的 webhook 只改沒寫 `schedulerName`、或寫的是 `default-scheduler` 的 pod。HAMi 不改寫已指定其他排程器（例如 `kai-scheduler`）的 `schedulerName`，所以兩套系統裝在一起，並不會自動合作。要用 HAMi 切分的 pod 就不要寫 `schedulerName`，讓 HAMi 的 webhook 去改；要走 KAI 佇列的 pod 照 KAI 的方式寫，兩邊不交集。
 
 除了這顆刻意送的 pod，今天其他的 pod（3 顆切分、4 顆放置、隔離測試的 pod）KAI 都沒有介入：
 
@@ -640,11 +687,13 @@ KAI 七元件(跨 Day 1–3):                     全部 Running,RESTARTS 0,age 
 
 Day 1 提過，KAI 的 README 把 NVIDIA GPU Operator 列為前置條件。GPU Operator 是 NVIDIA 提供的一個 operator，會在 GPU 節點上自動安裝驅動、container toolkit、device plugin，以及節點標籤、監控等元件。Day 1 已經確認「一顆 pod 用一張完整的卡」不需要它。把一張卡切給多個容器呢？查一下今天的叢集裡有沒有 Operator 的元件：
 
+查詢節點 labels 前，先用 `kubectl get nodes -l pool=gpu -o jsonpath='{.items[0].metadata.name}'` 取得一台 GPU 節點名稱，填入下方的 `<node-name>`。修正後的寫法本課沒有實跑；下方保留原查詢的輸出。
+
 ```console
 $ kubectl get ds,deploy -A | grep -iE "nvidia|dcgm|nfd|node-feature|mig|gpu-feature"
 # operator 類工作負載(driver / toolkit / dcgm / NFD / MIG manager):NONE
 
-$ kubectl get node aks-gpuspot-21249019-vmss000009 -o json \
+$ kubectl get node <node-name> -o json \
     | jq '[.metadata.labels|keys[]|select(test("feature.node|nvidia"))]'
 [ "nvidia.com/gpu.present" ]     ← 這一顆是我們自己在 pool 層級掛的,不是 NFD 掛的
 ```
@@ -714,20 +763,6 @@ managedResources:
 `ignoredByScheduler: true` 的意思是「內建的 kube-scheduler 不要拿這幾個資源判斷節點夠不夠」，全部交給 extender。內建排程器不知道 `gpumem` 是什麼，也就不會把它算進節點的帳。
 
 **修法**:查 VRAM 餘額要用 HAMi 自己的資訊來源，有三個地方可查：把各 pod 的 `hami.io/vgpu-devices-allocated` annotation 加總；看 extender 的 log（`kubectl -n kube-system logs deploy/hami-scheduler -c vgpu-scheduler-extender`）裡的 `Usedmem`；或讀 HAMi 的 metrics endpoint（chart 預設開在 NodePort 31993）。`kubectl describe node` 只告訴你 `nvidia.com/gpu` 用掉幾份，那是分給了幾個容器，不是用掉幾 GB。
-
-### busybox、alpine 映像一啟動就 exit 127 {#mine-3}
-
-**症狀**:要 HAMi 資源的 pod 用 `busybox:1.36` 當映像，pod 全部 `Failed`，容器 `exitCode: 127`，log 只有一行：
-
-```text
-sh: error while loading shared libraries: libdl.so.2: cannot open shared object file: No such file or directory
-```
-
-排程完全成功（事件有 `FilteringSucceed` 與 `BindingSucceed`，annotation 也配到了卡），是容器一啟動就失敗。只看事件，會以為映像壞了。
-
-**原因**:HAMi 對它管的每一個容器都寫入 `/etc/ld.so.preload = /usr/local/vgpu/libvgpu.so`。Linux 上常見的 C 標準函式庫有兩套：多數發行版用的 glibc，以及體積小、busybox 與 alpine 採用的 musl。`libvgpu.so` 是針對 glibc 編譯的，需要 `libdl.so.2`，musl 的映像裡沒有這個檔案。動態載入器在程式開始執行之前就失敗，連 `sh` 都起不來，所以是 127。
-
-**修法**:(1) 要用 `nvidia.com/gpumem` 的映像，基底必須是 glibc 系（debian、ubuntu、conda 系；`pytorch/pytorch`、`nvidia/cuda` 都可以）；(2) 輕量映像只用來做不需要 GPU 的事，就不要在那顆 pod 上寫任何 HAMi 資源，沒有資源請求就不會被注入；(3) 遇到「排程成功、立刻 exit 127、找不到 `.so`」這個組合，幾乎都是 preload 與 libc 不相容，不必去查 GPU 驅動。
 
 ### 指定 `schedulerName: kai-scheduler` 又要 `gpumem`，pod 永遠 Pending {#mine-4}
 

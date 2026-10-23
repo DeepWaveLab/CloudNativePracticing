@@ -4,9 +4,11 @@
 
 想像你剛在叢集裡加了一台插著 T4（NVIDIA 給資料中心用的入門 GPU）的節點。`kubectl get nodes` 顯示它 `Ready`，可是 `kubectl describe node` 翻遍了都找不到 `nvidia.com/gpu`，要 GPU 的 pod 一顆也排不上去。
 
-這一章從零蓋出 Sprint 1 後面每一天都要用的 AKS 叢集：申請額度、建叢集、開兩台 T4 的 GPU 節點、裝上讓 Kubernetes 認得 GPU 的元件，最後跑出第一顆 `nvidia-smi`。一路上，GPU 會在三個地方「消失」：雲端額度不夠，VM 根本開不出來；讓 Kubernetes 認得 GPU 的元件沒有排上節點；節點重建之後，原本補上的標籤不見了。
+這一章從零蓋出 Sprint 1 後面每一天都要用的 AKS（Azure Kubernetes Service）叢集。AKS 是 Azure 提供的託管 Kubernetes 服務。本章會申請額度、建叢集、開兩台 T4 的 GPU 節點、安裝 NVIDIA device plugin，最後在容器裡執行 `nvidia-smi`，查詢 GPU 型號、記憶體用量與驅動程式版本。
 
-讀完之後，GPU 節點上看不到 `nvidia.com/gpu` 時，你能分辨問題出在額度、出在那個元件沒排上，還是出在節點重建後標籤掉了。
+**device plugin** 是 Kubernetes 用來登錄 GPU 等特殊硬體的擴充機制。NVIDIA device plugin 會偵測節點上的 GPU，向 kubelet（每台節點上管理 pod 的元件）註冊成 `nvidia.com/gpu` 資源。本課由 AKS 安裝 NVIDIA driver（驅動程式），device plugin 則自行用 Helm 安裝，方便後續章節更換 GPU 分配工具。缺少 device plugin 時，即使 driver 已裝好，GPU 仍無法登錄為 Kubernetes 可排程的資源。
+
+一路上，GPU 會在三個地方「消失」：雲端額度不夠，VM 根本開不出來；device plugin 沒有排上節點；節點重建之後，原本補上的標籤不見了。讀完之後，GPU 節點上看不到 `nvidia.com/gpu` 時，你能分辨問題出在額度、device plugin 沒排上，還是節點重建後標籤掉了。
 
 !!! note "指令裡的佔位符"
     本課程的指令用 `<cluster>` 代表叢集名稱、`<resource-group>` 代表資源群組、`<subscription-id>` 代表訂閱 ID——照做時換成自己的值。
@@ -17,7 +19,7 @@ Sprint 1 要比較三套分配 GPU 的工具，它們對叢集的要求只有兩
 
 第一，Kubernetes 要 **1.34 以上**：Day 6–7 要用的一項 Kubernetes 功能，從 1.34 才有正式版。
 
-第二，GPU 要能隨開隨關。學習用的工作負載沒有必要讓卡整天開著，所以 GPU 節點平常縮到 0 台，要用時再拉起來。
+第二，GPU 要能隨開隨關。學習用的工作負載沒有必要讓卡整天開著，所以 GPU 節點平常縮到 0 台，要用時再增加節點數。
 
 本課程用 AKS 滿足這兩條。換成其他版本夠新的託管叢集也行，指令細節自行對應。
 
@@ -42,6 +44,8 @@ Standard NCASv3_T4 Family vCPUs           0               0
 
 1. 一般的隨需（on-demand）VM 要同時通過兩關：**VM 家族額度**（`Standard NCASv3_T4 Family vCPUs`，T4 這一系列機型能用多少 vCPU）和**區域總額**（`Total Regional vCPUs`，這個區域所有 VM 加起來的上限）。GPU 家族的額度預設是 0，一定要申請。
 2. spot VM（Azure 用便宜價格出租的閒置容量，Azure 需要時可以收回，步驟 5 再細講）用的是另一池額度 `Total Regional Low-priority vCPUs`。這裡上限是 3，一台 NC4as 要 4 vCPU，連一台都開不起來。
+
+AKS 用**節點池（node pool）**管理節點：一個節點池是一組規格相同的 VM，可以一起擴縮。system pool 是用來跑 CoreDNS 這類叢集元件的節點池。本課把它和 GPU 節點分開，GPU 節點縮到 0 台時叢集照樣運作。
 
 本課的 GPU 節點用 spot，但步驟 3 的 system pool 是隨需節點，一樣要從區域總額扣。這個例子裡，區域總額 50/50 已經滿了。要注意的是：**停機（deallocated，VM 關機並釋放運算資源，但 VM 和磁碟還留著）的 VM 仍然佔著區域額度**，只是關機不會還回來，要刪掉資源才會釋放（見[疑難排解：quota 夠了，VM 還是開不起來](#mine-2)）。刪掉不用的資源群組之後，再查一次：
 
@@ -76,7 +80,7 @@ $ az aks create -g <resource-group> -n <cluster> --subscription <subscription-id
     --generate-ssh-keys
 ```
 
-AKS 用**節點池（node pool）**管理節點：一個節點池是一組規格相同的 VM，可以一起擴縮。這裡先建的是 system pool，專門跑 CoreDNS 這類叢集自己的元件。把它和 GPU 節點分開，GPU 節點縮到 0 台時叢集照樣運作。它用最小的 D2as_v5 隨需節點，因為 AKS 規定 system pool 不能用 spot。
+這裡先建 system pool，用最小的 D2as_v5 隨需節點，因為 AKS 規定 system pool 不能用 spot。
 
 版本選 1.35 而不是最新的 1.36：1.34 以上就夠用，而 Day 1 要裝的 KAI Scheduler 官方文件沒有寫明支援到哪個版本。
 
@@ -128,11 +132,11 @@ aks-gpuspot-21249019-vmss000001   Ready    <none>   106s   v1.35.6
 指令裡有幾個設定之後會一直遇到：
 
 - `--spot-max-price -1` 表示「跟著現價走，不因為價格被收回」。容量不足時仍然可能被收回，這是 spot 本來的條件。這個值建立後不能改。
-- spot 節點池會自動帶上 `kubernetes.azure.com/scalesetpriority=spot:NoSchedule` 這個 taint。之後所有要排到 GPU 節點的 pod，都得寫上對應的 toleration。
+- spot 節點池會自動帶上 `kubernetes.azure.com/scalesetpriority=spot:NoSchedule` 這個 taint。taint 是節點上的排程限制；這裡的 `NoSchedule` 會阻止沒有對應 toleration 的 pod 排入。toleration 寫在 pod 上，表示允許它通過相應的 taint 限制，但仍須符合其他排程條件。之後所有要排到 GPU 節點的 pod，都得寫上對應的 toleration。
 - `--labels pool=gpu` 是我們自己加的標籤，後面用 `nodeSelector` 把 GPU 工作導到這兩台。
 - 節點數固定為 2，**不開 cluster autoscaler**（AKS 依 Pending 的 pod 自動增減節點的功能）。Day 2 的示範需要「資源刻意不夠」的情境，autoscaler 自動補節點的話，情境就不成立。平常用完就手動縮到 0，步驟 8 會實際走一次。
 
-兩台都 `Ready` 了，但如果現在 `kubectl describe node` 其中一台，會看到和開場一樣的情況：沒有 `nvidia.com/gpu`。AKS 在節點映像裡裝好了 NVIDIA driver，可是 Kubernetes 還不知道這台機器有 GPU。中間缺的那一層叫 **device plugin**：它是 kubelet 的擴充機制，在每台節點上跑一個程式，找到節點上的特殊硬體（GPU、FPGA 之類），再向 kubelet 註冊成可以排程的資源，例如 `nvidia.com/gpu: 1`。
+兩台都 `Ready` 了，但如果現在 `kubectl describe node` 其中一台，會看到和開場一樣的情況：沒有 `nvidia.com/gpu`。AKS 在節點映像裡裝好了 NVIDIA driver，但還缺 device plugin 向 kubelet 註冊 GPU，下一步就來安裝。
 
 AKS 有一種全託管模式，driver 和 device plugin 都由它裝。本課程選的是「AKS 管 driver、device plugin 自己用 Helm 裝」，原因在後面幾章：Day 3 的 HAMi 要用自己的 device plugin 接管 `nvidia.com/gpu`，Day 7 的 DRA driver 也要避免和傳統 device plugin 各自配置同一批實體 GPU。如果 device plugin 交給 AKS 託管，到時候會跟自己裝的元件衝突。
 
@@ -142,7 +146,7 @@ AKS 有一種全託管模式，driver 和 device plugin 都由它裝。本課程
 
 ![四層：最下面是 Tesla T4 硬體；GPU 節點上，AKS 裝好的 NVIDIA driver 讓 device plugin 找到卡，device plugin 再向 kubelet 註冊；kubelet 把 nvidia.com/gpu: 1 寫進叢集裡 Node 物件的 allocatable；最上面要 GPU 的 pod 依 allocatable 排上節點。device plugin 沒排上節點時，allocatable 就不會出現 nvidia.com/gpu](../assets/diagrams/s1d0-gpu-layers.svg)
 
-我們可以從圖上看到，driver 和 kubelet 中間隔著 device plugin。device plugin 以 DaemonSet 的形式部署，每台符合條件的節點跑一份。它向 kubelet 註冊之後，kubelet 才會把 `nvidia.com/gpu` 寫進節點的 **allocatable**：這台節點可以分給 pod 的資源量。排程器只看 allocatable，所以少了 device plugin 這一層，卡插得再好，pod 也排不上去。
+我們可以從圖上看到，driver 和 kubelet 中間隔著 device plugin。device plugin 以 DaemonSet 的形式部署，每台符合條件的節點跑一份。它向 kubelet 註冊之後，kubelet 才會把 `nvidia.com/gpu` 寫進節點的 **allocatable**：這台節點可以分給 pod 的資源量。GPU 必須先登錄為可分配資源，才能滿足 pod 的 GPU 請求；排程器也會檢查其他資源需求、親和性等[排程條件](https://kubernetes.io/docs/concepts/scheduling-eviction/kube-scheduler/#kube-scheduler)。
 
 用 NVIDIA 官方的 Helm chart 安裝，限定只跑在 GPU pool、並容忍 spot taint:
 
@@ -188,11 +192,11 @@ affinity={"nodeAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":{"nod
 
 由上往下看：
 
-- `desired=0`：DaemonSet 一份都不打算跑。所以不是 pod 起不來，是根本沒有 pod。
+- `desired=0`：沒有節點符合 DaemonSet 的排程條件，預期執行的 pod 數量是 0。
 - `nodeSelector` 和 `tolerations` 是我們用 `--set` 傳進去的，都對。
 - `affinity` 不是我們設的，是 chart 預設帶的 nodeAffinity：節點必須符合三組條件的其中一組才排得上：`feature.node.kubernetes.io/pci-10de.present`（節點上有 NVIDIA 的 PCI 裝置，10de 是 NVIDIA 的 PCI 廠商代碼）、`feature.node.kubernetes.io/cpu-model.vendor_id=NVIDIA`（CPU 是 NVIDIA 自家的，例如 Grace），以及 `nvidia.com/gpu.present=true`。
 
-`feature.node.kubernetes.io/` 開頭的標籤，是 **NFD**（Node Feature Discovery）貼的。NFD 是一個會自動偵測節點硬體、把結果貼成節點標籤的元件；`nvidia.com/gpu.present` 則是 NVIDIA 的 **GFD**（GPU Feature Discovery）這類元件會貼的標籤。AKS 預設兩個都沒有裝，所以三組條件全部落空，DaemonSet 認為整個叢集沒有它該去的節點，desired 就是 0。
+`feature.node.kubernetes.io/` 開頭的標籤，是 **NFD**（Node Feature Discovery）貼的。NFD 是一個會自動偵測節點硬體、把結果貼成節點標籤的元件；`nvidia.com/gpu.present` 則是 NVIDIA 的 **GFD**（GPU Feature Discovery）這類元件會貼的標籤。AKS 預設兩個都沒有裝，所以三組條件全部落空，沒有節點符合 DaemonSet 的排程條件，desired 就是 0。
 
 修法是補上第三組條件要的標籤 `nvidia.com/gpu.present=true`。這個標籤要下在**節點池層級**，不要用 `kubectl label node` 直接貼在節點上，理由步驟 8 會看到。`--labels` 會整組取代原有的標籤，所以 `pool=gpu` 要一起帶上：
 

@@ -19,7 +19,7 @@
 
 本次前三種操作後，數秒內就觀察到 GameServer 狀態變化；節點失效卻經過數分鐘。關鍵是「資料來源」：玩家探測的是封包是否回來，controller 處理的是 Kubernetes 與 GameServer 物件的變化，兩者不會同步更新。
 
-**metrics** 是元件對外提供的數值；本章用 **Prometheus** 定期擷取並保存它們，這個擷取動作稱為 **scrape**。Agones controller 的 `agones_gameservers_count` 依 Fleet 與狀態分組回報 GameServer 數量，資料來源是 GameServer 物件本身，沒有去探測 server 活著沒有。節點死掉但物件還沒更新的那段時間，metrics 也會照舊回報。
+**metrics** 是元件對外提供的數值；本章用 **Prometheus** 定期擷取並保存它們，這個擷取動作稱為 **scrape**。Agones controller 的 `agones_gameservers_count` 依 Fleet 與狀態分組回報 GameServer 數量，資料來源是 GameServer 物件本身，沒有去探測 server 活著沒有。節點失聯但物件還沒更新的那段時間，metrics 也會照舊回報。
 
 節點失效演練會關掉整台 VM，所以演練 Fleet 放在帶 taint 的專用節點池上，只有明確宣告 toleration 的 pod 會排上去。關機前要確認目標節點上沒有演練以外的工作負載，例如正式 Fleet、Quilkin proxy 或 Nakama。
 
@@ -49,7 +49,7 @@ rules:
     verbs: [get, list, watch]
 ```
 
-抓取設定如下。兩個 job 都用 `kubernetes_sd_configs` 直接抓 pod，不經過 Service；原因見[metrics 格式錯誤](#mine-1) 與[controller 指標間歇消失](#mine-2)：
+抓取設定如下。兩個 job 都用 `kubernetes_sd_configs` 找出各個 pod，逐一直接抓取。Agones controller 的副本透過 leader election 選出 **leader**（目前負責控制工作的副本），其餘副本是 standby；GameServer 相關 metrics 只有 leader 提供。若透過 Service 抓取，請求可能被分到 standby，即使 target 顯示 `up`，也查不到 GameServer 計數。直接抓每個 pod，才能持續擷取 leader 提供的指標：
 
 ```yaml
 global:
@@ -86,9 +86,13 @@ scrape_configs:
         target_label: pod
 ```
 
+Quilkin 0.10 的 admin `/metrics` 回應沒有帶 `Content-Type`，Prometheus 3.x 不會自動把這種回應當成文字格式處理。因此上面的 Quilkin job 已設定 `fallback_scrape_protocol: PrometheusText0.0.4`，讓 Prometheus 在 `Content-Type` 空白或無效時，改用指定的文字格式解析。設定選項見 [Prometheus configuration](https://prometheus.io/docs/prometheus/latest/configuration/configuration/#scrape_config)。
+
 Agones controller 的 metrics 在 port 8080，Quilkin proxy 的在 admin port 8000。把 `monitoring-lab` namespace 的 `prometheus` Deployment 之 9090 port-forward 到本機，保留該終端機，再於瀏覽器開啟 `http://127.0.0.1:9090`。在 Targets 頁（或查 `/api/v1/targets`），本次環境看到 2 個 `agones-controller` target 與 3 個 `quilkin-proxies` target 都是 `up`。
 
-在 Prometheus 的查詢欄輸入 `agones_gameservers_count{fleet_name="lab-game-server",type="Ready"}`。結果應等於 Ready 的顆數，這裡是 2；而且只有 **leader**（目前負責控制工作的副本）提供這組時間序列，原因見[controller 指標間歇消失](#mine-2)。
+Prometheus 把同一指標名稱、同一組標籤的數值，連同每次擷取的時間保存下來，這一串紀錄就叫「時間序列」（time series，下文簡稱 series）。例如固定 Fleet、狀態與來源 pod，就能觀察該組 GameServer 計數隨時間的變化；任一標籤值不同，就屬於另一條時間序列。詳見 [Prometheus data model](https://prometheus.io/docs/concepts/data_model/)。
+
+在 Prometheus 的查詢欄輸入 `agones_gameservers_count{fleet_name="lab-game-server",type="Ready"}`。結果應等於 Ready 的顆數，這裡是 2；只有 leader 提供這組時間序列，因此查詢時不必指定 pod。
 
 同一時間 kubectl 看到的也是 2 顆 Ready：
 
@@ -150,7 +154,7 @@ ACK: EXIT
 02:56:12 lab-game-server-s7xfm-bsn92   Ready            aks-gslab-97904148-vmss000000   <none>
 ```
 
-`simple-game-server` 收到 `EXIT` 後呼叫 SDK `Shutdown()`，狀態隨即轉成 `Shutdown`，接著原本的 GameServer 被刪除，Fleet 補出新的 Ready。觀察時應區分「舊對戰結束」與「新容量可用」兩個時間點。正式的遊戲 server 在對戰結束時也應該走這條路：由遊戲自己宣告「這場結束了」，Agones 就不必等 health check 失敗才發現。
+`simple-game-server` 收到 `EXIT` 後呼叫 SDK `Shutdown()`，狀態隨即轉成 `Shutdown`，接著原本的 GameServer 被刪除，Fleet 補出新的 Ready。觀察時應區分「舊對戰結束」與「新容量可用」兩個時間點。正式的遊戲 server 在對戰結束時也應該走這條路：遊戲呼叫 SDK `Shutdown()` 後，可直接進入關閉流程。
 
 ## 步驟 3:crash——送 `CRASH`
 
@@ -372,32 +376,6 @@ aks-system-26490877-vmss000003    Ready    <none>   27m   v1.34.10   system
 $ az aks nodepool delete -g <RESOURCE-GROUP> --cluster-name <CLUSTER> -n gslab
 ```
 
-## 疑難排解
-
-### Prometheus 3 拒收 Quilkin 的 metrics {#mine-1}
-
-**症狀**：quilkin-proxies 的三個 target 都是 `down`，錯誤訊息是 `non-compliant scrape target sending blank Content-Type and no fallback_scrape_protocol specified for target`。
-
-**根因**：Quilkin 0.10 的 admin `/metrics` 回應沒有帶 `Content-Type`。Prometheus 3.x 不再把這種回應自動當成文字格式處理。
-
-**修法**：在 Quilkin 的 scrape job 加上 `fallback_scrape_protocol: PrometheusText0.0.4`，Prometheus 遇到空白或無效的 Content-Type 時改用這個格式解析。
-
-### 透過 Service 抓 Agones controller，GameServer 計數時有時無 {#mine-2}
-
-**症狀**：用 `agones-controller-metrics-service:8080` 當抓取目標，target 顯示 `up`，卻查不到 `agones_gameservers_count`，只有 `agones_k8s_client_*` 這類通用 metrics。
-
-**根因**：Agones controller 跑 2 個副本，用 leader election（lease `agones-controller-lock`）決定由哪一個處理 GameServer；GameServer 相關的 metrics 只有 leader 會輸出。Service 會把 scrape 分到任一副本，分到 standby 時就沒有這些 series。分別直接抓兩個 pod，leader 回傳 16 行 `agones_gameservers_count`，standby 回傳 0 行。
-
-**修法**：改用 `kubernetes_sd_configs` 找出每個 controller pod 直接抓取（需要 `agones-system` 內 pods 的 get/list/watch 權限）。查詢時不必指定 pod，只有 leader 那個 pod 會有這些 series。
-
-### simple-game-server 的 README 對 `EXIT` 的描述過時 {#mine-3}
-
-**症狀**：README 寫 `EXIT` 會呼叫 `os.Exit(0)` 讓程序結束，照這個描述，可能預期 GameServer 會像 crash 一樣變成 `Unhealthy`；輸出卻顯示它直接進入 `Shutdown`。
-
-**根因**：Agones `release-1.60.0` 的 `examples/simple-game-server` 原始碼裡，`EXIT` 呼叫的是 SDK `s.Shutdown()`，程序等 Agones 刪 pod、收到 SIGTERM 後才結束。README 沒有跟著更新。
-
-**修法**：以原始碼為準：`EXIT` 是 graceful shutdown，`CRASH` 才是程序直接結束。範例程式的行為要看對應版本的原始碼，README 只能當線索。
-
 ## 想一想
 
 1. 節點已失聯，`agones_gameservers_count` 卻仍是 Allocated 1，這個數字實際反映什麼？
@@ -410,7 +388,11 @@ $ az aks nodepool delete -g <RESOURCE-GROUP> --cluster-name <CLUSTER> -n gslab
 
 ## 正式環境還要補的
 
-本章只以關閉隨需 VM 模擬節點失效，沒有測試 Spot 回收通知。節點維護（`kubectl drain`）、PodDisruptionBudget、Agones 的 `Reserved` 狀態與 `gracefulTerminationDelaySec` 也沒有納入；它們各自有不同的中斷與收尾條件，需要另外演練，不能沿用本次秒數。
+本章只以關閉隨需 VM 模擬節點失效，沒有測試 Spot 回收通知。若要安排節點維護，需另外演練 `kubectl drain`（驅逐節點上的 Pod）與 PodDisruptionBudget（限制自願中斷時可同時停止的 Pod 數量），確認進行中的對戰如何收尾。可從 [Agones controlling disruption](https://agones.dev/site/docs/advanced/controlling-disruption/) 閱讀遊戲程序收到終止訊號後的處理方式，以及允許驅逐的條件。
+
+若外部配對系統需要先保留一台 GameServer，等候對戰開始，可閱讀 SDK 的 [Reserve(seconds)](https://agones.dev/site/docs/guides/client-sdks/#reserveseconds)。它會讓 GameServer 進入 `Reserved` 狀態，在保留期間不因 Fleet 縮容或更新被刪除，也不接受 GameServerAllocation 分配；指定時間到期後回到 `Ready`。這是配對前的保留機制，不能讓節點失聯後的對戰復原。
+
+若遊戲結束時還要儲存結果或通知後端，需確認程序收到終止訊號後有足夠的收尾時間。`simple-game-server` 的 `gracefulTerminationDelaySec` 是範例程式參數，用來模擬收到終止訊號後、離開程序前的等待秒數，可對照[官方原始碼](https://github.com/agones-dev/agones/blob/main/examples/simple-game-server/main.go)閱讀；真正的遊戲仍需自行實作儲存與通知，並配合 Pod 的終止寬限時間。節點維護、`Reserved` 與這個延遲參數都未在本章演練，不能沿用本次秒數。
 
 監控這一側，Prometheus 要有多副本與持久化儲存，再加上儀表板與告警規則；Quilkin 的計數預設包含 proxy 收到的所有流量，要依 token 或 GameServer 拆開看，得另外規劃。
 
@@ -421,8 +403,8 @@ $ az aks nodepool delete -g <RESOURCE-GROUP> --cluster-name <CLUSTER> -n gslab
 - **[Agones metrics](https://agones.dev/site/docs/guides/metrics/)** —— 列出 `agones_gameservers_count` 等 controller metrics 的意義，以及用 Prometheus 抓取的方式。
 - **[Agones health checking](https://agones.dev/site/docs/guides/health-checking/)** —— 說明 GameServer 何時轉成 `Unhealthy`，以及 Fleet 刪除並替換 Unhealthy server 的規則。
 - **[Kubernetes taints and tolerations](https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/)** —— taint-based eviction 與 `not-ready`、`unreachable` 預設 300 秒 toleration 的來源。
-- **[Prometheus configuration](https://prometheus.io/docs/prometheus/latest/configuration/configuration/)** —— 查 `fallback_scrape_protocol` 的可用值，對應「metrics 格式錯誤」。
-- **[simple-game-server 原始碼（release-1.60.0）](https://github.com/googleforgames/agones/blob/release-1.60.0/examples/simple-game-server/main.go)** —— `EXIT`、`CRASH` 與 `automaticShutdownDelaySec` 的實際行為，對應「EXIT 行為與 README 不符」。
+- **[Prometheus configuration](https://prometheus.io/docs/prometheus/latest/configuration/configuration/)** —— 查 `fallback_scrape_protocol` 的可用值，對照步驟 1 的格式相容性設定。
+- **[simple-game-server 原始碼（release-1.60.0）](https://github.com/googleforgames/agones/blob/release-1.60.0/examples/simple-game-server/main.go)** —— 對照 `EXIT`、`CRASH` 與 `automaticShutdownDelaySec` 的實際行為。
 
 ## 下一步
 

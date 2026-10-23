@@ -2,13 +2,15 @@
 
 ![Kubernetes 官方標誌](../assets/logos/kubernetes-icon-color.svg){ align=right width="80" }
 
+上一章的一般 Kata 用獨立 kernel 的 VM 隔離 Pod，但宿主仍可讀取 VM 的記憶體明文。若 Pod 處理的敏感資料也需要防止宿主存取，kata-cc 會利用 SEV-SNP 的硬體記憶體加密與隔離，保護執行中的資料。
+
 上一章的節點已有 `kata-cc` handler，卻不代表把 Pod 的 RuntimeClass 改掉就能使用機密容器。硬體是否支援、節點是否配置對應 runtime、guest 是否允許這個 Pod 的操作，都會影響啟動。這章會逐項核對這些條件，並分清平台設定與遠端密碼學證明。
 
 ## 先找能建立機密 child VM 的節點
 
 AKS 的 kata-cc 路徑會為 Pod 建立機密 **child VM**，也就是在節點之下執行的 SEV-SNP guest。節點必須支援這種部署方式；一般機密 VM 與可建立機密 child VM 的機型不能只看名稱相近就互換。
 
-本課使用的 **SKU（雲端機型代碼）**是 `Standard_DC4as_cc_v5`，屬於 Azure 為這條路徑提供的系列。以下查詢範例檢查指定區域與機型的可用區資訊：
+你需要支援建立 SEV-SNP child VM 的 **SKU（雲端機型代碼）**，例如 `Standard_DC4as_cc_v5`。以下以此機型為例，檢查指定區域的可用區資訊：
 
 ```console
 $ az vm list-skus -l westeurope --size Standard_DC4as_cc_v5 \
@@ -16,13 +18,35 @@ $ az vm list-skus -l westeurope --size Standard_DC4as_cc_v5 \
 3	1	2                     ← westeurope 有,還有三個可用區
 ```
 
-有可用區資訊，不等於你的訂閱已有足夠配額或當下有容量。查詢時還要確認限制與配額。原驗證在 `japaneast` 無法建立這個 SKU，改在 `westeurope` 完成；這是當時的結果，不能當成今天的區域供應清單。
+有可用區資訊，不等於你的訂閱已有足夠配額或當下有容量。查詢時還要確認限制與配額。
 
 ## 使用標準系統池，再加入 kata-cc 使用者池
+
+本章實作需要另建一座使用預設 AKS 網路的叢集，不沿用 Day 6 的 BYOCNI Cilium 叢集；Cilium 與 kata-cc 的組合尚未在本課驗證。
 
 下面是已驗證的建立方式，會產生計費資源。`<rg>` 與 `<cluster>` 分別是你選定的資源群組及叢集名稱。命令保留驗證使用的 Kubernetes 1.34；實作前需確認目標區域仍提供與 kata-cc 相容的版本，不能把歷史版本直接當成永久可用。
 
 命令中的 OIDC issuer 提供身分權杖的簽發者資訊，workload identity 則讓工作負載以聯合身分使用 Azure 服務；它們是下一章存取金鑰服務的前提，不等同於 TEE 證明。
+
+先查詢 `westeurope` 可建立的 Kubernetes 版本，查到版本仍不代表與 kata-cc 相容（[依官方文件補上，本課沒有實跑](https://learn.microsoft.com/en-us/cli/azure/aks?view=azure-cli-latest#az-aks-get-versions)）：
+
+```bash
+az aks get-versions --location westeurope -o table
+```
+
+建立叢集前，先註冊 `KataCcIsolationPreview` 功能並查詢註冊狀態（[依官方文件補上，本課沒有實跑](https://learn.microsoft.com/en-us/azure/aks/deploy-confidential-containers-default-policy#register-the-kataccisolationpreview-feature-flag)）：
+
+```bash
+az feature register --namespace Microsoft.ContainerService --name KataCcIsolationPreview
+az feature show --namespace Microsoft.ContainerService --name KataCcIsolationPreview \
+  --query properties.state -o tsv
+```
+
+重複執行上面的 `az feature show`，直到狀態為 `Registered`，再更新資源提供者的註冊（依官方文件補上，本課沒有實跑）：
+
+```bash
+az provider register --namespace Microsoft.ContainerService
+```
 
 ```bash
 # 1) 標準系統池(Ubuntu 小節點)+ OIDC + workload identity
@@ -39,6 +63,16 @@ az aks nodepool add -g <rg> --cluster-name <cluster> --name katacc --mode User \
 az aks update -g <rg> -n <cluster>
 ```
 
+完成建池與 `az aks update` 後，將 `RG`、`CLUSTER` 換成上面使用的名稱，取得叢集憑證並查詢節點與 RuntimeClass（[依官方文件補上，本課沒有實跑](https://learn.microsoft.com/en-us/azure/aks/deploy-confidential-containers-default-policy#add-a-node-pool-with-confidential-containers-enabled)）：
+
+```bash
+RG='<rg>'
+CLUSTER='<cluster>'
+az aks get-credentials --resource-group "$RG" --name "$CLUSTER"
+kubectl get nodes -l agentpool=katacc -o wide
+kubectl get runtimeclass kata-cc-isolation -o yaml
+```
+
 先用一般系統池建立叢集，再把 `KataCcIsolation` 加為使用者池。`az aks update` 是此驗證流程啟用機密容器整合的一步。完成後，檢查節點與 RuntimeClass：
 
 ```console
@@ -51,11 +85,9 @@ kata-cc-isolation   kata-cc    ← az aks update 之後才出現
 
 `kata-cc-isolation` 的 handler 是 `kata-cc`，節點也已 Ready。這仍只是平台狀態；下一步要讓指定這個 RuntimeClass 的 Pod 真正啟動。
 
-這組環境使用預設 AKS 網路，沒有沿用 Day 6 的 BYOCNI Cilium。因此本章結果不代表已驗證 Cilium 與 kata-cc 的組合。
-
 ## 政策要先描述允許的操作
 
-機密 guest 不應無條件接受宿主端送來的操作。**安全政策**用來限制 guest agent 可以執行哪些請求；**OPA/Rego**是這裡使用的政策引擎與規則語言。
+機密 guest 不應無條件接受宿主端送來的操作。**guest agent** 是在 guest 內執行的服務，接收宿主端建立容器、設定網路介面等請求，並依**安全政策**決定是否執行；**OPA/Rego**是這裡使用的政策引擎與規則語言。
 
 先準備 `pod.yaml`：Pod 使用 `runtimeClassName: kata-cc-isolation`、排程到對應節點池，並包含預定的映像、指令與環境變數。接著依 manifest 產生政策，而不是先部署一個沒有政策的 Pod。原驗證中，沒有政策時收到以下 sandbox 錯誤：
 
@@ -100,7 +132,23 @@ Running 表示這組硬體、runtime 與政策能完成啟動。它尚未回答�
 
 ![平台啟動與遠端證明是不同的檢查階段](../assets/diagrams/s4d7-platform-evidence.svg)
 
-本章進一步檢查節點上的 containerd 設定，確認 `kata-cc` 指向對應 runtime 與 SEV-SNP 配置：
+你需要有權限建立 privileged 除錯 Pod、將它排程到指定節點，並存取宿主檔案系統；以下使用與叢集相同的 kubectl 1.34。
+
+選取 `katacc` 池的一個節點，使用 `sysadmin` profile 開啟具有特權的除錯容器（[依官方文件補上，本課沒有實跑](https://v1-34.docs.kubernetes.io/docs/tasks/debug/debug-cluster/kubectl-node-debug/)）：
+
+```bash
+NODE=$(kubectl get nodes -l agentpool=katacc -o jsonpath='{.items[0].metadata.name}')
+kubectl debug "node/$NODE" -n default -it --image=ubuntu:22.04 --profile=sysadmin
+```
+
+進入除錯容器後，從掛載於 `/host` 的宿主檔案系統讀取 containerd 設定，再退出容器（依官方文件補上，本課沒有實跑）：
+
+```bash
+cat /host/etc/containerd/config.toml
+exit
+```
+
+本章進一步檢查節點上的 containerd 設定，確認 `kata-cc` 指向對應 runtime 與 SEV-SNP 配置。這條執行路徑使用 **Cloud Hypervisor**，也就是負責建立與執行 child VM 的虛擬機監控器：
 
 ```console
 # 節點:AzureLinux/Mariner、SEV-SNP DC4as_cc_v5
@@ -114,6 +162,13 @@ Running 表示這組硬體、runtime 與政策能完成啟動。它尚未回答�
 
 `clh` 表示 Cloud Hypervisor，`snp` 對應 SEV-SNP。這份縮寫輸出、節點 SKU 與 Pod RuntimeClass 共同顯示預期的平台執行路徑；它不是由獨立驗證方確認的硬體證據，不能單靠檔名證明所有記憶體保護屬性。
 
+回到本機終端機後，將 `DEBUG_POD` 換成剛才 `kubectl debug` 顯示的除錯 Pod 名稱並刪除它（依官方文件補上，本課沒有實跑）：
+
+```bash
+DEBUG_POD='<debug-pod-name>'
+kubectl delete pod -n default "$DEBUG_POD"
+```
+
 本章沒有取得 guest 內的 SNP report，也沒有直接測試宿主讀取私有記憶體失敗。遠端驗證與金鑰釋出會在 [Day 8](sprint4-day8-attestation.md) 接續。
 
 ## 疑難排解
@@ -121,10 +176,6 @@ Running 表示這組硬體、runtime 與政策能完成啟動。它尚未回答�
 ### 指定區域無法建立 _cc_v5 節點 {#mine-1}
 
 若收到 `VMSizeNotSupported`，核對所需機型、區域、訂閱限制與配額。可用其他區域時，需在該區域準備叢集；不要用一般 `DCas_v5` 直接替換 kata-cc 所需的 child VM 機型。
-
-### 初始節點 bootstrap 回 curl 404 {#mine-2}
-
-驗證曾在 kata-cc 作初始系統池、Kubernetes 1.35.6 的組合遇到下載失敗；改成前述標準系統池、kata-cc 使用者池與 1.34 後完成。這同時改了多個條件，因此不能斷言唯一原因是池角色。遇到問題要依 bootstrap 訊息與當前支援版本檢查，不要把歷史 workaround 視為永久規則。
 
 ### Pod 停在 ContainerCreating，出現 UpdateInterfaceRequest 錯誤 {#mine-3}
 

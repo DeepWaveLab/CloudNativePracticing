@@ -2,9 +2,9 @@
 
 ![wasmCloud 官方標誌](../assets/logos/wasmcloud-icon-color.svg){ align=right width="88" }
 
-你照著網路上的 wasmCloud 教學，想讓同一個元件改用另一種儲存方式。教學要你修改 link definition，但 Day 2 裝好的叢集找不到這種物件。接著把設定裡的 `backend` 改掉，API 接受了，程式的行為卻沒有改變。
+Day 2 已經讓 HTTP 請求送到 wasmCloud 元件。這一章改用官方的檔案服務範例 blobby，讓元件接收請求後讀寫檔案。元件執行在 host 裡，儲存能力也由 host 提供；本章的 host 使用 NATS 服務中的物件儲存，讓不同 host 上的元件能讀取同一份資料。後半段會從一台節點上的 host 寫入，再從另一台節點上的 host 讀回。
 
-這一章先查版本提供的設定入口，再用能讀寫檔案的 blobby 元件測試授權，最後把 host 分散到兩台節點。讀完後，你能區分能力設定、host 的 Kubernetes 排程和元件的 wasmCloud 排程，也能判斷一個「設定成功」是否真的改變行為。
+能呼叫儲存介面，還不代表能存取其中的資料。bucket 是儲存物件的分組，host 會依元件設定的 `buckets` 清單判斷是否允許存取；blobby 使用的分組名稱是 `blobby`。沒有設定清單時，host 會拒絕它的讀寫請求。這一章先確認版本提供的設定入口，再測試授權，最後把 host 分散到兩台節點。讀完後，你能區分能力設定、host 的 Kubernetes 排程和元件的 wasmCloud 排程，也能判斷一個「設定成功」是否真的改變行為。
 
 ## 開始之前
 
@@ -12,7 +12,7 @@
 
 原始碼節錄都對應 wasmCloud 2.6.1；帶 `…` 的 console 區塊是觀察結果節錄，不能整段當成 shell 指令執行。需要操作的地方會另列完整指令。
 
-## 步驟 1: 先確認版本提供哪種能力設定
+## 步驟 1: 先確認版本提供哪種能力設定 {#mine-1}
 
 舊版教學中的 capability provider 是獨立的能力實作，例如把儲存操作接到 Redis 或 NATS；link definition 則記錄元件使用哪個 provider。先查目前安裝的版本有沒有對應資源：
 
@@ -29,7 +29,7 @@ $ kubectl get crd -o yaml | grep -icE "\blink\b|capabilityprovider|\bprovider\b"
 0
 ```
 
-這裡有 Workload、Host 等物件，沒有獨立的 provider 或 link。Day 2 用過的 `hostInterfaces` 才是本版宣告能力的位置。查看其中的 `config`：
+這裡有 Workload、Host 等物件，沒有獨立的 provider 或 link。本章 2.6.1 的 Kubernetes 整合使用 Day 2 用過的 `hostInterfaces` 宣告能力，不能直接套用 v1 的 link 操作。查看其中的 `config`：
 
 ```console
 $ kubectl explain workloaddeployment.spec.template.spec.hostInterfaces.config
@@ -40,63 +40,9 @@ DESCRIPTION:
 
 `map[string]string` 只要求鍵和值都是字串，沒有列出允許的鍵。API 接受 `backend: in-memory`，只代表這個欄位的型別正確，還要看 host 的實作是否讀取它。
 
-### 為什麼原始碼有多個後端，設定卻不生效
-
-2.6.1 的原始碼包含這些實作：
-
-```text
-crates/wash-runtime/src/plugin/wasi_blobstore/{in_memory,filesystem,nats}.rs
-crates/wash-runtime/src/plugin/wasi_keyvalue/{in_memory,filesystem,nats,redis}.rs
-crates/wash-runtime/src/plugin/multiplex.rs
-```
-
-`multiplex.rs` 有使用 `config.backend` 選後端的邏輯。然而 Kubernetes 裡啟動的是 `wash host`，它的註冊程式如下：
-
-```rust
-// crates/wash/src/cli/host.rs(v2.6.1)
-    .with_plugin(Arc::new(plugin::wasi_blobstore::NatsBlobstore::new(&data_nats_client)))?
-    .with_plugin(Arc::new(plugin::wasmcloud_messaging::NatsMessaging::new(…)))?
-    .with_plugin(Arc::new(plugin::wasi_keyvalue::NatsKeyValue::new(&data_nats_client)))?
-    …
-#[cfg(feature = "wasm_component_model_implements")]
-{
-    cluster_host_builder = cluster_host_builder.with_multiplexed_plugins()?;
-}
-```
-
-一般路徑註冊的是 NATS 版。下方的 `#[cfg(feature = ...)]` 是 Rust 的編譯開關，只有啟用該 feature 才會加入多後端的程式。另一種擴充入口 `hostPlugins` 也有自己的編譯條件，chart 的註解寫著：
-
-```yaml
-# Requires a wash image built with the `host-component-plugins` feature
-# (not enabled in release images yet); a host handed a plugin it cannot
-# build fails to start.
-```
-
-這兩個 feature 是不同的入口，不能只看其中一個就判定另一個也已啟用。本章沒有直接讀取 release 映像的編譯旗標；能確認的是，後面的測試改動 `backend` 沒有切換實際的 NATS 後端。
-
-從 host 的啟動參數，可以看到資料用的 NATS 端點：
-
-```console
-$ kubectl -n wasmcloud get deploy hostgroup-default -o jsonpath='{…args}'
-   host
-   --host-group=default
-   --scheduler-nats-url=nats://nats.wasmcloud.svc.cluster.local:4222
-   --data-nats-url=nats://nats.wasmcloud.svc.cluster.local:4222   ← 提供者的端點在這裡
-   --oci-cache-dir=/oci-cache
-   --http-addr=0.0.0.0:80
-```
-
-`runtime.hostGroups[].dataNatsUrl` 是 host group 的設定。若要指向另一個 NATS，修改的位置在 host group，不是元件的 link 物件。本章沒有實測第二個 host group 搭配第二座 NATS，因此先不把它當成已驗證的切換程序。
-
-下圖對照兩種設定方式。先看左邊獨立的 provider，再看右邊 host 啟動時選用的 NATS 連線。
-
-![v1 透過 link definition 連結元件與 provider；本章的 wasmCloud 2.6.1 host 使用內建的 NATS 實作，由 host 啟動參數指定資料端點。](../assets/diagrams/s3d3-provider-binding.svg)
-
-差別在設定生效的位置。接下來保留同一個 host 與元件映像，只修改它可以使用哪些 bucket，先驗證本版確實支援的授權方式。
-
 ## 步驟 2: 讓 blobby 寫入檔案
 
-blobby 是官方的檔案服務範例。它接收 HTTP 請求，透過 `wasi:blobstore` 介面讀寫資料；實際的儲存由 host 提供。下面是介面宣告的節錄，只用來看元件要求哪些能力，不需要建立或編譯檔案。WIT 是描述 Wasm 元件介面的語言；這裡的 `world` 列出元件與外部的介面，`import` 表示它需要宿主提供 `wasi:blobstore`：
+blobby 透過 `wasi:blobstore` 介面讀寫資料。下面是介面宣告的節錄，只用來看元件要求哪些能力，不需要建立或編譯檔案。WIT 是描述 Wasm 元件介面的語言；這裡的 `world` 列出元件與外部的介面，`import` 表示它需要宿主提供 `wasi:blobstore`：
 
 ```wit
 world blobby {
@@ -199,7 +145,7 @@ if is_write && data.read_only { return None }
 None                                                          // 其餘一律拒絕
 ```
 
-bucket 是儲存物件的分組，這份清單列出元件可以使用的分組名稱。blobby 使用的名稱是 `blobby`，因此需要 `buckets: blobby`。沒有設定時，host 不允許元件存取任何 bucket。
+這次設定只有 `backend: in-memory`，沒有授權 blobby 使用任何 bucket，因此請求被拒絕。下一步加入 `buckets: blobby`，允許它存取名為 `blobby` 的分組。
 
 下圖把請求經過的位置畫出來。Kubernetes 能確認 Service 和 host Pod 存在；是否允許讀寫 bucket，則在 host 裡決定。
 
@@ -296,21 +242,7 @@ Warning  FailedScheduling  default-scheduler
 
 ### chart 沒有提供排程欄位時
 
-先確認 chart 的 values 與已產生的 manifest。以下保留的是查詢摘要；`…` 代表省略的參數：
-
-```console
-$ helm show values oci://ghcr.io/wasmcloud/charts/runtime-operator --version 2.6.1 | wc -l
-412
-$ helm show values … | grep -cE "toleration|affinity|nodeSelector|topologySpread|priorityClass"
-0
-
-$ helm get manifest wasmcloud -n wasmcloud | wc -l
-924
-$ helm get manifest wasmcloud -n wasmcloud | grep -cE "toleration|affinity|…"
-0
-```
-
-412 行 values 與 924 行 manifest 都有內容，對指定排程欄位的搜尋才有意義。如果取資料的指令已失敗，`grep -c` 對空輸入也可能得到 0，不能把它解讀成「不存在」。
+2.6.1 的 chart values 沒有提供這些排程欄位，因此這裡直接修改 host Deployment。完整查詢放在[延伸閱讀](#chart-scheduling)。
 
 把下面內容存成 `toleration-patch.json`，它允許 host 排到帶有 spot taint 的節點：
 
@@ -491,10 +423,18 @@ spiritual-death-0162     10.244.0.117   WL 3
 az aks nodepool delete -g <resource-group> --cluster-name <cluster> -n spot1
 ```
 
+刪除後，用 `kubectl get node -o wide` 確認 spot 節點已移除，剩餘節點為 Ready，再確認下列條件：
+
+- `kubectl -n wasmcloud get pods -o wide` 顯示 host Pod 已在剩餘節點上執行，NATS 與 `curler` 也維持 Running。
+- `kubectl get hosts.runtime.wasmcloud.dev -A` 顯示 Host 物件的 Ready 為 True；`kubectl -n wasmcloud get workloaddeployment` 顯示 blobby 的 replicas 為 4、Ready 為 True。
+- `kubectl -n wasmcloud get endpointslice -l kubernetes.io/service-name=blobby` 顯示的位址對應剩餘節點上的 host，不再包含已移除節點上的 host 位址。
+
+接著從 `curler` 呼叫 Service。下方摘要中的 `$ curl` 省略了叢集內執行方式；完整寫法是 `kubectl -n wasmcloud exec curler -- curl -sS -m 10 -D- http://blobby.wasmcloud.svc.cluster.local/gateb.txt`。這是依驗證腳本的 `exec curler -- curl` 方式補全；修正後的寫法本課沒有實跑。要同時收到 HTTP 200 與 `written-via-spot-node-host`，才能確認 Service 已能讀回先前從 spot host 寫入的內容。
+
 以下保留原測試的刪除與恢復摘要：
 
 ```console
-$ az aks nodepool delete …                          實測 36 秒
+$ az aks nodepool delete …
 
 $ kubectl -n wasmcloud get workloaddeployment
 blobby        4   True
@@ -506,11 +446,21 @@ $ curl http://blobby.wasmcloud.svc.cluster.local/gateb.txt
 
 host Pod 由 Deployment 補回，元件重新分配到可用 host；先前寫入的資料也仍能讀取。NATS 留在另一台節點上，所以這裡驗證的是 host 所在節點被移除後的恢復，並未驗證儲存服務同時故障。
 
+## 版本限制
+
+### read_only 無法阻擋已授權 bucket 的寫入 {#mine-6}
+
+2.6.1 的這段授權程式先檢查 bucket allow-list，命中後直接放行，後面的 `read_only` 判斷不會阻擋已授權 bucket 的寫入。以下是補充驗證中設定 `buckets: blobby` 與 `read_only: "true"` 的結果，供判斷版本限制，不列為本章操作步驟：
+
+```console
+--- read_only=true
+  PUT=201
+  GET(ro.txt)=200 body=should-fail
+```
+
+HTTP 201 表示寫入成功，GET 的回應則顯示剛才寫入的內容已能讀回。因此這個版本不能依賴 `read_only: "true"` 提供唯讀保護。這與拼錯設定鍵不同：程式有讀取這個鍵，但判斷順序讓它沒有產生預期效果。
+
 ## 疑難排解
-
-### 找不到舊教學中的 provider 或 link definition {#mine-1}
-
-先對照 wasmCloud 的世代與版本。本章 2.6.1 的 Kubernetes 整合使用 `hostInterfaces`，不能直接套用 v1 的 link 操作；設定入口與限制見步驟 1。
 
 ### 能力設定套用成功，行為卻沒有改變 {#mine-2}
 
@@ -527,18 +477,6 @@ host Pod 由 Deployment 補回，元件重新分配到可用 host；先前寫入
 ### 補上 toleration 後，host 全排到 spot 節點 {#mine-5}
 
 toleration 只解決能不能排入節點，分散需求要另外設定。步驟 4 用 `topologySpreadConstraints` 限制分布；不要只加 toleration 就以為已經分散。
-
-### 設定 read_only 之後，寫入仍然成功 {#mine-6}
-
-2.6.1 的這段授權程式先檢查 bucket allow-list，命中後直接放行，後面的 `read_only` 判斷不會阻擋已授權 bucket 的寫入。實測結果如下：
-
-```console
---- read_only=true
-  PUT=201            ← 寫入沒有被擋
-  GET(ro.txt)=200 body=should-fail    ← 剛剛那次寫入確實落地了
-```
-
-因此這個版本不能依賴 `read_only: "true"` 提供唯讀保護。這與拼錯設定鍵不同：程式有讀取這個鍵，但判斷順序讓它沒有產生預期效果。
 
 ### 憑證 WARN 之後，公開元件仍成功啟動 {#mine-7}
 
@@ -561,6 +499,81 @@ INFO Starting workload                                    ← 下一行,拉取�
 wasmCloud 把元件的能力與執行位置放在 host 模型裡管理。查錯時要分清楚 Kubernetes 是否成功部署 host、wasmCloud 是否成功執行元件，以及 host 是否授權它使用特定資源。擴充節點則還要分開處理 host 的排程與元件的分配，最後以實際讀寫確認恢復範圍。
 
 ## 延伸閱讀
+
+### 為什麼原始碼有多個後端，設定卻不生效
+
+2.6.1 的原始碼包含這些實作：
+
+```text
+crates/wash-runtime/src/plugin/wasi_blobstore/{in_memory,filesystem,nats}.rs
+crates/wash-runtime/src/plugin/wasi_keyvalue/{in_memory,filesystem,nats,redis}.rs
+crates/wash-runtime/src/plugin/multiplex.rs
+```
+
+`multiplex.rs` 有使用 `config.backend` 選後端的邏輯。然而 Kubernetes 裡啟動的是 `wash host`，它的註冊程式如下：
+
+```rust
+// crates/wash/src/cli/host.rs(v2.6.1)
+    .with_plugin(Arc::new(plugin::wasi_blobstore::NatsBlobstore::new(&data_nats_client)))?
+    .with_plugin(Arc::new(plugin::wasmcloud_messaging::NatsMessaging::new(…)))?
+    .with_plugin(Arc::new(plugin::wasi_keyvalue::NatsKeyValue::new(&data_nats_client)))?
+    …
+#[cfg(feature = "wasm_component_model_implements")]
+{
+    cluster_host_builder = cluster_host_builder.with_multiplexed_plugins()?;
+}
+```
+
+一般路徑註冊的是 NATS 版。下方的 `#[cfg(feature = ...)]` 是 Rust 的編譯開關，只有啟用該 feature 才會加入多後端的程式。另一種擴充入口 `hostPlugins` 也有自己的編譯條件，chart 的註解寫著：
+
+```yaml
+# Requires a wash image built with the `host-component-plugins` feature
+# (not enabled in release images yet); a host handed a plugin it cannot
+# build fails to start.
+```
+
+這兩個 feature 是不同的入口，不能只看其中一個就判定另一個也已啟用。本章沒有直接讀取 release 映像的編譯旗標；能確認的是，本章的測試改動 `backend` 沒有切換實際的 NATS 後端。
+
+從 host 的啟動參數，可以看到資料用的 NATS 端點：
+
+```console
+$ kubectl -n wasmcloud get deploy hostgroup-default -o jsonpath='{…args}'
+   host
+   --host-group=default
+   --scheduler-nats-url=nats://nats.wasmcloud.svc.cluster.local:4222
+   --data-nats-url=nats://nats.wasmcloud.svc.cluster.local:4222   ← 提供者的端點在這裡
+   --oci-cache-dir=/oci-cache
+   --http-addr=0.0.0.0:80
+```
+
+`runtime.hostGroups[].dataNatsUrl` 是 host group 的設定。若要指向另一個 NATS，修改的位置在 host group，不是元件的 link 物件。本章沒有實測第二個 host group 搭配第二座 NATS，因此先不把它當成已驗證的切換程序。
+
+下圖對照兩種設定方式。先看左邊獨立的 provider，再看右邊 host 啟動時選用的 NATS 連線。
+
+![v1 透過 link definition 連結元件與 provider；本章的 wasmCloud 2.6.1 host 使用內建的 NATS 實作，由 host 啟動參數指定資料端點。](../assets/diagrams/s3d3-provider-binding.svg)
+
+圖右的 NATS 連線由 host 啟動參數決定；步驟 3 修改的 `buckets` 則控制元件能存取哪些儲存分組。
+
+### 查詢 chart 的排程欄位 {#chart-scheduling}
+
+以下查詢比較 chart 的 values 與已產生的 manifest，確認是否提供 toleration 與分散排程等欄位：
+
+```console
+$ helm show values oci://ghcr.io/wasmcloud/charts/runtime-operator --version 2.6.1 | wc -l
+412
+$ helm show values oci://ghcr.io/wasmcloud/charts/runtime-operator --version 2.6.1 \
+    | grep -cE "toleration|affinity|nodeSelector|topologySpread|priorityClass"
+0
+
+$ helm get manifest wasmcloud -n wasmcloud | wc -l
+924
+$ helm get manifest wasmcloud -n wasmcloud | grep -cE "toleration|affinity|nodeSelector|topologySpread|priorityClass"
+0
+```
+
+412 行 values 與 924 行 manifest 都有內容，對指定排程欄位的搜尋才有意義。如果取資料的指令已失敗，`grep -c` 對空輸入也可能得到 0，不能把它解讀成「不存在」。
+
+### 相關文件
 
 想再深入，可以從這幾份開始：
 

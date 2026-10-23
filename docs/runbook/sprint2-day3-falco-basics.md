@@ -10,7 +10,7 @@ Day 2 的手工基線抓得到偏離，但要有人先掛好探針、有人比�
 
 ## 從隨用的探針換成常駐的元件
 
-Day 2 結尾那張「辦不到的七件事」表，前四列是沒有持久化、沒有告警、沒有規則語言、必須剛好在看。Falco 用一個 DaemonSet 處理這四件：每顆節點跑一份，從 pod 啟動起一直在看，規則寫在檔案裡，符合規則的事件印成告警。
+Day 2 結尾那張「辦不到的七件事」表，列出了沒有告警、沒有規則語言、必須剛好在看等限制。Falco 用一個 DaemonSet 在每顆節點跑一份，從 pod 啟動起持續偵測，規則寫在檔案裡，符合規則的事件印成告警。本章沒有配置告警的外部保存，持久化仍需另外處理。
 
 兩種做法最大的差別，在事件是在哪裡被過濾掉的。把 Day 2 和今天的做法並排，上半是使用者空間，下半是核心：
 
@@ -23,17 +23,16 @@ Day 2 結尾那張「辦不到的七件事」表，前四列是沒有持久化�
 
 Falco 也能讀 Kubernetes 的稽核日誌（`k8saudit` 這個事件來源），但 AKS 的稽核日誌要另外經 Azure 的服務轉出來。本課只用 syscall 這個來源。
 
-## 步驟 1: 選 driver，而且不要讓它自己決定
+## 步驟 1: 明確指定已驗證的 driver
 
-Falco 要拿到 syscall 事件，得先在核心裡放一段程式，把事件送到使用者空間，這段程式叫 **driver**。Falco 有三種 driver，受管的 AKS 節點上只有一種走得通：
+Falco 要拿到 syscall 事件，得先在核心裡放一段程式，把事件送到使用者空間，這段程式叫 **driver**。本章使用的 [chart 9.1.0 設定檔](https://github.com/falcosecurity/charts/blob/falco-9.1.0/charts/falco/values.yaml#L293-L299) 列出兩種 driver：
 
-| driver | 怎麼運作 | 在受管節點上 |
+| driver | 怎麼運作 | 本章的驗證範圍 |
 |---|---|---|
-| `kmod` | 載入一個 out-of-tree 核心模組（不隨核心一起發布、另外編譯的模組） | 不可行，節點映像不讓你載入自己的模組 |
-| `ebpf`（legacy） | 安裝時在節點上現場編譯 eBPF probe | 要對著節點的 GLIBC（Linux 上的 C 標準函式庫）編譯，節點映像換版就可能編不出來 |
-| `modern_ebpf` | CO-RE（Day 0 講過的「編譯一次、到處執行」）：一份預先編好的 probe，靠 BTF 在載入時對上這台的核心結構 | 可行，[Day 0](sprint2-day0-ebpf-concepts.md) 已經確認節點有 BTF |
+| `kmod` | 載入一個 out-of-tree 核心模組（不隨核心一起發布、另外編譯的模組） | 沒有實際安裝 |
+| `modern_ebpf` | CO-RE（Day 0 講過的「編譯一次、到處執行」）：一份預先編好的 probe，靠 BTF 在載入時對上這台的核心結構 | 已實際安裝並觸發告警；[Day 0](sprint2-day0-ebpf-concepts.md) 已確認節點有 BTF |
 
-Helm chart 的預設值是 `kind: auto`，由 Falco 安裝時自己挑。它挑了哪一種，要裝完去翻日誌才知道，而且 auto 允許退回 legacy `ebpf`。所以在 AKS 上直接寫死 `modern_ebpf`：
+這個版本的預設值仍是 `kind: auto`，但列出的 driver 選項不含 legacy `ebpf`。本章明確指定已驗證的 `modern_ebpf`，讓安裝設定與後面的實驗一致：
 
 ```bash
 cat > falco-values.yaml <<'EOF'
@@ -57,7 +56,7 @@ EOF
 另外兩項也不是預設值：
 
 - `tty: true`：Falco 的 stdout 沒接終端機時是整塊緩衝的，告警會壓在緩衝區裡，不會馬上出現在 `kubectl logs`。
-- `tolerations`：本課的 `ebpf` 節點池是 spot，節點帶著 `NoSchedule` 的 taint，而 chart 預設的 toleration 只涵蓋 control-plane 節點。少了這一段，DaemonSet 只會跑在沒有 taint 的節點上，`kubectl get ds` 照樣顯示 `DESIRED 1 / READY 1`，看起來完全健康，但你要觀察的節點上根本沒有 Falco。這種失敗不報錯，後面的實驗只會一直沒有資料。你的節點池如果不是 spot，這一段可以拿掉。
+- `tolerations`：本課的 `ebpf` 節點池是 spot，節點帶著 `NoSchedule` 的 taint，而 chart 預設的 toleration 只涵蓋 control-plane 節點。少了這一段，DaemonSet 只會跑在沒有 taint 的節點上，`kubectl get ds` 照樣顯示 `DESIRED 1 / READY 1`，看起來完全健康，但你要觀察的節點上根本沒有 Falco。這種失敗不顯示錯誤，後面的實驗只會一直沒有資料。你的節點池如果不是 spot，這一段可以拿掉。
 
 後面的步驟要用 JSON 讀告警，也要用腳本數告警，所以再讓 Falco 輸出 JSON：
 
@@ -70,9 +69,26 @@ falco:
 EOF
 ```
 
-本課只實際裝過 `modern_ebpf`。`kmod` 和 legacy `ebpf` 走不通，是根據官方文件和節點映像的限制判斷的，沒有實際裝過；在受管的 AKS 上照著用 `modern_ebpf` 就好，節點映像升級後，用下一步的啟動日誌確認它還是選到這一種。
+節點映像升級後，用下一步的啟動日誌確認 Falco 使用的 driver。
 
 ## 步驟 2: 安裝，以及它裝出了什麼
+
+如果沿用 Day 2 收尾後的環境，先啟動叢集，再把 `ebpf` 節點池從 0 台恢復為 2 台。將 `<resource-group>`、`<cluster-name>` 與 `<sub>` 換成自己的資源群組、叢集名稱與訂閱：
+
+```console
+$ az aks start -g <resource-group> -n <cluster-name> --subscription <sub>
+```
+
+接著執行 `az aks nodepool scale -g <resource-group> --cluster-name <cluster-name> --subscription <sub> -n ebpf --node-count 2`。驗證紀錄保留了擴至兩台的操作，但省略部分參數；這裡依 [Azure CLI 文件](https://learn.microsoft.com/en-us/cli/azure/aks/nodepool#az-aks-nodepool-scale) 補齊，修正後的寫法本課沒有實跑。
+
+查詢節點狀態，等兩顆 `ebpf` 節點及 system 節點都顯示 `Ready` 才安裝。以下是驗證紀錄使用的查詢方式；`<context>` 填叢集的 kubeconfig context，`<api-ip>` 與 `<api-fqdn>` 填目前 API server 的 IP 與完整網域名稱：
+
+```console
+$ kubectl --context <context> --server https://<api-ip>:443 \
+    --tls-server-name <api-fqdn> get nodes -o wide
+```
+
+確認節點就緒後安裝 Falco：
 
 ```console
 $ helm repo add falcosecurity https://falcosecurity.github.io/charts && helm repo update
@@ -93,7 +109,7 @@ falco   3         3         3       falco,falcoctl-artifact-follow   falcosecuri
                                                                      falcosecurity/falcoctl:0.13.0
 ```
 
-另外還有一個 init 容器，pod 啟動前先跑完。三個容器各自的工作：
+另外還有一個 init 容器，pod 啟動前先跑完。它會下載規則與 **plugin**；plugin 是 Falco 執行時載入的擴充模組。三個容器各自的工作：
 
 | 容器 | 工作 |
 |---|---|
@@ -124,12 +140,12 @@ $ kubectl -n falco logs -l app.kubernetes.io/name=falco -c falco --tail=30
 … Loading rules from:
 …    /etc/falco/falco_rules.yaml | schema validation: ok
 … The chosen syscall buffer dimension is: 8388608 bytes (8 MBs)
-… Opening 'syscall' source with modern BPF probe.        ← 這一行就是證據
+… Opening 'syscall' source with modern BPF probe.
 … One ring buffer every '2' CPUs.
 … [libs]: libpman: disabled BPF iterators (not running in the root PID namespace…)
 ```
 
-標了箭頭的 `Opening 'syscall' source with modern BPF probe.` 就是答案。往上兩行的 8 MB 是 **ring buffer** 的大小：核心裡的 probe 把事件寫進這塊環狀的緩衝區，Falco 從另一端讀出來。Falco 讀得比事件產生得慢，緩衝區滿了，新的事件就會被丟掉。
+從 `Opening 'syscall' source with modern BPF probe.` 這一行確認 Falco 使用 modern eBPF driver。上一行的 8 MB 是 **ring buffer** 的大小：核心裡的 probe 把事件寫進這塊環狀的緩衝區，Falco 從另一端讀出來。Falco 讀得比事件產生得慢，緩衝區滿了，新的事件就會被丟掉。
 
 最後那行 `disabled BPF iterators` 不是錯誤。BPF iterator 是用 BPF 程式一次列出核心裡所有行程的方法；Falco 跑在 pod 自己的 PID namespace 裡，所以不用它掃節點上既有的行程，改讀 `/proc`。功能沒少，只是啟動時多花一點時間建行程表。
 
@@ -160,27 +176,11 @@ $ kubectl -n falco exec <falco-pod> -c falco -- ls -la /etc/falco/
 -rw-r--r--  nonroot  nonroot  63642  falco_rules.yaml
 ```
 
-只有一個規則檔，63 KB。用 `grep` 數，裡面有 25 條 rule、87 個 macro、49 個 list；25 條 rule 全部啟用，而且全部標著 `maturity_stable`。
+只有一個規則檔，63 KB。用 `grep` 數，裡面有 25 條 rule（規則）、87 個 macro（一段取了名字、可重複引用的條件）、49 個 list（一組只列項目、不含邏輯的資料）；25 條 rule 全部啟用，而且全部標著 `maturity_stable`。
 
-maturity 是規則的成熟度。Falco 的規則分成 stable、incubating、sandbox 三級，預設只裝 stable 這一級，另外兩級要自己用 `falcoctl artifact install` 裝。所以手上就是這 25 條：
+maturity 是規則的成熟度。Falco 的規則分成 stable、incubating、sandbox 三級，預設只裝 stable 這一級，另外兩級要自己用 `falcoctl artifact install` 裝。完整的 25 條規則列在章末的[延伸閱讀](#default-rule-list)。
 
-```text
- 1 Directory traversal monitored file read      14 Packet socket created in container
- 2 Read sensitive file trusted after startup    15 Redirect STDOUT/STDIN to Network Connection in Container
- 3 Read sensitive file untrusted                16 Linux Kernel Module Injection Detected
- 4 Run shell untrusted                          17 Debugfs Launched in Privileged Container
- 5 System user interactive                      18 Detect release_agent File Container Escapes
- 6 Terminal shell in container                  19 PTRACE attached to process
- 7 Contact K8S API Server From Container        20 PTRACE anti-debug attempt
- 8 Netcat Remote Code Execution in Container    21 Find AWS Credentials
- 9 Search Private Keys or Passwords             22 Execution from /dev/shm
-10 Clear Log Activities                         23 Drop and execute new binary in container
-11 Remove Bulk Data from Disk                   24 Disallowed SSH Connection Non Standard Port
-12 Create Symlink Over Sensitive Files          25 Fileless execution via memfd_create
-13 Create Hardlink Over Sensitive Files
-```
-
-讀這份清單要注意它挑了什麼：每一條描述的都是一種已知的攻擊手法，例如載入核心模組、`release_agent` 容器逃逸、`memfd_create` 無檔案執行、翻找私鑰、清日誌。沒有一條在管「這個容器今天做了以前沒做過的事」，而那正是 Day 2 手工基線在做的事。步驟 5 會實際比一次。
+這些規則的共同點是：每一條描述的都是一種已知的攻擊手法，例如載入核心模組、`release_agent` 容器逃逸、`memfd_create` 無檔案執行、翻找私鑰、清日誌。沒有一條在管「這個容器今天做了以前沒做過的事」，而那正是 Day 2 手工基線在做的事。步驟 5 會實際比一次。
 
 ### 一條規則的五個欄位
 
@@ -219,7 +219,7 @@ maturity 是規則的成熟度。Falco 的規則分成 stable、incubating、san
 
 ### condition 裡的名字從哪來
 
-`condition` 的前三行 `spawned_process`、`container`、`shell_procs` 不是欄位，是 **macro**：一段取了名字的條件，可以被 rule 或其他 macro 引用。`shell_procs` 裡的 `shell_binaries` 則是 **list**：一組純資料，只列項目，不含邏輯。把它們一個個展開：
+`condition` 的前三行 `spawned_process`、`container`、`shell_procs` 都是 macro；`shell_procs` 裡的 `shell_binaries` 則是 list。把它們一個個展開：
 
 ```yaml
 - macro: spawned_process
@@ -442,7 +442,7 @@ k8s.ns.name    = ebpf-lab          ← namespace
 | `evt.*` / `proc.*` / `fd.*` / `user.*` | **核心事件本身**，probe 直接送上來 | `evt.type=execve`、`proc.tty=34816`、`fd.name=/etc/shadow` |
 | `container.*` / `k8s.*` | **container plugin 事後查出來的**，靠行程的 cgroup 反查容器執行期 | `container.id`、`k8s.pod.name` |
 
-**plugin** 是 Falco 執行時載入的擴充模組，步驟 2 的啟動日誌裡那行 `Loaded plugin 'container@0.7.1'` 就是 container plugin。它做的事，[Day 2](sprint2-day2-bpftrace-kubernetes.md) 你親手做過一遍：`cgroup` builtin 拿到 inode、`find -inum` 找出路徑、從路徑裡取出 container id 與 pod uid、`crictl inspect` 換成 pod 名字。在 Falco 裡，這整串變成 `output` 裡的一個 `%container.id`。
+步驟 2 的啟動日誌裡那行 `Loaded plugin 'container@0.7.1'` 就是 container plugin。它做的事，[Day 2](sprint2-day2-bpftrace-kubernetes.md) 你親手做過一遍：`cgroup` builtin 拿到 inode、`find -inum` 找出路徑、從路徑裡取出 container id 與 pod uid、`crictl inspect` 換成 pod 名字。在 Falco 裡，這整串變成 `output` 裡的一個 `%container.id`。
 
 既然第二類欄位還是靠 cgroup 查出來的，Day 2 的[「從節點 nsenter 進去的動作沒有被記錄」](sprint2-day2-bpftrace-kubernetes.md#mine-2)在 Falco 身上也成立。步驟 5 會驗證它的後果。
 
@@ -450,7 +450,13 @@ Day 2 還有一個問題，在這裡沒有出現：[「kubectl exec 開的 shell
 
 ### 撈告警的小腳本
 
-接下來要反覆從各節點的 Falco 日誌裡撈告警，先寫一支小腳本，後面幾章也會用到：
+接下來要反覆從各節點的 Falco 日誌裡撈告警。下方保留的腳本有三個問題：`kubectl logs` 帶 selector 時，預設只取各 pod 最後 10 行；空的 `LINES` 經 `echo` 仍會印出一個換行；`2>/dev/null` 與 `|| true` 則會隱藏讀取失敗。[kubectl 官方文件](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_logs/) 說明了 selector 的預設行數限制。
+
+當日驗證使用的 `04-falco-alerts.sh` 是逐顆 pod 讀取、直接輸出符合條件的日誌，所以沒有前兩個問題，但同樣需要補上錯誤傳遞。要使用下方腳本，先依序修正以下幾處；修正後的寫法本課沒有實跑：
+
+1. 在 `LINES` 前先取 pod 清單：`PODS=$(kubectl -n falco get pods -l app.kubernetes.io/name=falco -o name) || exit "$?"`。接著用 `[ -n "$PODS" ] || { printf 'No Falco pods found\n' >&2; exit 1; }`，避免把找不到 pod 當成零告警。
+2. 將整段 `LINES=$(...)` 換成 `LINES=$(for pod in $PODS; do kubectl -n falco logs "$pod" -c falco --since="$SINCE" --tail=-1 --prefix=false || exit "$?"; done | sed -n '/"rule"/p') || exit "$?"`。逐顆讀取並保留 stderr；`sed` 沒找到告警時正常結束，讀取失敗則透過原有的 `pipefail` 與 `exit` 傳回非零狀態。
+3. 兩處 `echo "$LINES"` 都換成 `printf '%s\n' "$LINES"`，並在整個 `if [ "$MODE" = rules ]; then … fi` 外再包一層 `if [ -n "$LINES" ]; then … fi`，讓空結果完全不輸出。
 
 ```bash
 cat > falco-alerts.sh <<'EOF'
@@ -484,7 +490,7 @@ chmod +x falco-alerts.sh
 
 回到 `condition` 的第五行 `container_entrypoint`：它要求 shell 的父行程是容器執行期。換句話說，只有容器執行期直接生出來的 shell 才會被報。容器裡已經在跑的程式再開一個 shell，父行程是那支程式，這條規則就不成立。
 
-驗證這件事要先避開一個陷阱。用巢狀的 `bash -c` 測，會看到兩層都報（輸出是把告警整理成一行一筆的結果）：
+用巢狀的 `bash -c` 測，會看到兩層都報（輸出是把告警整理成一行一筆的結果）：
 
 ```console
 $ script -q /dev/null kubectl exec -n ebpf-lab -it baseline-nginx -- bash -c 'bash -c "echo inner-shell-ran"'
@@ -602,7 +608,9 @@ Warning  Read sensitive file untrusted
 
 ### 沒有人操作時有多少告警
 
-這個量測是在裝好 Falco、還沒做步驟 4 之前做的：在沒有任何人操作的 8 分 28 秒裡，三顆節點的告警數如下。如果你已經做完前面的步驟，先等一段時間不做任何操作，再用 `--since` 指定這段時間來數：
+這個量測是在裝好 Falco、還沒做步驟 4 之前做的：在沒有任何人操作的 8 分 28 秒裡，三顆節點的告警數如下。零告警與後面的規則計數來自驗證素材的 `04-falco-alerts.sh`，並非上面保留的舊腳本；六筆原始告警也與規則計數相符。如果你已經做完前面的步驟，先等一段時間不做任何操作，再用 `--since` 指定這段時間來數。
+
+計數前先完成步驟 4 的腳本修正。在 Bash 中用 `set -o pipefail; ./falco-alerts.sh | wc -l`，讓讀取失敗能傳到整個管線；只有結束狀態為 0 時，數字才可採用。這個修正後的計數寫法本課沒有實跑，下方保留原有指令與紀錄：
 
 ```console
 $ ./falco-alerts.sh | wc -l
@@ -780,6 +788,26 @@ Falco 在每顆節點上把所有 syscall 事件送到使用者空間，逐條�
 - **[預設規則清單與成熟度分級](https://falco.org/docs/reference/rules/default-rules/)** —— 官方明載「預設只載入 stable 規則」，incubating 與 sandbox 要另外安裝，對應步驟 3 數到的 25 條。
 - **[事件與條件可用的欄位總表](https://falco.org/docs/reference/rules/supported-fields/)** —— 寫規則時查欄位名稱用；`evt.*`／`proc.*` 與 `container.*`／`k8s.*` 分屬不同來源，在這裡看得最清楚。
 - **[Falco Helm chart 的參數表](https://github.com/falcosecurity/charts/tree/master/charts/falco)** —— `driver.kind` 預設 `auto`、`customRules` 的用法都在這份 README 的參數表裡，Day 4 會直接用到。
+
+### 本章載入的 25 條 stable 規則 {#default-rule-list}
+
+以下是步驟 3 的完整清單，供查找規則名稱時對照：
+
+```text
+ 1 Directory traversal monitored file read      14 Packet socket created in container
+ 2 Read sensitive file trusted after startup    15 Redirect STDOUT/STDIN to Network Connection in Container
+ 3 Read sensitive file untrusted                16 Linux Kernel Module Injection Detected
+ 4 Run shell untrusted                          17 Debugfs Launched in Privileged Container
+ 5 System user interactive                      18 Detect release_agent File Container Escapes
+ 6 Terminal shell in container                  19 PTRACE attached to process
+ 7 Contact K8S API Server From Container        20 PTRACE anti-debug attempt
+ 8 Netcat Remote Code Execution in Container    21 Find AWS Credentials
+ 9 Search Private Keys or Passwords             22 Execution from /dev/shm
+10 Clear Log Activities                         23 Drop and execute new binary in container
+11 Remove Bulk Data from Disk                   24 Disallowed SSH Connection Non Standard Port
+12 Create Symlink Over Sensitive Files          25 Fileless execution via memfd_create
+13 Create Hardlink Over Sensitive Files
+```
 
 ## 下一步
 

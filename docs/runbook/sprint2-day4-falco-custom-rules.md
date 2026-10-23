@@ -4,7 +4,7 @@
 
 Day 3 留下兩個空白：從容器連 8.8.8.8，連線成功，預設規則一筆都沒報；容器裡已經在跑的程式再開一個 shell，預設規則也看不到。這一章自己寫兩條規則把它們補上。
 
-規則寫好、也命中了，接下來的問題比較難處理。假設你的規則是「容器只准連允許清單上的位址」，而叢集裡有一顆什麼壞事都沒做的 pod，每 2 秒呼叫一次叢集內的服務。這條規則每分鐘會因為它報 180 筆告警。加上兩條例外，告警就歸零；可是同一個容器如果把 `/etc/shadow` 的內容塞進請求，送到同一個服務，規則一樣不會報。
+規則寫好、也命中了，接下來的問題比較難處理。假設你的規則是「容器只准連允許清單上的位址」，而叢集裡有一顆只執行正常請求的 Pod，每 2 秒呼叫一次叢集內的服務。這條規則每分鐘會因為它報 180 筆告警。加上兩條例外，告警就歸零；可是同一個容器如果把 `/etc/shadow` 的內容塞進請求，送到同一個服務，規則一樣不會報。
 
 讀完這一章，遇到一條很吵的自訂規則時，你能找出誤報是從哪裡放大出來的；決定加一條例外之前，你能說出這條例外會讓哪些連線從此不被這條規則看見。
 
@@ -241,7 +241,7 @@ falcosidekick:
 另外幾個值：
 
 - `webui.enabled: false`：sidekick 的 Web UI 會另外部署一個 Redis 和一個 UI 服務，用途是在瀏覽器上翻告警列表。這一章沒有步驟用得到，所以關掉，少兩顆 pod。
-- `resources`：chart 預設完全沒有給，後果見[疑難排解：sidekick 預設兩份副本、不給 resources](#mine-6)。
+- `resources`：設定 sidekick 的 CPU 與記憶體 requests、limits，上面的 values 已經包含這些設定。
 - `minimumpriority: "notice"`：只把 notice 以上的告警送到這個 webhook，每個目的地可以各自設門檻。本課的實驗沒有產生低於 notice 的事件，所以門檻有沒有擋下低等級的告警，沒有實際驗證。
 
 ### 一次 `helm upgrade` 交出規則和設定
@@ -258,6 +258,31 @@ helm upgrade falco falcosecurity/falco --version 9.1.0 -n falco \
 這樣規則檔是一份獨立的檔案，可以單獨檢查語法、單獨看 diff。檔名裡的點要跳脫（`custom-rules\.yaml`），否則 Helm 會把它當成兩層 key。
 
 這次升級改到了規則的 ConfigMap，Falco 的 DaemonSet 會一個節點接一個節點重啟，每個節點重啟期間有幾十秒沒有監控。之後每次改規則都會這樣，原因見[疑難排解：只改規則內容，整個 DaemonSet 也重啟一遍](#mine-1)。
+
+每次 `helm upgrade` 成功後，先等待 Falco 滾動完成，再重新取得 Pod 名稱、檢查規則檔與所有 Falco Pod 的載入日誌（依官方文件補上，本課沒有實跑）：
+
+```bash
+(
+  set -eu
+  kubectl -n falco rollout status daemonset/falco --timeout=5m
+
+  FALCO_POD=$(kubectl -n falco get pods \
+    -l app.kubernetes.io/name=falco,app.kubernetes.io/instance=falco \
+    -o jsonpath='{.items[0].metadata.name}')
+
+  kubectl -n falco exec "$FALCO_POD" -c falco -- \
+    ls -la /etc/falco/rules.d/
+
+  kubectl -n falco logs \
+    -l app.kubernetes.io/name=falco,app.kubernetes.io/instance=falco \
+    -c falco --tail=-1 --prefix=true |
+    sed -n '/Loading rules from/,/syscall buffer/p'
+)
+```
+
+等待失敗就停止，不繼續觸發事件或量測；等待成功後，依日誌的 Pod 前綴逐顆確認自訂規則的載入紀錄與警告，DaemonSet 滾動完成本身不代表規則符合預期。
+
+寫法依據 Kubernetes 1.35 的 [DaemonSet 滾動更新](https://v1-35.docs.kubernetes.io/docs/tasks/manage-daemon/update-daemon-set/)、[kubectl get](https://v1-35.docs.kubernetes.io/docs/reference/kubectl/generated/kubectl_get/)、[kubectl exec](https://v1-35.docs.kubernetes.io/docs/reference/kubectl/generated/kubectl_exec/) 與 [kubectl logs](https://v1-35.docs.kubernetes.io/docs/reference/kubectl/generated/kubectl_logs/) 文件；資源名稱與 selector 對照 [Falco chart 9.1.0 範本](https://github.com/falcosecurity/charts/blob/falco-9.1.0/charts/falco/templates/_helpers.tpl)。
 
 升級完成後，進 Falco 的 pod 看規則檔：
 
@@ -285,14 +310,18 @@ rules_files:
 | 位置 | 誰放的 | 說明 |
 |---|---|---|
 | `falco_rules.yaml` | init 容器在 pod 啟動時下載（規則檔跟容器映像一樣放在 OCI registry 上，用同一套格式發佈） | 預設的 25 條。不要手改，下次拉新版就被蓋掉 |
-| `falco_rules.local.yaml` | 傳統上留給人手動編輯的本機覆寫檔 | 這個映像裡沒有這個檔案。`rules_files` 裡不存在的項目，Falco 直接跳過，不報錯 |
+| `falco_rules.local.yaml` | 傳統上留給人手動編輯的本機覆寫檔 | 這個映像裡沒有這個檔案。`rules_files` 裡不存在的項目，Falco 直接跳過，不顯示錯誤 |
 | `rules.d/` | chart 的 `customRules` | 這一章的規則在這裡 |
 
 清單由上往下解析，名字重複時，後解析的會蓋過先解析的。規則 A、B 都是新的名字，跟預設規則沒有重名，所以預設的 25 條一條都沒被動到。Day 5 要拿 Tetragon 跟 Falco 對照，預設規則保持原樣，對照才有共同的基準。
 
 ### 確認規則真的載入了
 
+<span id="mine-2"></span>
+
 `helm upgrade` 成功，只代表 ConfigMap 寫進去了、pod 重建了；helm 不會檢查規則的內容。規則有沒有載入，要看 Falco pod 自己的啟動日誌。每個規則檔會列一行，附上 schema 驗證的結果：
+
+下面保留原指令與輸出。這條指令帶了 selector（`-l`），依 [kubectl 官方文件](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_logs/#options)，預設每顆 Pod 只取最後 10 行，可能看不到啟動訊息。讀取時應在 `-c falco` 後加上 `--tail=-1`；修正後的寫法本課沒有實跑。
 
 ```console
 $ kubectl -n falco logs -l app.kubernetes.io/name=falco -c falco | sed -n '/Loading rules from/,/syscall buffer/p'
@@ -303,7 +332,7 @@ The chosen syscall buffer dimension is: 8388608 bytes (8 MBs)
 ```
 
 
-`custom-rules.yaml` 那一行要在，而且下面直接接 `The chosen syscall buffer dimension`，中間不能夾著 warning 區塊。如果看到 `Ok, with warnings`，規則可能載入了卻永遠不會觸發，見[疑難排解：`evt.dir` 已經淘汰，規則照樣載入成功](#mine-2)。
+`custom-rules.yaml` 那一行要在，而且下面直接接 `The chosen syscall buffer dimension`，中間不能夾著 warning 區塊。如果看到 `Ok, with warnings`，先閱讀 warning 內容，確認規則使用的欄位與條件是否符合目前版本。
 
 ### 告警現在怎麼走
 
@@ -320,7 +349,7 @@ The chosen syscall buffer dimension is: 8388608 bytes (8 MBs)
 
 ## 步驟 4：放一顆正常的 pod 進來
 
-規則 A 把「不在清單上的對端」都當成可疑。叢集裡一顆正常的 pod 平常要連的東西，比寫規則時想到的多。先放一顆什麼壞事都沒做的 pod 進去：它解析叢集內的服務名稱、GET 步驟 3 建的接收端、睡 2 秒，一直重複。
+規則 A 把「不在清單上的對端」都當成可疑。叢集裡一顆正常的 pod 平常要連的東西，比寫規則時想到的多。先放一顆只執行正常請求的 Pod 進去：它解析叢集內的服務名稱、GET 步驟 3 建的接收端、睡 2 秒，一直重複。
 
 這顆 pod 引起的告警就是**誤報**（false positive）：規則報了，但它要抓的事並沒有發生。
 
@@ -355,7 +384,9 @@ kubectl apply -f legit-client.yaml
 ```
 
 
-量告警率之前，先準備一支量測腳本。它用每一筆告警自己的時間戳劃出固定長度的窗口，再按規則名稱分組計數。沒有直接用 `kubectl logs --since`，是因為 `--since` 對每顆 pod 各自計算，幾顆 Falco 的窗口會錯開：
+量告警率時，要先記錄起點、等待 120 秒、記錄終點，再用每筆告警自己的時間戳篩選同一個時間區間，按規則名稱計數。只靠 `kubectl logs --since`，各顆 Pod 的查詢時間會錯開。
+
+下面保留原腳本供對照，請使用下一個區塊的量測版本。原腳本回查過去的資料，沒有等待兩分鐘；其中 `logs -l` 又預設每顆 Pod 只取最後 10 行。若沿用 selector 讀取，應加上 `--tail=-1`，修正後的寫法本課沒有實跑。後面補入的實跑版本會等待指定秒數，再逐顆指定 Pod 讀取，並用共同的起訖時間篩選告警：
 
 ```bash
 cat > alert-rate.sh <<'EOF'
@@ -379,6 +410,54 @@ EOF
 chmod +x alert-rate.sh
 ```
 
+
+將下列內容存成 `alert-rate.sh`，再用上方的 `chmod +x alert-rate.sh` 設定執行權限。這是驗證素材 `06-alert-rate.sh` 的內容，僅省略註解；下方調校前後的 120 秒結果使用這個版本量測。腳本需要本機有 Python 3：
+
+```bash
+#!/bin/bash
+set -u
+W="${1:-60}"
+FILTER="${2:-}"
+K="${KUBECTL:-kubectl}"
+NS="${FALCO_NS:-falco}"
+
+start_epoch=$(date -u +%s)
+echo "window start $(date -u +%FT%TZ), ${W}s"
+sleep "$W"
+end_epoch=$(date -u +%s)
+echo "window end   $(date -u +%FT%TZ)"
+
+tmp=$(mktemp)
+for p in $($K -n "$NS" get pods -l app.kubernetes.io/name=falco -o name | sed 's#pod/##'); do
+  $K -n "$NS" logs "$p" -c falco --since "$((W + 20))s" 2>/dev/null | grep '"priority"' >> "$tmp"
+done
+
+python3 - "$tmp" "$start_epoch" "$end_epoch" "$FILTER" <<'PY'
+import json, sys, datetime, collections
+path, s, e, filt = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
+hits = collections.Counter()
+total = 0
+for line in open(path):
+    try:
+        a = json.loads(line)
+    except Exception:
+        continue
+    t = a["time"][:19]
+    ep = datetime.datetime.strptime(t, "%Y-%m-%dT%H:%M:%S").replace(
+        tzinfo=datetime.timezone.utc).timestamp()
+    if not (s <= ep <= e):
+        continue
+    if filt and filt not in a["rule"]:
+        continue
+    hits[a["rule"]] += 1
+    total += 1
+win = e - s
+print(f"--- {total} alert(s) in {win}s = {total * 60.0 / win:.1f} alerts/min")
+for r, c in hits.most_common():
+    print(f"{c:6d}  {r}")
+PY
+rm -f "$tmp"
+```
 
 一顆每 2 秒發一次請求的 pod，每分鐘是 30 次請求。量兩分鐘：
 
@@ -407,7 +486,7 @@ window end   2026-08-06T11:12:51Z
 
 連到接收端 ClusterIP（Service 在叢集內的虛擬 IP）的 TCP 是 30 筆，一次請求一條，跟預期一樣。多出來的 150 筆都連到 CoreDNS（叢集的 DNS 伺服器，`10.0.0.10`）的 UDP 53，平均每次請求 5 筆。
 
-原因在 Kubernetes 替每個 pod 寫的 `/etc/resolv.conf`。它的格式大致如下（依 Kubernetes 官方文件的格式；本課沒有在 pod 裡實際印出這個檔案，你的 `search` 清單可能多幾個網域，用 `kubectl exec` 進 pod `cat /etc/resolv.conf` 就看得到自己的版本）：
+要確認 DNS 查詢順序，用 `kubectl exec` 進入 `legit-client`，執行 `cat /etc/resolv.conf`，查看 `search` 清單與 `ndots` 設定。以下是格式示意，你的 `search` 清單可能包含其他網域：
 
 ```text
 search <ns>.svc.cluster.local svc.cluster.local cluster.local
@@ -534,17 +613,38 @@ Shell spawned by non-runtime parent in container   proc=bash pname=bash tty=0   
 | **好審查** | diff 是「一行超長條件變成另一行更長的條件」 | diff 是「某條具名例外多了一列 values」，一眼看得出放行範圍擴大了多少 |
 | **有結構** | 純文字 | `fields`／`comps`／`values` 有固定結構，可以用程式檢查，例如禁止任何例外拿整段 CIDR 當值 |
 
-「可追加」靠的是 Falco 的覆寫語法：在後解析的檔案裡寫一條同名的規則，就能改動先解析的那條。同名規則只寫 `- rule: <同名>` 加完整欄位，會整條取代；只想加一點東西，就在同名規則底下寫 `override`，指定某個欄位要 `append`（接在原本的後面）或 `replace`（取代）。`append` 是直接把文字接在原本的 `condition` 後面，所以要自己寫 `and`，例如 `condition: and not user.name=root`；用在 `exceptions` 上，新的 `values` 會併入既有的例外。想關掉一條規則，就寫同名規則加 `enabled: false`。
-
-所以多個團隊共用一座叢集時，可以由一個團隊維護規則本身，各應用團隊在自己的檔案裡只追加自己的例外值。本課沒有實際跑過追加的寫法；要用的話，照[官方的覆寫說明](https://falco.org/docs/concepts/rules/overriding/)寫，套用後一樣用步驟 3 的啟動日誌確認沒有 warning。
+多個團隊需要分別維護例外時，可以參考章末延伸閱讀的覆寫與追加語法。
 
 例外也不一定要逐一列 IP：`comps` 可以用 `in`，配合 `fd.snet` 這類欄位一次放行整個網段。這樣寫起來省事，放行的範圍也跟著變大。
 
 改好 `custom-rules.yaml`，重跑步驟 3 的 `helm upgrade` 指令。這次只有規則內容變了，DaemonSet 還是會整個滾動一遍（[疑難排解：只改規則內容，整個 DaemonSet 也重啟一遍](#mine-1)）。
 
+調校後的 `helm upgrade` 成功後，先等待滾動完成，再重新取得 Pod 名稱、檢查規則檔與載入日誌（依官方文件補上，本課沒有實跑）：
+
+```bash
+(
+  set -eu
+  kubectl -n falco rollout status daemonset/falco --timeout=5m
+
+  FALCO_POD=$(kubectl -n falco get pods \
+    -l app.kubernetes.io/name=falco,app.kubernetes.io/instance=falco \
+    -o jsonpath='{.items[0].metadata.name}')
+
+  kubectl -n falco exec "$FALCO_POD" -c falco -- \
+    ls -la /etc/falco/rules.d/
+
+  kubectl -n falco logs \
+    -l app.kubernetes.io/name=falco,app.kubernetes.io/instance=falco \
+    -c falco --tail=-1 --prefix=true |
+    sed -n '/Loading rules from/,/syscall buffer/p'
+)
+```
+
+等待失敗就停止，不繼續觸發事件或量測；等待成功後，依日誌的 Pod 前綴逐顆確認自訂規則的載入紀錄與警告，DaemonSet 滾動完成本身不代表規則符合預期。
+
 ### 調校後的告警率
 
-legit-client 一直在跑，流量跟之前一樣。再量一次：
+legit-client 一直在跑，流量跟之前一樣。使用步驟 4 補入的量測版本，重新記錄起點並等待 120 秒，再計算調校後的告警率：
 
 ```console
 $ ./alert-rate.sh 120
@@ -562,7 +662,7 @@ window end   2026-08-06T11:18:11Z
 | 連 8.8.8.8:53 | 命中 | **命中** |
 | fork 出來的 shell（規則 B） | 命中 | **命中** |
 
-這個 0 是 120 秒窗口的結果，本課沒有做更長時間的觀察。
+這個 0 是 120 秒時間區間的結果，本課沒有做更長時間的觀察。
 
 ### 這兩條例外放行了什麼 {#what-exceptions-allow}
 
@@ -673,6 +773,29 @@ Falco 自己輸出的 JSON 只有 `hostname`、`output`、`output_fields`、`pri
 
 接收端和 legit-client 只用在這一章。先把 `falco-values.yaml` 裡的 `falcosidekick.enabled` 改回 `false`，照步驟 3 的指令再 `helm upgrade` 一次，關掉 sidekick；然後刪掉兩個測試用的物件：
 
+關閉 sidekick 的 `helm upgrade` 成功後，先等待 Falco 滾動完成，再重新取得 Pod 名稱、檢查規則檔與載入日誌（依官方文件補上，本課沒有實跑）：
+
+```bash
+(
+  set -eu
+  kubectl -n falco rollout status daemonset/falco --timeout=5m
+
+  FALCO_POD=$(kubectl -n falco get pods \
+    -l app.kubernetes.io/name=falco,app.kubernetes.io/instance=falco \
+    -o jsonpath='{.items[0].metadata.name}')
+
+  kubectl -n falco exec "$FALCO_POD" -c falco -- \
+    ls -la /etc/falco/rules.d/
+
+  kubectl -n falco logs \
+    -l app.kubernetes.io/name=falco,app.kubernetes.io/instance=falco \
+    -c falco --tail=-1 --prefix=true |
+    sed -n '/Loading rules from/,/syscall buffer/p'
+)
+```
+
+等待失敗就停止；依 Pod 前綴逐顆確認規則載入符合預期後，再刪除測試物件：
+
 ```console
 $ kubectl delete -f legit-client.yaml
 $ kubectl delete -f webhook-receiver.yaml
@@ -701,48 +824,9 @@ templates/pod-template.tpl:
 - **直接 patch ConfigMap，不經過 helm**：Falco 監看到檔案變了會重新載入，pod 不重啟；但 Helm release 記錄的狀態跟叢集實際狀態就對不上了，下一次 `helm upgrade` 會把改動蓋掉。
 - **接受滾動**：把規則變更當成一次部署來排時間，不要在處理事故的途中改規則。
 
-### `evt.dir` 已經淘汰，規則照樣「載入成功」 {#mine-2}
+### sidekick 兩份副本排在同一個節點 {#mine-6}
 
-**症狀**：`helm upgrade` 回報 `STATUS: deployed`，pod 全部 Running，日誌也寫著 `schema validation: ok`，可是規則可能永遠不會觸發。規則是照網路上的範例寫的，macro 長這樣，舊版 Falco 的教學與範例大多這樣寫：
-
-```yaml
-- macro: lab_outbound_connect
-  condition: >
-    (evt.type = connect and evt.dir = <
-     and (fd.typechar = 4 or fd.typechar = 6)
-     and (evt.rawres >= 0 or evt.res = EINPROGRESS))
-```
-
-
-**原因**：啟動日誌裡，規則檔那一行後面多了一段 warning：
-
-```text
-/etc/falco/rules.d/custom-rules.yaml: Ok, with warnings
-1 Warnings:
-LOAD_DEPRECATED_ITEM (Used deprecated item: field 'evt.dir'):
-  due to the drop of enter events, 'evt.dir = <' always evaluates to true,
-  and 'evt.dir = >' always evaluates to false. The rule expression can be
-  simplified by removing the condition on 'evt.dir'
-```
-
-
-這一課用的是 Falco 0.44.1（chart 9.1.0 預設的版本）。Falco 0.44 的 syscall 事件來源不再送 enter 事件（系統呼叫進入時的事件），只留下返回時的事件，所以 `evt.dir = <` 永遠為真，`evt.dir = >` 永遠為假。寫 `<` 的規則剛好沒事，等於這個條件不存在；寫成 `>` 的規則永遠不會觸發，而 helm、schema 驗證、pod 狀態全部正常。網路上很多 Falco 規則範例是 0.3x 版的寫法，複製過來就會遇到。
-
-**修法**：刪掉 `evt.dir` 那個條件（步驟 1 的規則 A 已經沒有它）。修好之後，warning 區塊整個消失：
-
-```console
-Loading rules from:
-   /etc/falco/falco_rules.yaml | schema validation: ok
-   /etc/falco/rules.d/custom-rules.yaml | schema validation: ok
-The chosen syscall buffer dimension is: …          ← 直接接下一行,沒有 warning 區塊
-```
-
-
-判斷規則有沒有正常載入，看的是規則檔那一行下面有沒有 warning 區塊，而不是 helm 有沒有成功。
-
-### sidekick 預設兩份副本、不給 resources，還會擠在同一顆節點 {#mine-6}
-
-**症狀**：打開 Falcosidekick 時如果沒有在 values 裡補 `resources`，查它的 pod 會看到兩份副本、`PRIO` 是 0，而且排在同一個節點：
+**症狀**：Falcosidekick 有兩份副本，但查詢 Pod 所在節點時，兩列的 `NODE` 相同：
 
 ```console
 $ kubectl -n falco get pods -l app.kubernetes.io/name=falcosidekick \
@@ -752,15 +836,9 @@ falco-falcosidekick-5f96d6d856-8k4mt   <node-b>   0
 ```
 
 
-**原因**：這是 chart 的三個預設值造成的：
+**原因**：`replicaCount` 預設是 2，但沒有設定 pod anti-affinity（讓同一組 Pod 分散到不同節點的排程條件），兩份副本可能排到同一個節點。該節點故障時，兩份副本都會受影響。
 
-1. **`replicaCount` 預設是 2**，多一倍的 pod。
-2. **預設完全不給 `resources`。** 沒補的話，沒有 requests 的 pod，QoS 等級是 BestEffort（Kubernetes 依 requests 與 limits 把 pod 分成三級，BestEffort 是最低的一級），節點記憶體吃緊時最先被 OOM kill。
-3. **沒有設定 pod anti-affinity**（讓同一組 pod 分散到不同節點的排程條件），兩份副本排到了同一個節點。那個節點掛了，兩份一起沒，`replicaCount: 2` 等於沒有備援。
-
-`PRIO` 欄是 0，跟 Day 3 的[「Falco pod 被搶佔，DaemonSet 卻顯示全部就緒」](sprint2-day3-falco-basics.md#mine-1)是同一類問題，但後果不同：Falco 被踢掉，是少看到事件；sidekick 被踢掉，是事件照樣偵測到，卻沒有人收到，從 Falco 的健康狀態完全看不出來。
-
-**修法**：自己補上 `resources`（步驟 3 的 values 已經補了），視需要調整 `replicaCount`，並加上 pod anti-affinity。這三項 chart 都沒有預設。
+**修法**：設定 pod anti-affinity，並用上面的查詢確認兩份副本位於不同節點。
 
 ## 想一想
 
@@ -778,7 +856,7 @@ falco-falcosidekick-5f96d6d856-8k4mt   <node-b>   0
 
 - **[規則例外（exceptions）的官方說明](https://falco.org/docs/concepts/rules/exceptions/)** —— `fields`／`comps`／`values` 三者怎麼組成一段自動接在 `condition` 後面的 `and not`，以及覆寫時 `override` 底下 `append` 與 `replace` 的差別（這裡的 `append` 是 `override` 的值，不是舊版已淘汰的 `append: true`），對應步驟 6 的調校。
 - **[Pod 的 DNS 設定與 ndots](https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/)** —— Kubernetes 官方文件寫明 pod 的 `search` 清單與 `options ndots:5`，步驟 4 那個六倍放大的來源。
-- **[Falco 規則的覆寫與追加語法](https://falco.org/docs/concepts/rules/overriding/)** —— 同名規則怎麼整條取代、只追加條件，或只追加例外值；多個團隊共用規則時，分工就靠這一頁。
+- **[Falco 規則的覆寫與追加語法](https://falco.org/docs/concepts/rules/overriding/)** —— 後解析的檔案可以用同名規則覆寫前面的定義；提供完整欄位可整條取代，用 `override` 則可指定欄位要 `append` 或 `replace`。追加 `condition` 時要自行加上 `and`，例如 `condition: and not user.name=root`；追加 `exceptions` 時可併入新的 `values`。停用規則則用 `enabled: false`。多個團隊可藉此分別維護例外，套用後仍要確認啟動日誌。
 - **[Falco Helm chart 的參數表](https://github.com/falcosecurity/charts/tree/master/charts/falco)** —— `customRules` 的形狀（檔名對內容的 map）、`falcosidekick` 子 chart 的開關與預設值都在這裡。
 - **[Falcosidekick 專案 README](https://github.com/falcosecurity/falcosidekick)** —— 可以轉送的完整目的地清單（七十多種），接實際環境時從這份挑。
 

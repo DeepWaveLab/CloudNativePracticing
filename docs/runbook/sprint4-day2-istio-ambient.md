@@ -29,7 +29,7 @@ cilium           1/1   Running   (kube-system)
 
 這個狀態只證明元件已啟動；下一步必須發出應用請求，才能確認工作負載真的加入 mesh。
 
-先準備具有獨立 ServiceAccount 的 client。以下設定來自本章使用的 client manifest；`serviceAccountName: client` 會在稍後的身分紀錄中出現。
+先準備具有獨立 **ServiceAccount** 的 client。ServiceAccount 是 Kubernetes 提供給工作負載使用的帳號，Istio 會用它識別工作負載。以下設定先建立名為 `client` 的帳號，再以 `serviceAccountName: client` 指定 Pod 使用它；稍後的身分紀錄也會包含這個帳號名稱。
 
 ```yaml
 apiVersion: v1
@@ -66,6 +66,23 @@ spec:
               memory: 16Mi
 ```
 
+將上方 YAML 存為 `10-client.yaml`，再建立 client、等待 client 就緒（Day 1 的 web 後端要先是 Running）、啟用 ambient 並發出三次請求（依官方文件補上，本課沒有實跑）：
+
+```sh
+kubectl apply -f 10-client.yaml
+kubectl -n mesh-demo rollout status deployment/client --timeout=180s
+kubectl label namespace mesh-demo istio.io/dataplane-mode=ambient --overwrite
+
+for i in 1 2 3; do
+  kubectl -n mesh-demo exec deployment/client -c curl -- \
+    curl -sS --max-time 10 -o /dev/null \
+    -w "req${i} %{http_code}\n" \
+    http://web.mesh-demo.svc.cluster.local:80/
+done
+```
+
+指令依據 Kubernetes 1.35 的 [apply](https://v1-35.docs.kubernetes.io/docs/reference/kubectl/generated/kubectl_apply/)、[rollout status](https://v1-35.docs.kubernetes.io/docs/reference/kubectl/generated/kubectl_rollout/kubectl_rollout_status/)、[exec](https://v1-35.docs.kubernetes.io/docs/reference/kubectl/generated/kubectl_exec/)、[label](https://v1-35.docs.kubernetes.io/docs/reference/kubectl/generated/kubectl_label/)，以及 [Istio 1.30 加入 ambient 的官方文件](https://raw.githubusercontent.com/istio/istio.io/release-1.30/content/en/docs/ambient/usage/add-workloads/index.md)。
+
 client 容器會保持執行，供你從容器內向 `web.mesh-demo.svc.cluster.local:80` 發出 HTTP 請求。接著為命名空間加上 ambient 標籤。以下第二行是三次請求結果摘要，並非可執行的 shell 指令：
 
 ```console
@@ -77,7 +94,7 @@ $ client → web:  req1 200  req2 200  req3 200
 
 ## 從 ztunnel 紀錄找出身分與目的地
 
-**SPIFFE** 是工作負載身分的標準表示方式。這裡的 `spiffe://cluster.local/ns/mesh-demo/sa/client` 把信任網域、命名空間與 ServiceAccount 組合成身分。它不等同於 Pod IP，也不代表已授權執行所有操作。
+**SPIFFE** 是工作負載身分的標準表示方式。這裡的 `spiffe://cluster.local/ns/mesh-demo/sa/client` 把信任網域、命名空間與 ServiceAccount 組合成身分。**信任網域**是這些身分所屬的信任範圍，此處以 `cluster.local` 表示；`mesh-demo` 是命名空間，`client` 是 ServiceAccount 名稱。這個身分不等同於 Pod IP，也不代表已授權執行所有操作。
 
 **HBONE** 是 ambient 傳送服務流量使用的通道協定，使用 mTLS 保護通道。下圖把通道保護與稍後加入的 HTTP 處理分開，避免把 ztunnel 當成 HTTP 代理。
 
@@ -94,7 +111,7 @@ dst.identity="spiffe://cluster.local/ns/mesh-demo/sa/default"
 
 `dst.addr` 的 15008 是 HBONE 通道端點，`dst.hbone_addr` 的 80 是應用目的連接埠。`src.identity` 對應 client ServiceAccount，`dst.identity` 對應 web 使用的 default ServiceAccount。這些欄位要一起看；單獨看到 15008 這個連接埠，不足以證明任意流量都已加密。
 
-這組紀錄來自單節點練習，不能把它說成已驗證跨節點傳輸。它證明的是 ambient 通道與工作負載身分，[Day 3](sprint4-day3-cilium-mesh.md) 會改驗 Cilium WireGuard 的跨節點加密；那份結果不能補成 Istio 的跨節點證據。
+這組紀錄的驗證範圍是單節點內的 ambient 通道與工作負載身分，未涵蓋跨節點傳輸。
 
 ## 加入 waypoint，再限制送往 web 的連線
 
@@ -105,7 +122,7 @@ $ istioctl waypoint apply -n mesh-demo --enroll-namespace
 ✅ waypoint applied; namespace labeled istio.io/use-waypoint: waypoint
 ```
 
-此命令使用 `--enroll-namespace` 完成命名空間設定，不需要另外加 `-y`。接著套用 **DestinationRule**，也就是針對目的服務設定流量政策的 Istio 資源。這份設定把 **connection pool（連線池）**上限壓低，讓超出容量的請求容易被拒絕：
+此命令使用 `--enroll-namespace` 完成命名空間設定。接著套用 **DestinationRule**，也就是針對目的服務設定流量政策的 Istio 資源。這份設定把 **connection pool（連線池）**上限壓低，讓超出容量的請求容易被拒絕：
 
 ```yaml
 apiVersion: networking.istio.io/v1
@@ -135,10 +152,10 @@ spec:
 
 ```text
   22 200
-  28 503        ← 斷路 trip
+  28 503
 ```
 
-200 與 503 的數量會受連線時序影響，不應要求每次都重現 22 比 28。判斷連線池限制是否介入，還要看失敗回應的標頭。驗證中可觀察到：
+200 與 503 的數量會受連線時序影響，不應要求每次都重現 22 比 28。判斷連線池限制是否介入，還要看回應標頭。這批回應中，14 筆帶有 `x-envoy-overloaded` 標頭，30 筆帶有 `x-envoy-decorator-operation` 標頭，標頭內容如下：
 
 ```text
 x-envoy-overloaded: true
@@ -146,22 +163,6 @@ x-envoy-decorator-operation: web.mesh-demo.svc.cluster.local:80/*
 ```
 
 `x-envoy-overloaded: true` 是 Envoy 容量限制介入的線索；搭配本章刻意降低的連線池設定，支持部分請求由代理拒絕的判斷。`x-envoy-decorator-operation` 提供代理處理的服務資訊，不能單憑它推定所有 503 都由同一項限制造成。原始紀錄中帶 overload 標頭的回應數與 503 總數不同，這裡不把所有 503 一概歸因。
-
-## 疑難排解
-
-### 叢集顯示 Running，但 kubectl 回 no such host {#mine-1}
-
-若控制平面狀態正常，kubectl 卻無法解析 API 主機名稱，先比較本機 resolver 與其他可用 DNS resolver 的結果。驗證中曾出現公用 DNS 已能解析、本機仍回 NXDOMAIN 的情況，符合 DNS 負快取的症狀；這不代表每次 AKS 停開機都一定會刪除 DNS 紀錄。
-
-可以等待快取失效。若已確認正確 IP，也可暫時將 kubeconfig 的連線位址指向它，並保留原 FQDN 作 TLS 名稱。`<cluster>` 是 kubeconfig 中對應的 cluster 項目名稱，`<FQDN>` 是原 `server` URL 的主機名稱：
-
-```sh
-kubectl config set-cluster <cluster> \
-  --server=https://<已解析的 IP>:443 \
-  --tls-server-name=<FQDN>
-```
-
-這會修改本機 kubeconfig，且 IP 可能改變。DNS 恢復後，應將 `server` 還原為原本 FQDN；不要把暫時固定 IP 當成長期配置。
 
 ## 想一想
 

@@ -10,19 +10,19 @@
 
 先把玩家需要的資訊列出來：登入憑證用來向 Nakama 證明身分；遊戲入口與 routing token 用來把 UDP 送到對戰伺服器。這兩組資訊用途不同。現在要補上配對與 UDP 之間的交接：Day 6 的 hook 只把 `address:port` 交給 client，Day 4 的 Quilkin 卻要求封包帶著 routing token。這份 GameServer 名稱、proxy 入口與 token 的組合稱為 **assignment**，也就是交給玩家的分配結果。Nakama module 在配對成立時要完成以下順序：
 
-1. **產生 routing token**，放進 `GameServerAllocation` 的 `spec.metadata.annotations["quilkin.dev/tokens"]`。Agones 在分配的同時把這個 annotation 寫到被選中的 GameServer 上，Quilkin 的 xDS control plane 看到之後，就知道帶這個 token 的封包要轉給哪顆 server。
-2. **把 assignment 存進 Nakama storage**，內容是 GameServer 名稱、Quilkin endpoint 與 token，每位玩家各一筆。
+1. **產生 routing token**，經 base64 編碼後放進 `GameServerAllocation` 的 `spec.metadata.annotations["quilkin.dev/tokens"]`。Agones 在分配時把這個 annotation 寫到被選中的 GameServer 上，Quilkin 的 xDS control plane（控制面）依 annotation 更新 token 與 GameServer 的路由對應，再交給 proxy 用來轉送封包。
+2. **把 assignment 存進 Nakama storage**，內容是 GameServer 名稱、Quilkin endpoint 與未經 base64 編碼的原始 token，每位玩家各一筆。client 會把原始 token 接在 UDP 封包尾端，供 proxy 比對路由。
 3. **用兩種方式把 assignment 交給 client**：配對當下用 notification 主動推送；另外註冊一支 **RPC** `get_assignment`，讓 client 主動呼叫後端函式查詢。這次測試會在收到通知後立刻查詢，比對兩份結果；斷線後補查是這個設計可延伸的用途，尚未包含完整重連流程。
 
 圖中上半部交付 assignment，下半部才傳遊戲封包。請注意：client 拿到 assignment 後連的是 Quilkin 入口，而不是 assignment 裡供核對用的 direct 位址。
 
 ![Nakama 分配伺服器並交付 assignment，client 再帶 token 連到 Quilkin](../assets/diagrams/s5d7-handoff.svg)
 
-所以排除問題時，要先問「兩位玩家拿到相同 assignment 嗎」，再問「Quilkin 與 GameServer 也看見同一個 token 嗎」。只有 client 印出成功配對，還缺少下半部的證據。
+排除問題時，先比對兩位玩家的 assignment，再把其中的 routing token 做 base64 編碼，核對是否與被分配的 GameServer annotation 相同。步驟 7 會示範這個核對方式，並用該 GameServer 的 log 確認封包抵達。proxy 的 Capture filter 會取出並剝除封包尾端的 token，後續路由比對使用取出的 token，GameServer 收到的是遊戲內容。本章的 ACK 與 server log 用來核對實際傳送結果，沒有直接讀取 proxy 的路由設定。
 
 本章延續 Day 4 已可用的 Quilkin proxy；它的 LoadBalancer 入口以 `<LB-IP>:7777` 表示，請換成自己環境的實際位址。操作前在課程儲存庫切換到 `labs/sprint5/day7/`，後續相對檔名與 Python 指令都以這個目錄為準；程式節錄只供閱讀，部署與執行請使用完整檔案。
 
-接下來會新增專用節點池、`lab-game-server` Fleet，以及獨立的 `nakama-lab` namespace。這讓下一章可以把特定 GameServer 放到另一台節點上做失效演練。帶 taint 的節點仍可容納有相符 toleration 的其他 Pod，因此隔離不能只看節點池名稱；下一章關機前還要核對實際工作負載。完整檔案在 [labs/sprint5/day7/](https://github.com/DeepWaveLab/CloudNativePracticing/tree/main/labs/sprint5/day7)。
+接下來會新增專用節點池與 `lab-game-server` Fleet，供下一章把特定 GameServer 放到另一台節點上做失效演練；獨立的 `nakama-lab` namespace 則用來部署本章的 Nakama 與 PostgreSQL。完整檔案在 [labs/sprint5/day7/](https://github.com/DeepWaveLab/CloudNativePracticing/tree/main/labs/sprint5/day7)。
 
 ## 步驟 1:建立演練節點池與演練 Fleet
 
@@ -216,6 +216,16 @@ nk.register_rpc(get_assignment, "get_assignment")
 
 ## 步驟 4:確認 module 載入與 Fleet 就緒
 
+等待 Nakama Deployment 可用後讀取啟動 log，依官方文件補上，本課沒有實跑（Kubernetes 1.34 的 [kubectl wait](https://v1-34.docs.kubernetes.io/docs/reference/kubectl/generated/kubectl_wait/) 與 [kubectl logs](https://v1-34.docs.kubernetes.io/docs/reference/kubectl/generated/kubectl_logs/)）：
+
+```console
+$ kubectl -n nakama-lab wait deployment/nakama \
+    --for=condition=Available --timeout=300s
+$ kubectl -n nakama-lab logs deployment/nakama -c nakama --tail=-1
+```
+
+`wait` 成功後，還要核對 log 中的 `modules` 包含 `main.lua`、`count` 為 `1`，並有 `get_assignment`、Matchmaker Matched hook 的註冊紀錄與 `Startup done`；逾時或缺少任一紀錄時，先排除啟動問題再繼續。
+
 Nakama 啟動 log 要同時看到 module 數量、RPC 與 hook 的註冊：
 
 ```text
@@ -224,6 +234,17 @@ Nakama 啟動 log 要同時看到 module 數量、RPC 與 hook 的註冊：
 {"level":"info","ts":"2026-09-29T02:50:23.722Z","caller":"server/runtime.go:2657","msg":"Registered Lua runtime Matchmaker Matched function invocation"}
 {"level":"info","ts":"2026-09-29T02:50:24.077Z","caller":"main.go:243","msg":"Startup done"}
 ```
+
+查詢演練節點的節點池標籤與 Fleet 內各 GameServer 的狀態、位址、port 和節點，依官方文件補上，本課沒有實跑（Kubernetes 1.34 的 [kubectl get](https://v1-34.docs.kubernetes.io/docs/reference/kubectl/generated/kubectl_get/)）：
+
+```console
+$ kubectl get nodes -l role=gameserver-lab -L agentpool
+$ kubectl -n default get gameservers \
+    -l agones.dev/fleet=lab-game-server \
+    -o 'custom-columns=NAME:.metadata.name,STATE:.status.state,ADDRESS:.status.address,PORT:.status.ports[0].port,NODE:.status.nodeName'
+```
+
+若尚未就緒，重複第二個查詢，直到同一次查詢恰好列出 2 顆 GameServer、兩顆皆為 `Ready`，且 `NODE` 都在第一個查詢列出的節點中、對應的 `AGENTPOOL` 都是 `gslab`，才繼續下一步。
 
 演練 Fleet 有 2 顆 Ready，都在專用節點池上：
 
@@ -251,7 +272,13 @@ $ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:17350/healthcheck
 4. **RPC**：`POST /v2/rpc/get_assignment`，帶 `Authorization: Bearer <session token>`，比對回傳內容與 notification 是否相同。
 5. **UDP**：把 `hello-<player>` 接上 routing token，送到 Quilkin endpoint，等 `ACK`；再用錯的 token `zz0` 送一次，預期收不到回應。
 
-Python 標準函式庫沒有直接可用的 WebSocket client，所以這份範例以 `socket` 實作本次流程需要的訊息框架（frame）。下面是 RFC 6455 的部分要求：HTTP Upgrade 握手、client 送出的 frame 一律加 mask、回應 server 的 ping。送 frame 的部分：
+WebSocket 讓 client 與 Nakama 在同一條連線上持續收送訊息，因此排隊後可以直接接收配對結果與通知。Python 標準函式庫沒有直接可用的 WebSocket client，這份範例便以 `socket` 實作本次流程需要的部分。讀程式前，先區分建立連線與傳送訊息時的處理：
+
+- **HTTP Upgrade 握手**：client 先送 HTTP 請求，要求把連線切換成 WebSocket。完整程式的 `__init__` 送出 `Upgrade: websocket` 等 header，再檢查回應是否為 `101`；之後才收送 WebSocket 訊息。
+- **frame 與 mask**：frame 是 WebSocket 傳送資料的單位，由標示訊息類型、長度等資訊的 header，加上實際內容（payload）組成。client 送出的 frame 還必須帶 mask（遮罩）：用隨機的 4 bytes 轉換 payload，server 再還原內容。這是協定要求，mask 會隨 frame 傳送，不提供加密保密的效果。
+- **ping 與 pong**：ping 用來確認對方是否仍能回應，pong 是對它的回覆。`recv_json` 收到 ping 時，會呼叫 `_send_frame(0xA, payload)`，把相同內容以 pong 回傳，接著繼續等待配對訊息。
+
+下面的 `_send_frame` 負責組合並送出一個 frame；`opcode` 表示訊息類型，例如 `send_json` 傳入 `0x1`，代表文字：
 
 ```python
 def _send_frame(self, opcode, payload):
@@ -267,6 +294,14 @@ def _send_frame(self, opcode, payload):
     masked = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
     self.sock.sendall(header + mask + masked)
 ```
+
+對照程式由上往下讀：
+
+1. `0x80 | opcode` 用位元 OR（`|`）把第一個 byte 的最高位設為 1，表示這是訊息的最後一個 frame，同時保留 `opcode` 的類型值。這支程式送出的訊息都放在單一 frame。
+2. 第二個 byte 的 `0x80` 表示有使用 mask，其餘 7 個位元放長度資訊。`n < 126` 時直接放 payload 的 byte 數；較長時先放 `126` 或 `127` 作為標記，再以 `struct.pack("!H", n)` 或 `struct.pack("!Q", n)` 接上 2 或 8 bytes 的長度。`!` 指定網路位元組順序，也就是高位 byte 在前。
+3. `b ^ mask[i % 4]` 用位元 XOR（`^`）轉換每個 payload byte；`i % 4` 讓遮罩的 4 個 bytes 輪流使用，接收端用相同遮罩再做一次 XOR 就能還原。最後依 `header + mask + masked` 的順序送出。
+
+這裡先掌握程式如何組合 frame；握手的完整驗證規則、訊息分段與其他控制 frame，見章末的 RFC 延伸閱讀。
 
 呼叫 RPC 時要注意 body 的格式：Nakama REST 的 RPC body 是「一個 JSON 字串」，不是 JSON 物件。空參數要送 `"{}"`（含引號），回應的 `payload` 也是字串，要再 `json.loads` 一次。直接使用 REST 時需要處理這層編碼；SDK 可能已代為處理。這裡 `http_json` 會再做一次 JSON 編碼，因此傳給它的是 Python 字串 `"{}"`：
 
@@ -348,6 +383,17 @@ gameserver.agones.dev "lab-game-server-s7xfm-g4fk2" deleted
 gameserver.agones.dev "lab-game-server-s7xfm-g9p9n" deleted
 ```
 
+刪除後查詢節點池與 Fleet 補回的 GameServer，依官方文件補上，本課沒有實跑（Kubernetes 1.34 的 [kubectl get](https://v1-34.docs.kubernetes.io/docs/reference/kubectl/generated/kubectl_get/)）：
+
+```console
+$ kubectl get nodes -l role=gameserver-lab -L agentpool
+$ kubectl -n default get gameservers \
+    -l agones.dev/fleet=lab-game-server \
+    -o 'custom-columns=NAME:.metadata.name,STATE:.status.state,ADDRESS:.status.address,PORT:.status.ports[0].port,NODE:.status.nodeName'
+```
+
+若尚未補齊，重複第二個查詢，直到同一次查詢恰好列出 2 顆 GameServer、兩顆皆為 `Ready`，且 `NODE` 都在第一個查詢列出的節點中、對應的 `AGENTPOOL` 都是 `gslab`，才再次執行 client 或進入下一章。
+
 ```text
 NAME                          STATE   ADDRESS        PORT   NODE
 lab-game-server-s7xfm-2gcfx   Ready   <NODE-IP>      7114   aks-gslab-97904148-vmss000000
@@ -376,7 +422,7 @@ Nakama 要有對外入口與 TLS，不能靠 port-forward。routing token 只有
 
 - **[Agones GameServerAllocation reference](https://agones.dev/site/docs/reference/gameserverallocation/)** —— `spec.metadata` 的 labels 與 annotations 會在分配當下寫到 GameServer 上。
 - **[Nakama matchmaker](https://heroiclabs.com/docs/nakama/concepts/multiplayer/matchmaker/)** —— matchmaker 只接受保持 socket 連線的玩家，這是 client 必須先開 realtime socket 再排隊的原因。
-- **[RFC 6455 The WebSocket Protocol](https://datatracker.ietf.org/doc/html/rfc6455)** —— client frame 必須加 mask、握手與 ping/pong 的規格，對照步驟 5 的最小實作。
+- **[RFC 6455 The WebSocket Protocol](https://datatracker.ietf.org/doc/html/rfc6455)** —— 第 4 節說明握手與回應驗證，第 5.2–5.3 節說明 frame 欄位與 mask，第 5.4 節說明訊息分段，第 5.5 節說明 close、ping 與 pong；可對照步驟 5 的最小實作。
 
 ## 下一步
 

@@ -8,6 +8,23 @@ Cilium 狀態顯示 Encryption 已啟用，client 也能呼叫 web。這是否�
 
 [Day 2](sprint4-day2-istio-ambient.md) 的 ztunnel 與 waypoint 仍可能處理流量。若直接加入 Cilium 政策，看到的結果可能混合兩套代理。因此本章使用已移除 Istio 的練習環境，保留 Cilium 1.20.0、`mesh-demo/client` 與 `web`。
 
+Cilium 在本章透過不同元件處理傳輸加密、HTTP 授權與工作負載身分。WireGuard 使用金鑰建立加密通道，保護支援範圍內的 Pod 流量；未啟用時，這些流量就沒有 WireGuard 的加密保護。Envoy 是能解析 HTTP 的代理，Cilium 將需要檢查 HTTP 規則的流量交給它；少了這層處理，就無法執行本章依方法與路徑放行請求的政策。
+
+SPIRE 提供工作負載身分，供 Cilium 進行相互身分驗證，確認連線雙方是誰。身分後端未就緒時，這項驗證便無法完成，即使加密通道與 HTTP 政策已經可用。接續 Day 2，本章會分別檢查 Cilium 的這些功能，判斷移除 Istio 後各項保護是否成立。
+
+卸載 Istio 前，先刪除 `mesh-demo` 的 waypoint、移除兩種命名空間標籤，再查詢清理狀態（依官方文件補上，本課沒有實跑）：
+
+```bash
+istioctl waypoint delete --all -n mesh-demo
+kubectl label namespace mesh-demo istio.io/use-waypoint- istio.io/dataplane-mode-
+kubectl get namespace mesh-demo \
+  -L istio.io/use-waypoint,istio.io/dataplane-mode
+kubectl -n mesh-demo get gateways.gateway.networking.k8s.io
+kubectl -n mesh-demo get deployments,services,pods
+```
+
+指令依據適用於 Istio 1.30.3 的 [Istio 1.30 waypoint 清理文件](https://raw.githubusercontent.com/istio/istio.io/release-1.30/content/en/docs/ambient/usage/waypoint/index.md)，以及 Kubernetes 1.35 的 [kubectl label](https://v1-35.docs.kubernetes.io/docs/reference/kubectl/generated/kubectl_label/) 與 [kubectl get](https://v1-35.docs.kubernetes.io/docs/reference/kubectl/generated/kubectl_get/) 文件。確認兩個標籤欄位皆空白，且 `waypoint` Gateway、Deployment、Service 與其 Pod 已消失，再進行下方卸載步驟；若仍在刪除中，重複執行最後三條查詢。
+
 清理時除了取消 ambient 納管，也要刪除命名空間的 waypoint 資源、清除 `istio.io/use-waypoint` 標籤，並確認 waypoint Pod 已消失。接著移除 Istio 控制元件。以下節錄保留移除與檢查結果：
 
 ```text
@@ -93,7 +110,7 @@ POST /       -> 403   (method 不符)
 
 第一個請求確認服務仍可用，另外兩個則分別改變路徑與方法。這樣才能區分「服務整體連不上」與「HTTP 條件被拒絕」。驗證中的 403 由 Cilium 管理的 Envoy 回覆，並非 nginx 找不到頁面的 404。
 
-這項測試是 HTTP 授權，不是 [Day 2](sprint4-day2-istio-ambient.md) 的連線池限制。兩者都需要 HTTP 處理，但規則與驗證方式不同，後續比較時不應當成同一項測試。
+本節驗證 HTTP 授權；[Day 2](sprint4-day2-istio-ambient.md) 驗證連線池限制。兩者都需要 HTTP 處理，但規則與驗證方式不同，後續比較時不應當成同一項測試。
 
 ## 身分後端未就緒，不能宣稱驗證成功
 

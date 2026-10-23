@@ -6,17 +6,21 @@
 
 這一章把 wasmCloud 裝進 Day 1 建好的叢集，跑起第一個 wasm 元件，再拿 Day 1 存下的節點基準逐份比對，確認節點真的沒被改過。接著看它把代價放在哪裡：要先預留多少節點資源、Kubernetes 的哪些工具看不到元件，以及出問題時錯誤訊息會在哪裡。
 
-讀完之後，看到一套宣稱「不用改節點」的 wasm 方案，你能判斷元件實際在哪個行程裡執行、Kubernetes 的工具還看得到什麼，以及要替它預留多少資源；遇到元件物件全部 `READY=True` 卻回 404 時，你會先去查 host pod 的 log。
+讀完之後，看到一套宣稱「不用改節點」的 wasm 方案，你能判斷元件實際在哪個行程裡執行、Kubernetes 的工具還看得到什麼，以及要替它預留多少資源。
 
 ## wasmCloud 為什麼不用改節點
 
-先把兩條路線並排看。下圖左邊是 Day 1 追過的 RuntimeClass 路線，右邊是 wasmCloud；由上往下依序是叢集 API 裡的物件、負責決定位置的控制元件，以及節點上真正執行 wasm 的地方。
+wasmCloud 把 wasm 放在叫做 **host** 的普通 Pod 裡執行。host 容器裡的 wasm 執行引擎 Wasmtime 負責載入 wasm component（元件）；元件除了 Wasm 模組，還宣告可供呼叫、以及需要宿主提供的介面。
+
+元件用 **WorkloadDeployment** 描述，它是透過 CRD 擴充到 Kubernetes API 的物件種類。**runtime-operator** 是持續觀察這些物件、讓實際狀態符合設定的控制程式，負責決定元件放在哪顆 host，並維護記錄 Service 後端位址的 EndpointSlice。operator 與 host 透過開源訊息系統 **NATS** 傳遞指令。
+
+下圖左邊是 Day 1 追過的 RuntimeClass 路線，右邊是 wasmCloud；由上往下依序是叢集 API 裡的物件、負責決定位置的控制元件，以及節點上真正執行 wasm 的地方。
 
 ![兩條路線並排：左邊 Pod 帶 runtimeClassName，經 kube-scheduler、kubelet 與 containerd，最後要在節點的 config.toml 加一段 runtime 並放一支 shim 執行檔；右邊 WorkloadDeployment 經 runtime-operator 透過 NATS 交給 host pod，由 host pod 裡的 Wasmtime 載入元件，節點設定不用改](../assets/diagrams/s3d2-two-paths.svg)
 
-我們可以從圖上看到，兩條路線在最底下那一層分開了。左邊的 wasm 由 containerd 透過 shim 啟動，所以節點得先有那支 shim 和對應的設定。右邊的 wasm 根本沒有交給 containerd：它在一顆叫 **host** 的 pod 裡執行。host 是 wasmCloud 提供的普通容器，裡面跑著 wasm 執行引擎 Wasmtime，它載入的是 wasm component（元件）：在 Wasm 模組之外，再宣告可供呼叫、以及需要宿主提供的介面，讓宿主知道如何與它互動。對 containerd 來說，host 只是一般的容器，用節點原本就有的 `runc` 啟動。
+從圖的最底層可以看到，Day 1 的 wasm 由 containerd 透過 shim 啟動，所以節點得先有那支 shim 和對應的設定。wasmCloud 的元件則由 host 裡的 Wasmtime 執行，containerd 只需用節點原本就有的 `runc` 啟動 host 容器。
 
-圖上另外兩個名字，runtime-operator 和 WorkloadDeployment，等步驟 3 清點安裝結果時再介紹。這一章接下來要用實際輸出確認圖右邊的每一格，最後比對本章追蹤的節點設定與執行檔清單。
+接下來用實際輸出確認圖右邊的各個元件，最後比對本章追蹤的節點設定與執行檔清單。
 
 ## 步驟 1：確認 Day 1 的基準還能用
 
@@ -69,45 +73,13 @@ $ diff <Day1 基準>/baseline-shim-binaries.txt pre-shim-binaries.txt
 
 ## 步驟 2：找到正確的安裝入口
 
-本課用的是 wasmCloud v2.6.1，驗證時（2026-08）它是最新的 release。動手前先用同一條指令查一次，看現在的最新版是哪一個：
-
-```console
-$ gh api repos/wasmCloud/wasmCloud/releases --jq '.[] | "\(.tag_name)\t\(.published_at)"' | head -4
-v2.6.1   2026-07-29T21:06:31Z
-v2.6.0   2026-07-28T22:02:31Z
-v2.5.2   2026-07-10T19:25:23Z
-v2.5.1   2026-07-02T13:27:14Z
-```
-
-
-wasmCloud 在 Kubernetes 上的安裝方式在 2026 年換過一次，網路上的教學很多還停在舊做法。舊的 `wasmCloud/wasmcloud-operator` repo 已經改名成 `wadm-operator`，而 GitHub 會自動把舊網址轉過去：
-
-```console
-$ gh api repos/wasmCloud/wasmcloud-operator --jq '.full_name'
-wasmCloud/wadm-operator          ← GitHub 自動轉址,舊 URL 還通
-
-$ gh api repos/wasmCloud/wadm-operator --jq '.pushed_at'
-2025-12-15T09:11:53Z             最後 release v0.5.1(2025-12-04)
-```
-
-
-所以教學裡寫 `helm install wasmcloud-operator …` 的，裝到的是 v1 世代的東西，而且照著舊網址點過去也不會看到任何警告。官方文件站也有類似的情況，見[疑難排解：官方文件站的指令裝到上一代 chart](#mine-5)。
-
-v2 的 Kubernetes 安裝入口在主 repo 裡，chart 名稱是 `runtime-operator`，chart 版本與 wasmCloud 本身的版本一起發佈：
-
-```console
-$ helm show chart oci://ghcr.io/wasmcloud/charts/runtime-operator --version 2.6.1
-name: runtime-operator
-version: 2.6.1
-appVersion: 2.6.1        ← release train 每次一起推
-```
-
+本章適用 wasmCloud v2.6.1，Kubernetes 安裝入口是 `oci://ghcr.io/wasmcloud/charts/runtime-operator`。請使用 2.6.1 的 chart 與下方的本機 values 檔，讓安裝版本與本章使用的欄位一致。
 
 ### overlay：疊在 chart 預設值上的設定
 
 Helm 的 chart 是一組 Kubernetes 資源範本，values 是提供給範本的設定。**overlay** 就是額外的一份 values 檔，用來覆寫 chart 的預設值；安裝後這一組資源在 Helm 裡稱為 release。這一章把 release 命名為 `wasmcloud`。
 
-本課使用以下設定：關閉已棄用的 `runtime-gateway`，HTTP 改由 operator 維護 EndpointSlice；host 則開 3 個副本。把下面內容存成 `values.local.yaml`，後面安裝時使用固定的 chart 2.6.1，避免直接讀取會持續變更的 main 分支設定：
+本課使用以下設定：關閉已棄用的 `runtime-gateway`，HTTP 改由 operator 維護 EndpointSlice；host 則開 3 個副本。把下面內容存成 `values.local.yaml`，避免直接讀取會持續變更的 main 分支設定。設定如下：
 
 ```yaml
 gateway:
@@ -137,19 +109,21 @@ runtime:
 
 ## 步驟 3：安裝，清點它放進叢集的東西
 
+安裝時應在下方 `helm install` 指令加上 `--version 2.6.1`，固定 chart 版本；這個參數的用法見 [Helm 官方文件](https://helm.sh/docs/helm/helm_install/)。以下保留原始實跑指令，該次拉取的是 2.6.1，但指令未固定版本；修正後的寫法本課沒有實跑。
+
 ```console
 $ helm install wasmcloud oci://ghcr.io/wasmcloud/charts/runtime-operator \
-    --namespace wasmcloud --create-namespace --version 2.6.1 -f values.local.yaml
+    --namespace wasmcloud --create-namespace -f values.local.yaml
 STATUS: deployed
 ```
 
 
-CRD 讓 Kubernetes API 認得新的物件種類；operator 是持續觀察這些物件、讓實際狀態符合設定的控制程式。安裝完成後清點一下：5 個 CRD、3 個 Deployment、3 個 ClusterIP Service、3 個 NetworkPolicy，以及一組 RBAC。沒有任何 DaemonSet、webhook、PVC 或 LoadBalancer。DaemonSet 會在符合條件的節點維持 Pod，本章安裝沒有這類元件。不過有沒有 DaemonSet 本身不足以證明節點是否被修改，後面還會檢查權限、掛載與檔案差異。
+安裝完成後清點一下：5 個 CRD、3 個 Deployment、3 個 ClusterIP Service、3 個 NetworkPolicy，以及一組 RBAC。沒有任何 DaemonSet、webhook、PVC 或 LoadBalancer。DaemonSet 會在符合條件的節點維持 Pod，本章安裝沒有這類元件。不過有沒有 DaemonSet 本身不足以證明節點是否被修改，後面還會檢查權限、掛載與檔案差異。
 
 三個 Deployment 各做一件事：
 
-- **`runtime-operator`**：對帳那 5 個 CRD，決定元件該放在哪一顆 host 上，並替元件的 Service 維護 EndpointSlice。
-- **`nats`**：operator 和 host 之間傳遞指令的訊息匯流排。NATS 是一套獨立的開源訊息系統，chart 內建的是單顆、資料不落地的版本，正式環境通常會改接外部的 NATS。
+- **`runtime-operator`**：管理前面介紹的元件部署與路由。
+- **`nats`**：提供 operator 與 host 之間的訊息傳遞；chart 內建的是單顆、資料不落地的版本，正式環境通常會改接外部的 NATS。
 - **`hostgroup-default`**：就是上一節圖上的 host，3 個 replica。映像是 `ghcr.io/wasmcloud/wash:2.6.1`，一個普通的容器映像。
 
 operator 和 host 啟動時都要連 NATS，NATS 還沒好就直接結束、交給 kubelet 重啟。所以剛裝完時 `kubectl get pods` 可能看到重啟；本課紀錄是 2 次，約一分鐘後恢復，但次數與時間依 NATS 就緒情況而異，見[疑難排解：啟動時連不上 NATS](#mine-3)。
@@ -208,7 +182,7 @@ $ grep -iE "toleration|affinity|nodeSelector|topologySpread|priorityClass" \
 ```
 
 
-`tolerations`、`affinity`、`nodeSelector`、`topologySpreadConstraints`、`priorityClassName` 在 values.yaml 和 Deployment 範本裡一次都沒出現，連覆寫的入口都沒有。所以 host 無法排到帶 taint 的節點、不保證分散在不同節點上，也沒有優先權保護。這幾件事在單節點的叢集上看不出來，Day 3 加第二顆節點時就會遇到，細節見[疑難排解：chart 沒有 tolerations、affinity、priorityClassName](#mine-2)。
+`tolerations`、`affinity`、`nodeSelector`、`topologySpreadConstraints`、`priorityClassName` 在 values.yaml 和 Deployment 範本裡一次都沒出現，連覆寫的入口都沒有。若節點有 `NoSchedule` taint，且 host Pod 缺少對應的 toleration，host 就無法排入該節點；`PreferNoSchedule` 則是盡量避免排入的偏好，兩者的差異見 [Kubernetes 官方文件](https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/)。chart 也沒有設定讓 host 分散到不同節點的條件或優先權保護。多節點排程與 toleration 的操作留到 [Day 3](sprint3-day3-wasmcloud-distributed.md)。
 
 ## 步驟 4：檢查 host pod 有沒有碰到節點
 
@@ -287,7 +261,7 @@ taints                             : None
 
 | | **Day 1 / Day 6:RuntimeClass + containerd shim** | **Day 2:wasmCloud host** |
 |---|---|---|
-| wasm 元件對 Kubernetes 來說是什麼 | 一顆 Pod（有 IP、QoS、probe、`kubectl logs`） | 一個 CRD 物件，Kubernetes 不知道它在跑什麼 |
+| wasm 元件對 Kubernetes 來說是什麼 | 一顆 Pod（有 IP、QoS、probe、`kubectl logs`） | 一個 CRD 物件；元件不是獨立 Pod，無法直接取得每個元件的 Pod 指標 |
 | 誰決定它跑在哪 | kube-scheduler 決定 Pod 所在節點 | kube-scheduler 排 host Pod；wasmCloud 再決定元件放在哪顆 host |
 | 誰真的執行它 | containerd → shim → Wasmtime | host pod 行程裡的 Wasmtime |
 | 節點要不要改 | 要：shim 執行檔、`config.toml`，通常還要標籤 | 不用 |
@@ -302,7 +276,7 @@ taints                             : None
 
 ## 步驟 5：部署第一個元件
 
-元件用一個叫 **WorkloadDeployment** 的 CRD 描述，搭配一個 Service 讓叢集內可以呼叫它：
+以下用 WorkloadDeployment 描述元件，搭配一個 Service 讓叢集內可以呼叫它：
 
 ```bash
 cat > hello-world.yaml <<'EOF'
@@ -338,7 +312,7 @@ kubectl apply -f hello-world.yaml
 
 manifest 裡有兩個地方跟一般的 Deployment 加 Service 不同。
 
-第一個是 `hostInterfaces` 底下的 `config.host`。它是 HTTP `Host` 標頭的比對值：host 收到請求時，會拿請求的 `Host` 標頭去找哪個元件綁定了這個值，這種做法叫虛擬主機路由。所以它要填呼叫端實際使用的網址，這裡是 Service 的 FQDN。官方範例寫的是 `localhost`，因為範例是給本機 kind 叢集用的；照抄的話會拿到一個沒有任何內容的 404，見[疑難排解：照官方範例填 `localhost`，回 404](#mine-4)。
+第一個是 `hostInterfaces` 底下的 `config.host`。它是 HTTP `Host` 標頭的比對值：host 收到請求時，會拿請求的 `Host` 標頭去找哪個元件綁定了這個值，這種做法叫虛擬主機路由。所以它要填呼叫端實際使用的網址，這裡是 Service 的 FQDN。官方範例寫的是 `localhost`，因為範例是給本機 kind 叢集用的；照抄的話會拿到一個沒有任何內容的 404，可在後面的[錯誤情境練習](#mine-4)觀察這個差異。
 
 第二個是 Service 沒有 `selector`，這是刻意的。一般 Service 靠 selector 找出符合標籤的 Pod 當後端，但元件不是 Pod，沒有標籤可以選。wasmCloud 改由 operator 直接寫這個 Service 的 EndpointSlice，只列出真正載著這個元件的 host：
 
@@ -479,18 +453,6 @@ $ kubectl get node -o json | (labels/annotations 含 wasm|spin) → []   taints 
 
 **修法**：評估減少 host 數量或增加節點。要調整數量，可在步驟 3 保存的 values 檔修改對應 host group 的 `replicas`，保留同一項的其他欄位，再沿用該檔升級 release；不要只傳入缺少其他設定的陣列項目。不要把 request 拿掉：250m 是替 host 跑滿元件時準備的，拿掉之後元件變多，host 就沒有保底的 CPU。
 
-### chart 沒有 tolerations、affinity、priorityClassName {#mine-2}
-
-**症狀**：在單節點叢集上看不出問題。加了帶 taint 的節點池之後，host pod 排不上去；有多顆節點時，host 也可能全部擠在同一顆上；節點資源吃緊時，host 會被搶占，上面的元件跟著停掉。
-
-**原因**：步驟 3 的搜尋結果，五個排程欄位在 chart 裡都沒有，也沒有 values 可以覆寫。實際的影響有三項：
-
-- host 不保證分散。host group 的用意之一是多顆 host 互相備援，但 chart 沒有反親和性或 `topologySpreadConstraints`。本課在單節點上沒辦法驗證這一點，Day 3 加第二顆節點時才實際看到。
-- 帶 taint 的節點排不上。AKS 的 spot 節點池預設帶 `kubernetes.azure.com/scalesetpriority=spot:NoSchedule`，host pod 沒有對應的 toleration。
-- 沒有 `priorityClassName`，operator 和 host 的優先權跟一般 pod 一樣是 0，節點吃緊時可能被搶占。元件的可用性完全取決於載著它的 host pod，而 host 被驅逐時，上面所有元件會一起停掉。本課沒有實際測試 host 被刪掉時元件的行為，這是依架構推論。
-
-**修法**：chart 沒有欄位可以設，只能直接 `kubectl patch` Deployment 的 pod template。這種 patch 在下次 `helm upgrade` 時不一定會被蓋掉：chart 沒有範本的欄位（例如 `tolerations`）會保留下來，Day 3 使用 Helm 4.2.2 的 server-side apply 時，`replicas` 被 `kubectl scale` 改過，下一次 `helm upgrade` 因欄位所有權衝突失敗。這是該次版本與操作組合的結果。細節見 Day 3 的[「`kubectl scale` 過的 Deployment 會讓下一次 `helm upgrade` 直接失敗」](sprint3-day3-wasmcloud-distributed.md#mine-4)。
-
 ### operator 與 host 啟動時連不上 NATS {#mine-3}
 
 **症狀**：安裝後，或叢集停機再開機後，`runtime-operator` 與三顆 host 的 `RESTARTS` 都是 2：
@@ -521,9 +483,56 @@ chart 沒有處理啟動順序，沒有 initContainer 等 NATS，也沒有連線
 
 **修法**：先確認 NATS 恢復後 host 能正常提供服務。不要把固定的重啟次數當成正常判準；監控應關注持續重啟、就緒狀態與請求失敗。改接外部 NATS 時要特別注意：NATS 在別的叢集或命名空間、NetworkPolicy 還沒生效、DNS 還沒更新時，host 會一直重啟、退避間隔拉長到五分鐘，而 `Connection refused (os error 111)` 這行錯誤不會告訴你 NATS 的位址（chart 裡的 `schedulerUrl`）設成了什麼，要自己去查。
 
-### 照官方範例填 `config.host: localhost`，回空白的 404 {#mine-4}
+### 錯誤情境練習：讓 Host 標頭與設定不符 {#mine-4}
 
-**症狀**：照官方範例在 `hostInterfaces` 填 `config.host: localhost`，再用 Service 的 FQDN 呼叫：
+步驟 5 使用 Service 的 FQDN，正常情況會回 200。這個練習刻意把 `config.host` 設成 `localhost`，觀察物件全部 `READY=True` 時，請求為什麼仍會回 404。請先完成步驟 5 的叢集內請求測試，再將以下內容存成 `10-hello-world.yaml`；它與步驟 5 指向相同的 Service 與 WorkloadDeployment，會覆寫元件的路由設定。
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-world
+  namespace: wasmcloud
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      protocol: TCP
+---
+apiVersion: runtime.wasmcloud.dev/v1alpha1
+kind: WorkloadDeployment
+metadata:
+  name: hello-world
+  namespace: wasmcloud
+spec:
+  replicas: 1
+  template:
+    spec:
+      hostSelector:
+        hostgroup: default
+      kubernetes:
+        service:
+          name: hello-world
+      components:
+        - name: hello-world
+          image: ghcr.io/wasmcloud/components/hello-world:0.1.0
+      hostInterfaces:
+        - namespace: wasi
+          package: http
+          interfaces:
+            - incoming-handler
+          config:
+            host: localhost
+```
+
+套用這份設定：
+
+```console
+$ kubectl apply -f 10-hello-world.yaml
+```
+
+接著從叢集內用 Service 的 FQDN 呼叫：
 
 ```console
 $ curl -sS -D- http://hello-world.wasmcloud.svc.cluster.local/
@@ -537,15 +546,24 @@ content-length: 0
 **原因**：`config.host` 是虛擬主機比對的值（見步驟 5）。範例的 `localhost` 是給本機 kind 叢集用的；在叢集裡用 Service 的 FQDN 呼叫，請求的 `Host` 標頭就是 FQDN，比對不到。線索只出現在載著元件的那顆 host pod 的 log（`kubectl -n wasmcloud logs <host-pod>`），而且層級是 `WARN`，不是 `ERROR`：
 
 ```console
+$ kubectl -n wasmcloud logs <host-pod>
 WARN handle_http_request{http.host=hello-world.wasmcloud.svc.cluster.local}:
      failed to route incoming request
      err=no workload bound to host "hello-world.wasmcloud.svc.cluster.local"
 ```
 
 
-這是一對一的比對：設定是 `localhost` 時，加上 `-H "Host: localhost"` 呼叫會得到 200；把設定改成 FQDN 之後，反過來是 `Host: localhost` 的請求得到 404。
+保持 `localhost` 設定，改送與它相同的 `Host` 標頭，就會得到 200：
 
-**修法**：`config.host` 填呼叫端實際使用的主機名稱，本章步驟 5 的 manifest 已經這樣寫。之後遇到 wasmCloud 回 404，先看 host pod 的 log 有沒有 `no workload bound to host`，不要從 Service 和 EndpointSlice 查起。
+```console
+$ curl -sS -D- -H "Host: localhost" http://hello-world.wasmcloud.svc.cluster.local/
+HTTP/1.1 200 OK
+Hello from wasmCloud!
+```
+
+這是一對一的比對；把設定改成 FQDN 之後，反過來是 `Host: localhost` 的請求得到 404。
+
+練習後用步驟 5 的 `kubectl apply -f hello-world.yaml` 恢復 FQDN 設定，再送一次步驟 5 的請求確認回應。之後遇到 wasmCloud 回 404，先看 host pod 的 log 有沒有 `no workload bound to host`，再判斷是否為 `Host` 不符。
 
 另一種症狀可以拿來對照。把元件刪掉，同一個 Service 給的不是 404，而是連不上，因為 operator 把 EndpointSlice 清空了：
 
@@ -558,40 +576,6 @@ curl: (7) Failed to connect … port 80 after 2 ms
 
 這組對照裡，「連不上」是因為 EndpointSlice 已空，「404」是因為 `Host` 不符。其他網路、路由與應用程式問題也可能產生相同症狀，要查 EndpointSlice 與 host 日誌才能判定。做完這個對照，用 `kubectl apply -f hello-world.yaml` 把元件裝回來。
 
-### 官方文件站的安裝指令，裝到上一代的 chart {#mine-5}
-
-**症狀**：照 wasmCloud 文件站 Kubernetes 部署頁的指令安裝，`helm install` 成功、pod 也都起來了，但 `kubectl apply` 本章的 manifest 時，叢集不認得 `WorkloadDeployment`。
-
-**原因**：截至本課驗證時（2026-08），文件站給的是這行指令：
-
-```bash
-helm upgrade --install wasmcloud-platform \
-  --values https://raw.githubusercontent.com/wasmCloud/wasmcloud/main/charts/wasmcloud-platform/values.yaml \
-  oci://ghcr.io/wasmcloud/charts/wasmcloud-platform --dependency-update
-```
-
-
-那個 chart 在 registry 上仍然拉得下來，但它是 v1 世代：
-
-```console
-$ helm show chart oci://ghcr.io/wasmcloud/charts/wasmcloud-platform
-Pulled: ghcr.io/wasmcloud/charts/wasmcloud-platform:0.1.2
-appVersion: 1.2.1          ← v1 世代
-```
-
-
-主 repo 的 `charts/` 目錄底下卻只剩 `runtime-operator`：
-
-```console
-$ gh api repos/wasmCloud/wasmCloud/contents/charts --jq '.[].name'
-runtime-operator           ← 只有這一筆
-```
-
-
-文件站推薦的 chart 已經不在原始碼裡，registry 上的舊版本還在。安裝不會失敗，只是裝到的是 v1，CRD 不同。
-
-**修法**：用步驟 2 的 `runtime-operator`。裝完先跑 `kubectl get crd | grep wasmcloud`，看到 `runtime.wasmcloud.dev` 底下有 `workloaddeployments` 才是 v2；看到 `wadm` 相關的就是 v1。
-
 ## 想一想
 
 - 另一套 wasm 方案的文件說「不需要修改節點」，但安裝步驟裡有一個替節點加上 `wasm=enabled` 標籤的 DaemonSet。依這一章的判斷方式，你會認為它比較接近 wasmCloud 還是 shim 路線？你會先檢查哪幾樣東西來確認？
@@ -600,7 +584,58 @@ runtime-operator           ← 只有這一筆
 
 ## 小結
 
-wasmCloud 的元件在一顆普通的 host pod 裡由 Wasmtime 執行，containerd 只負責用 `runc` 把 host 跑起來，所以節點不需要 shim、不需要改 `config.toml`，也不需要標籤；本章用安裝前後的五份比對確認了這一點，比對之前先確認目前節點與 Day 1 的基準相同。代價移到了別的地方：官方 overlay 的 3 顆 host 在小節點上預留了大部分的 CPU；chart 沒有任何排程欄位，host 不保證分散、排不上帶 taint 的節點、也沒有優先權保護；多了 NATS 這套要維護的元件，NATS 未就緒時 host 與 operator 可能重啟；元件不是 Pod，`kubectl get pod`、`kubectl top`、HPA 都只看得到 host。之後評估任何宣稱「不用改節點」的方案時，先問它的程式在哪個行程裡執行、需要哪些節點權限與掛載，以及它要求預留多少資源；遇到物件全綠卻回 404，先看 host 的 log。
+wasmCloud 的元件在一顆普通的 host pod 裡由 Wasmtime 執行，containerd 只負責用 `runc` 把 host 跑起來，所以節點不需要 shim、不需要改 `config.toml`，也不需要標籤；本章用安裝前後的五份比對確認了這一點，比對之前先確認目前節點與 Day 1 的基準相同。代價移到了別的地方：官方 overlay 的 3 顆 host 在小節點上預留了大部分的 CPU；chart 沒有任何排程欄位，host 不保證分散、缺少對應 toleration 時排不上帶 `NoSchedule` taint 的節點、也沒有優先權保護；多了 NATS 這套要維護的元件，NATS 未就緒時 host 與 operator 可能重啟；元件不是 Pod，`kubectl get pod`、`kubectl top`、HPA 都只看得到 host。之後評估任何宣稱「不用改節點」的方案時，先問它的程式在哪個行程裡執行、需要哪些節點權限與掛載，以及它要求預留多少資源；遇到物件全綠卻回 404，先看 host 的 log。
+
+## 版本提醒 {#mine-5}
+
+本章的 WorkloadDeployment 屬於 wasmCloud v2，請使用步驟 2 的 `runtime-operator` 2.6.1。舊版 `wasmcloud-platform` 與 `wasmcloud-operator` 教學使用不同的 CRD，不能直接套用本章 manifest。
+
+<details markdown="1">
+<summary>既有版本查詢與舊 chart 紀錄（不屬於操作步驟）</summary>
+
+以下保留既有紀錄，供辨識版本；其中的舊 chart 安裝指令不適用本章。
+
+```console
+$ gh api repos/wasmCloud/wasmCloud/releases --jq '.[] | "\(.tag_name)\t\(.published_at)"' | head -4
+v2.6.1   2026-07-29T21:06:31Z
+v2.6.0   2026-07-28T22:02:31Z
+v2.5.2   2026-07-10T19:25:23Z
+v2.5.1   2026-07-02T13:27:14Z
+```
+
+```console
+$ gh api repos/wasmCloud/wasmcloud-operator --jq '.full_name'
+wasmCloud/wadm-operator          ← GitHub 自動轉址,舊 URL 還通
+
+$ gh api repos/wasmCloud/wadm-operator --jq '.pushed_at'
+2025-12-15T09:11:53Z             最後 release v0.5.1(2025-12-04)
+```
+
+```console
+$ helm show chart oci://ghcr.io/wasmcloud/charts/runtime-operator
+name: runtime-operator
+version: 2.6.1
+appVersion: 2.6.1        ← release train 每次一起推
+```
+
+```bash
+helm upgrade --install wasmcloud-platform \
+  --values https://raw.githubusercontent.com/wasmCloud/wasmcloud/main/charts/wasmcloud-platform/values.yaml \
+  oci://ghcr.io/wasmcloud/charts/wasmcloud-platform --dependency-update
+```
+
+```console
+$ helm show chart oci://ghcr.io/wasmcloud/charts/wasmcloud-platform
+Pulled: ghcr.io/wasmcloud/charts/wasmcloud-platform:0.1.2
+appVersion: 1.2.1          ← v1 世代
+```
+
+```console
+$ gh api repos/wasmCloud/wasmCloud/contents/charts --jq '.[].name'
+runtime-operator           ← 只有這一筆
+```
+
+</details>
 
 ## 延伸閱讀
 
@@ -612,7 +647,7 @@ wasmCloud 的元件在一顆普通的 host pod 裡由 Wasmtime 執行，containe
 
 ## 下一步
 
-這一章確認了 wasmCloud 不改節點，也看到它把代價放在哪裡。但三顆 host 都在同一顆節點上，所以「host 分散在多顆節點上互相備援」還沒有驗證。[Day 3](sprint3-day3-wasmcloud-distributed.md) 加入第二顆節點，第一件事就會遇到上面的 chart 缺排程欄位問題：新節點帶 taint，host pod 排不上去。接著再看 wasmCloud 的分散式模型：同一個元件怎麼只靠能力設定改變行為，以及元件會被放到哪一顆節點。
+這一章確認了 wasmCloud 不改節點，也看到它把代價放在哪裡。但三顆 host 都在同一顆節點上，所以「host 分散在多顆節點上互相備援」還沒有驗證。[Day 3](sprint3-day3-wasmcloud-distributed.md) 加入第二顆節點，第一件事就會遇到上面的 chart 缺排程欄位問題：新節點帶 `NoSchedule` taint，host pod 缺少對應 toleration 而排不上去。接著再看 wasmCloud 的分散式模型：同一個元件怎麼只靠能力設定改變行為，以及元件會被放到哪一顆節點。
 
 ---
 

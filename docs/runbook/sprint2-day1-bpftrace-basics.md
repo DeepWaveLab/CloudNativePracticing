@@ -5,7 +5,7 @@
 
 假設節點上某個目錄一直被寫進來路不明的檔案，或者你懷疑某個容器在做奇怪的事。你想問三個問題：這台機器剛剛執行了什麼、誰開了哪些檔案、這個容器連去哪裡。[Day 0](sprint2-day0-ebpf-concepts.md) 用一行 bpftrace 在一顆 pod 裡追到另一顆 pod 的 execve，但那一行只回答得了第一個問題的一部分。
 
-Ubuntu 的 bpftrace 套件附了一批現成的追蹤工具，三個問題各有一支對應的工具。這一章先把三支都跑一次，看它們的輸出各漏掉了什麼；再拆開其中一支的原始碼，學會讀 `.bt` 腳本；最後自己寫一支「誰在寫這個目錄」，並且把它和另一套工具 bcc 比較。讀完這一章，看到一份追蹤輸出時，你能從工具掛在哪個探針判斷它漏掉哪些事件，並在現成工具不夠時自己寫一支腳本補上。
+Ubuntu 的 bpftrace 套件附了一批現成的追蹤工具，三個問題各有一支對應的工具。這一章先把三支都跑一次，看它們的輸出各漏掉了什麼；再拆開其中一支的原始碼，學會讀 `.bt` 腳本；最後自己寫一支「誰在寫這個目錄」，並且把它和 bcc（BPF Compiler Collection）比較。bcc 是另一套 eBPF 工具集，也提供追蹤行程執行、開檔與連線的工具。讀完這一章，看到一份追蹤輸出時，你能從工具掛在哪個探針判斷它漏掉哪些事件，並在現成工具不夠時自己寫一支腳本補上。
 
 ## 步驟 1:把實驗環境接回來，確認用的是哪一支 bpftrace
 
@@ -17,6 +17,14 @@ az aks nodepool scale -g <resource-group> --cluster-name <cluster> -n ebpf \
 ```
 
 如果你在兩次練習之間用 `az aks stop` 停過整座叢集，重新啟動後 `kubectl` 可能連不上，錯誤訊息還會把你帶往錯的方向，見[疑難排解：`kubectl` 回 `no such host`](#mine-1)。
+
+用完整欄位路徑列出節點名稱、kernel 與 AKS node image 版本（依官方文件補上，本課沒有實跑）：
+
+```bash
+kubectl get nodes -o custom-columns='NODE:.metadata.name,KERNEL:.status.nodeInfo.kernelVersion,IMAGE:.metadata.labels.kubernetes\.azure\.com/node-image-version'
+```
+
+語法與欄位依據 [Kubernetes 1.35 kubectl get 文件](https://v1-35.docs.kubernetes.io/docs/reference/kubectl/generated/kubectl_get/)、[1.35.6 的 Node 欄位定義](https://github.com/kubernetes/api/blob/v0.35.6/core/v1/types.go)與 [AKS node image 查詢說明](https://learn.microsoft.com/en-us/azure/aks/upgrade-node-image#upgrade-all-node-images-in-all-node-pools)；`IMAGE` 取自 `kubernetes.azure.com/node-image-version` label。
 
 節點就緒後，連同 system pool 一起列出三台節點的 kernel：
 
@@ -194,7 +202,7 @@ chmod +x /tmp/d1x-122216.sh
 ```
 
 
-前兩行是 runc，它是 containerd 透過 shim 呼叫的 OCI runtime，實際負責在容器裡建立行程；`kubectl exec` 進容器時，容器裡的 `bash -c` 就是由它開出來的。照著 `PPID` 欄往回看，父子關係連得起來：13685（runc）→ 13698（`bash -c`）→ 13704 到 13707（各個子指令）。
+前兩行是 runc，它負責在容器裡建立行程；`kubectl exec` 進容器時，容器裡的 `bash -c` 就是由它開出來的。照著 `PPID` 欄往回看，父子關係連得起來：13685（runc）→ 13698（`bash -c`）→ 13704 到 13707（各個子指令）。
 
 這份輸出有四個地方跟你預期的不一樣：
 
@@ -284,7 +292,7 @@ TIME     PID      COMM             SADDR            SPORT  DADDR         DPORT
 
 前兩列都由掛載點決定：只掛進入端的就分不出成敗，只掛 TCP 函式的就看不到 UDP。印出來的目標本身也各有偏差：execsnoop 的參數截在第 16 個，opensnoop 給的是原樣字串、相對路徑不會還原，tcpconnect 的 IP 可信但只涵蓋 TCP。
 
-行數那一列也要記住。同一台幾乎閒置的節點，開檔事件比執行新行程多了約 70 倍，一秒約 1,100 筆。事件越密的追蹤，開著的成本越高，越不適合整天掛著。本章沒有測更高的事件量，map 滿了或事件來不及處理時會怎樣，這裡沒有驗證。
+事件密度會影響追蹤成本。同一台幾乎閒置的節點，開檔事件比執行新行程多了約 70 倍，一秒約 1,100 筆。事件越密的追蹤，開著的成本越高，越不適合整天掛著。本章沒有測更高的事件量，map 滿了或事件來不及處理時會怎樣，這裡沒有驗證。
 
 最後一列是三支工具共同的空白：沒有一支說得出「這是哪一顆 pod」。它們掛在核心的 syscall 與網路函式上，比容器這一層更低，這些事件的資料裡沒有 Kubernetes pod 的欄位。要把事件接回 pod，得自己補上對應關係，那是 Day 2 的題目。
 
@@ -383,9 +391,9 @@ stdin:1:59-82: ERROR: BPF_FUNC_d_path not available for your kernel version
 
 ### 核心裡的路徑是一條 dentry 鏈
 
-核心裡沒有完整的路徑字串。每一層目錄或檔案在核心裡是一個 **dentry**（directory entry），它只記得自己的名字（`d_name`），以及一個指向上一層的指標 `d_parent`。`path()` 做的事，就是從檔案沿著 `d_parent` 一路往上走，把名字串起來。下圖是 `/var/log/day1-watch/from-pod.bin` 這條鏈，每個方塊上方標的是下面的腳本要走幾次 `d_parent` 才到得了它：
+核心裡沒有完整的路徑字串。每一層目錄或檔案在核心裡是一個 **dentry**（directory entry），儲存名稱（`d_name`）以及指向父節點的指標（`d_parent`）。`path()` 做的事，就是從檔案沿著 `d_parent` 一路往上走，把名字串起來。下圖是 `/var/log/day1-watch/from-pod.bin` 這條鏈，每個方塊上方標的是下面的腳本要走幾次 `d_parent` 才到得了它：
 
-![dentry 鏈由右往左是 from-pod.bin、day1-watch、log、var、/，每個 dentry 只記得自己的名字和指向上一層的 d_parent；腳本裡 $d 是 from-pod.bin，走一次 d_parent 到 day1-watch，兩次到 log，三次到 var，開頭的 / 是寫死的；filter 只比對 day1-watch 這一層；trace-target 容器裡的 dd 與節點上的 dd 都寫進同一個 day1-watch dentry](../assets/diagrams/s2d1-dentry-chain.svg)
+![dentry 鏈由右往左是 from-pod.bin、day1-watch、log、var、/，每個 dentry 儲存名稱以及指向父節點的 d_parent；腳本裡 $d 是 from-pod.bin，走一次 d_parent 到 day1-watch，兩次到 log，三次到 var，開頭的 / 是寫死的；filter 只比對 day1-watch 這一層；trace-target 容器裡的 dd 與節點上的 dd 都寫進同一個 day1-watch dentry](../assets/diagrams/s2d1-dentry-chain.svg)
 
 照著圖由右往左看：腳本裡的 `$d` 是檔案本身的 dentry，`$d->d_parent` 是 `day1-watch`，再往上兩層是 `log` 和 `var`。filter 只需要看 `day1-watch` 那一層的名字，就知道這次寫入是不是落在監看的目錄裡。圖的下半部，等跑完腳本再回來看。
 
@@ -436,7 +444,7 @@ EOF
 除了上一節看過的語法，這支腳本有三個地方值得說明：
 
 - **filter 只比對直屬父目錄的名字。** `WATCHDIR` 是 `day1-watch`，`WATCHLEN` 是 11，比字串長度多 1，連結尾的 NUL 字元一起比，所以是完全相符，`day1-watch-old` 這種名字不會被當成同一個目錄。判斷在核心裡做，其他目錄的寫入不會送出核心。
-- **用 `kfunc:` 而不是 `kprobe:`。** Day 0 提過，`kfunc` 透過 BTF 知道參數的型別，所以可以直接寫 `args.file->f_path.dentry`。用 `kprobe` 只拿得到沒有型別的原始參數，得自己寫 `((struct file *)arg0)`，還要用 `#include` 引入定義 `struct file` 的標頭檔。
+- **用 `kfunc:` 而不是 `kprobe:`。** Day 0 提過，`kfunc` 透過 BTF 取得參數的型別，所以可以直接寫 `args.file->f_path.dentry`。用 `kprobe` 取得的是原始參數，得自行轉型，例如 `((struct file *)arg0)`；有 BTF 時，核心型別可直接使用，不必用 `#include` 引入標頭檔，見 [bpftrace v0.20.2 的 BTF 說明](https://github.com/bpftrace/bpftrace/blob/v0.20.2/docs/reference_guide.md#btf-support)。
 - **map 的第二種用法：聚合。** opensnoop 的 map 是暫存；這裡的 `@bytes[comm, pid] = sum(args.count);` 是聚合，`sum()` 把每次寫入的位元組數加總，key 是 `comm` 與 `pid` 兩個欄位組成的 tuple。同類的聚合函式還有 `count()`、`avg()`、`hist()`、`lhist()`。加總在核心裡做，使用者空間只在最後讀一次結果，事件再多也不必一筆一筆送出來。
 
 ### 兩個寫入者，一份輸出
@@ -484,9 +492,7 @@ PID、`comm`、路徑都有了，容器裡的寫入者（19878）和節點上的
 
 ## 步驟 4:同一支腳本放到兩個不同的 kernel 上
 
-步驟 1 看過，`ebpf` 節點池是 kernel 6.8.0-1062，system pool 是 6.8.0-1059。這一步把同一份 `whowrites.bt` 用 `kubectl cp` 也放進 `ebpf-lab-system`。放好之後，工作站上的原檔和兩顆 pod 裡的副本，用 `md5sum` 算出來都是 `e398f627…7182`，確定三份是同一個檔案。
-
-兩台節點的 BTF 則不一樣。用 `stat -c '%s' /sys/kernel/btf/vmlinux` 量大小、`md5sum` 算指紋：`ebpf` 節點池那台是 6,035,000 bytes、md5 `6f631a7b…f423c`，system pool 那台是 6,033,733 bytes、md5 `d504cbf3…39924`。兩邊的 bpftrace 都是 v0.20.2，node image 分別是 202607.20.0 與 202607.09.0。
+這一步需要兩種 kernel、各自的 BTF，以及各節點上的特權 pod；兩邊的 bpftrace 都使用 v0.20.2。以下對照步驟 1 的兩種版本：`ebpf` 節點池的 `6.8.0-1062-azure` 與 system pool 的 `6.8.0-1059-azure`。如果所有節點都是同一版本，就無法做這裡的跨版本對照。把步驟 3 的同一份 `whowrites.bt` 用 `kubectl cp` 也放進 `ebpf-lab-system`，比較它在兩邊能否載入並追到寫入事件。
 
 下面是本課量測時用的腳本 `06-core-portability.sh`，用 `kubectl cp` 放進兩顆特權 pod 後各執行一次，參數是一個節點上不會重複的名字。它在背景執行 `whowrites.bt`，趁程式還掛著時用節點的 bpftool 查出載入的程式與它的指令（`bpftool prog dump xlated`），再用改名的 `dd` 自己寫一筆，最後結束 bpftrace：
 
@@ -544,11 +550,14 @@ cat /tmp/core.out
 ```
 
 
-同一份腳本，一個字都沒改，兩台節點都沒有安裝 kernel headers，也都跑起來了。不過 bpftrace 其實在兩台節點上各編譯了一次，只是編譯時用的型別資訊來自本機的 BTF，不是 headers。這一點會影響下面的結論。
+兩筆輸出顯示，同一份 `whowrites.bt` 在這兩種 kernel 上都能追到寫入事件。bpftrace 在每台節點上，對照本機的 BTF 各編譯一次，不需要另外安裝 kernel headers。這是原始碼層的可攜性；libbpf（另一套 eBPF 開發函式庫）的 CO-RE 則使用預先編好的 `.o` 目的檔，在載入時依本機 BTF 調整欄位位移。
 
-### 比對兩邊載進核心的程式
+這次只驗證了上述兩種 kernel，不能推論所有版本都能執行。同一份 `.bt` 在不同節點編譯出的指令也不必相同；若結構欄位的位置改變，bpftrace 會依當地 BTF 使用相應的位移，仍須確認腳本用到的函式與欄位是否存在。
 
-跑得起來，還不代表兩邊載進核心的程式一樣。趁兩邊的腳本都還在跑，用節點的 bpftool 查（`nsenter -t 1 -m -- bpftool prog show id <id>`）。id 要從 `bpftool prog list` 裡找 `name vfs_write` 的那一行，每台節點還有一支核心自帶、型別也是 `tracing` 的 `hid_tail_call`，不要找錯。上面的腳本取的是清單裡最後一個 `tracing`，剛載入的程式 id 最大，所以會是 `vfs_write`：
+<details markdown="1">
+<summary>載入程式與位元碼的比對輸出</summary>
+
+以下保留兩種 kernel 的比對結果。第一份輸出是載入的 `vfs_write` 程式資訊，第二份摘出指令差異，箭頭左邊是 `ebpf` pool，右邊是 system pool：
 
 ```console
 (ebpf pool)                                (system pool)
@@ -560,10 +569,6 @@ cat /tmp/core.out
 ```
 
 
-兩邊的 `tag` 完全相同。Day 0 看過，tag 是核心對程式指令算出的雜湊，計算時會遮掉 map 編號這類每次載入都不同的值，所以 tag 相同，代表兩顆不同的 kernel 上載入的是同一串指令。`xlated`（位元碼長度）和 `jited`（編譯成機器碼後的長度）也一樣。
-
-再用 `bpftool prog dump xlated id <id>` 把兩邊完整的指令列出來逐行比對，各 318 行，只有 14 行不同。下面摘出其中幾行，箭頭左邊是 `ebpf` pool，右邊是 system pool：
-
 ```diff
   48: (18) r1 = map[id:109]        →   48: (18) r1 = map[id:125]
   54: (85) call bpf_ringbuf_output#340416  →  #340176
@@ -573,17 +578,13 @@ cat /tmp/core.out
 ```
 
 
-14 行全部屬於兩類。一類是 `map[id:…]`，那是這次載入時核心配給 map 的編號，跟程式邏輯無關。另一類是 `call` 指令，呼叫的是 helper 函式，也就是核心提供給 BPF 程式使用的函式，例如取得目前 PID 的 `bpf_get_current_pid_tgid`。`#` 後面的數字代表呼叫目標在該 kernel 映像裡的位置，兩邊每一組都剛好差 240：兩顆 kernel 是不同的建置，helper 函式在核心映像裡的位置整體偏移了 240 bytes，核心載入程式時填入的是自己這一份的位置。指令本身呼叫的是同一個 helper，只是位址不同。其餘 304 行完全相同。
+兩邊的 `tag` 與程式長度相同；列出的差異是載入時配置的 map 編號與核心函式的呼叫位置。這些結果只描述這一組 kernel，原始碼可攜不要求位元碼相同。
 
-### 這組數字能說明到哪裡
-
-這組數字說明：同一份沒改過的 `.bt`，在兩顆 BTF 不同的 kernel 上都能跑，產生的指令完全相同，差別只在載入時由核心填入的編號與位址。如果用需要 kernel headers 的做法，兩台節點都得各自準備一份跟 kernel 版本相符的 headers，少一份就編不出來；這裡兩台都不需要 headers，型別全部來自核心自帶的 BTF。
-
-Day 0 介紹 CO-RE 時，用來示範的就是一行 bpftrace：它和 CO-RE 程式一樣，靠核心自帶的 BTF 得知這台 kernel 的結構長什麼樣。差別在編譯的時機。用 libbpf（另一套 eBPF 開發函式庫）寫的 CO-RE 程式是預先編好的 `.o` 目的檔，裡面帶著可重定位的欄位參考，搬到各台機器載入時，再由 libbpf 依當地的 BTF 改成正確的位移，可攜性在目的檔這一層。bpftrace 則是在每一台節點上，對照那台節點的 BTF 即時編譯一次，可攜性在原始碼這一層。今天兩邊的指令一模一樣，是因為腳本用到的幾個結構欄位（`struct file` 的 `f_path`、`dentry` 的 `d_parent` 與 `d_name`、`vfs_write` 的參數）在兩顆 kernel 裡的位置剛好相同。如果其中一顆 kernel 改了欄位的位置，同一份原始碼還是能跑，只是兩邊編出來的指令會不同，而那正是對照本機 BTF 重新編譯的用處。
+</details>
 
 ## 步驟 5:和 bcc 比一比
 
-bpftrace 不是唯一的選擇。**bcc**（BPF Compiler Collection）是更早出現的一套 eBPF 工具集，execsnoop、opensnoop、tcpconnect 都有 bcc 版，在 Ubuntu 上叫 `execsnoop-bpfcc` 這類名字。bcc 的工具是 Python 程式，裡面嵌著一段 C 原始碼，每次啟動時編譯成 BPF 程式；編譯時需要的核心結構定義，從 **kernel headers**（描述核心內部結構的 C 標頭檔，Ubuntu 上的套件是 `linux-headers-<kernel 版本>`）讀取。
+execsnoop、opensnoop、tcpconnect 都有 bcc 版，在 Ubuntu 上叫 `execsnoop-bpfcc` 這類名字。bcc 的工具是 Python 程式，裡面嵌著一段 C 原始碼，每次啟動時編譯成 BPF 程式；編譯時需要的核心結構定義，從 **kernel headers**（描述核心內部結構的 C 標頭檔，Ubuntu 上的套件是 `linux-headers-<kernel 版本>`）讀取。
 
 常聽到不選 bcc 的理由有兩個：「bcc 要靠 kernel headers 編譯，雲端節點裝不了」，以及「bcc 要編譯器，bpftrace 不用」。這一步在同一座叢集上把兩句都檢查一次。
 
@@ -642,9 +643,7 @@ flock            29422   978       0 /usr/bin/flock -e 10
 ```
 
 
-這樣就跑得起來了。這裡要用 symlink，改用 `mount --bind` 會綁錯目錄，見[疑難排解：`mount --bind` 掛進來是空的](#mine-4)。
-
-headers 不是裝好工具之後就用不到了：把這個 symlink 移開，同一支剛跑成功的工具立刻又找不到 headers。bcc 每次啟動都要重新編譯，headers 是執行時的需求，見[疑難排解：bcc 工具突然找不到 kernel headers](#mine-6)。
+bcc 每次啟動都要重新編譯，headers 是執行時的需求。節點升級 kernel 時，也要提供與新版本相符的 headers。
 
 到這裡，第一句理由也不成立：只要把節點的 headers 接進容器，bcc 在 AKS 上編譯得起來。
 
@@ -668,7 +667,7 @@ d1b-123744.sh    39639   39632     0 /tmp/d1b-123744.sh
 
 ## 步驟 6:收尾，先確認沒有殘留再刪
 
-Day 0 的[「bpftrace 應該已經結束，核心裡的程式卻還在」](sprint2-day0-ebpf-concepts.md#mine-6)講過，BPF 程式的生命週期跟著 fd，不跟著終端機。bcc 的工具也有類似的狀況，收到 SIGINT 不一定會結束，見[疑難排解：`execsnoop-bpfcc` 收到 SIGINT 之後還在跑](#mine-5)。所以刪 pod 之前，先在三顆特權 pod 裡各檢查一次：`pgrep -x bpftrace` 與 `pgrep -f '[e]xecsnoop-bpfcc'` 確認沒有還在跑的追蹤行程；`nsenter -t 1 -m -- bpftool prog list` 列出核心裡的程式，數一數總數，以及 `tracing`、`tracepoint`、`kprobe` 三類各有幾支。三台的結果整理如下：
+Day 0 的[「bpftrace 應該已經結束，核心裡的程式卻還在」](sprint2-day0-ebpf-concepts.md#mine-6)講過，BPF 程式的生命週期跟著 fd，不跟著終端機。所以刪 pod 之前，先在三顆特權 pod 裡各檢查一次：`pgrep -x bpftrace` 與 `pgrep -f '[e]xecsnoop-bpfcc'` 確認沒有還在跑的追蹤行程；`nsenter -t 1 -m -- bpftool prog list` 列出核心裡的程式，數一數總數，以及 `tracing`、`tracepoint`、`kprobe` 三類各有幾支。三台的結果整理如下：
 
 ```console
 --- ebpf-lab-przdr (vmss000003, kernel 6.8.0-1062) ---
@@ -746,30 +745,6 @@ $ bpftrace --info | sed -n '/Kernel helpers/,/^$/p'
 擋下腳本的是 bpftrace 0.20.2 自己的能力偵測，不是核心，錯誤訊息點名的 kernel 不是出問題的地方，所以升級 kernel 也沒有用。bpftrace 的偵測為什麼得到 `no`，本課沒有查到確切原因。
 
 **修法**：不要用 `path()`，改從 dentry 鏈自己組出路徑，寫法見步驟 3 的腳本。
-
-### `mount --bind /proc/1/root/…` 回報成功，掛進來的目錄卻是空的 {#mine-4}
-
-**症狀**：特權容器加上 `hostPID: true` 之後，`ls /proc/1/root/lib/modules/…` 讀得到節點上的檔案；`mount --bind /proc/1/root/lib/modules /lib/modules` 也回報成功，`mount` 列表裡多了一筆，但 `ls /lib/modules/` 是空的。
-
-**原因**：util-linux 的 `mount` 指令會先對來源路徑做 `realpath()`，把路徑裡的 symlink 全部解開。`/proc/1/root` 是核心產生的特殊連結，`readlink` 出來就是 `/`，於是 `/proc/1/root/lib/modules` 被改寫成容器自己的 `/lib/modules`，結果綁到的是容器自己的目錄。
-
-**修法**：臨時除錯改用 symlink（步驟 5 的 `ln -sfn /proc/1/root/usr/src/linux-headers-$KV /lib/modules/$KV/build`），核心解析 symlink 時不會先做 `realpath()`。要寫進 manifest，就用 hostPath 把節點的 `/lib/modules` 與 `/usr/src` 掛進容器。
-
-### `execsnoop-bpfcc` 收到 SIGINT 之後還在跑 {#mine-5}
-
-**症狀**：量啟動時間的腳本在偵測到第一個位元組輸出之後送 `SIGINT`（等同按 Ctrl-C），bpftrace 每次都正常結束，`execsnoop-bpfcc` 卻沒有結束，繼續寫輸出，過了幾分鐘 `ps` 還看得到它。
-
-**原因**：本課只量到這個現象。比較可能的解釋是 Python 的訊號處理：Python 收到 `SIGINT` 時只先記下來，要等直譯器回到執行 Python 程式碼時才處理，而那時它正卡在 bcc 函式庫裡編譯 C 程式（一次就要兩秒以上）。這個解釋沒有進一步驗證。
-
-**修法**：bcc 工具要準備用 `SIGKILL`（`kill -9`）結束。另外，`pkill -9 -f "execsnoop-bpfcc"` 會連自己所在的那個 `bash -c` 一起殺掉，因為比對的字串也出現在它自己的命令列裡，整個 `kubectl exec` 會回 137。改寫成 `pkill -f "[e]xecsnoop-bpfcc"`，或不要用 `-f`。
-
-### bcc 工具突然找不到 kernel headers {#mine-6}
-
-**症狀**：同一支已經裝好、剛剛還跑得起來的 `execsnoop-bpfcc`，只要把 `/lib/modules/$(uname -r)/build` 移開，就再次回 `Unable to find kernel headers`；移回去又恢復正常。
-
-**原因**：bcc 的工具每次啟動都把內嵌的 C 原始碼重新編譯一次，headers 在那時才讀取，安裝時一個 header 都不需要。
-
-**修法**：把 headers 當成執行時的相依套件管理，節點升級 kernel 時，headers 套件要同時換成新版本。headers 沒跟上時，所有 bcc 工具會在下一次啟動時一起失效，而且不是安裝失敗，是原本能跑的工具突然不能跑。bpftrace 沒有這個問題，它讀的 `/sys/kernel/btf/vmlinux` 由執行中的核心提供，一定跟 kernel 同版。
 
 ## 想一想
 

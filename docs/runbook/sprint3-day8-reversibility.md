@@ -12,7 +12,7 @@ SpinKube 試用完了，要把它從叢集拆掉。直覺的做法是：把節�
 
 這一章的比對要成立，有一個前提：從開機到最後一次比對，叢集中間不能停機。Day 5 量過，本課 `az aks stop` 再 `start` 曾換成新 VM，節點上的改動全部消失（見 Day 5 的[「停機抹掉節點層改動，而 RuntimeClass 留在 etcd」](sprint3-day5-cost-measurement.md#mine-1)）。如果中途停過機，最後比對出來「跟基準相同」，就分不出是拆乾淨了，還是 VM 被換掉了。
 
-先判斷起始狀態。情境 A 需要一台尚未加上 rcm 設定與檔案的測試節點，再讓 rcm 安裝；如果接著 Day 7 使用已修好 plugin domain 的節點，請直接從[情境 B](#scenario-b)開始，不要宣稱做過 A。停止、啟動叢集不保證每次換 VM。
+先判斷起始狀態。情境 A 需要一台尚未加上 rcm 設定與檔案的測試節點，再讓 rcm 安裝；如果接著 Day 7 使用已修好 plugin domain 的節點，請直接從[情境 B](#scenario-b)開始，這條路線未執行情境 A。停止、啟動叢集不保證每次換 VM。
 
 使用 Day 6 的[七份取樣腳本](../assets/labs/s3d6/node-snapshot.sh)，在本機記錄拆除前後。另保留 `kubectl get node -o yaml` 的 Node UID 與 providerID，確認兩次比對是同一台節點。`day8-s0` 是下列實測在尚未安裝 rcm 的新節點上保存的基準；如果你的起點是 Day 7，應另命名為 `day8-before-removal`，不要直接期待得到相同的七份差異。
 
@@ -60,7 +60,7 @@ if !shimResource.DeletionTimestamp.IsZero() {
 }
 ```
 
-`DeletionTimestamp` 是你下 `kubectl delete` 時，API server 在物件上蓋的時間戳。finalizer 是刪除前必須完成清理的標記；帶這個標記的物件不會立刻消失，controller 看到這個時間戳，就知道要先做完清理（finalizer 在步驟 4 會再遇到）。所以觸發解除安裝的唯一動作是刪除 Shim CR，拿掉標籤只會讓節點掉出清單。
+`DeletionTimestamp` 是你下 `kubectl delete` 時，API server 在物件上蓋的時間戳。finalizer 是刪除前必須完成清理的標記；帶這個標記的物件不會立刻消失，controller 依刪除時間戳觸發清理（finalizer 在步驟 4 會再遇到）。所以觸發解除安裝的唯一動作是刪除 Shim CR，拿掉標籤只會讓節點掉出清單。
 
 `handleDeleteShim` 收到的 `nodes`，是**刪除當下**還符合 `nodeSelector` 的節點，而且它只對帶著 `spin-v2` 標籤的節點派 Job。兩個條件都要成立。下面這張圖把兩種順序並排，左邊先刪 CR，右邊先拿標籤：
 
@@ -125,7 +125,9 @@ containerd 設定、有效設定、runtime handler 清單三份快照，都跟 D
 
 第 1 層先刪 SpinApp 和 Day 7 的測試 Deployment。這裡刻意先刪光測試 pod，所以「還有 Spin pod 在跑時解除安裝會怎樣」本課沒有驗證，正式環境拆除前要自己測。
 
-第 2、3 層的順序要注意。SpinAppExecutor 身上帶著 `core.spinkube.dev/finalizer`。**finalizer** 是物件上的一個標記，表示「刪除前必須由某個 controller 先做完清理，再把標記拿掉」；標記沒被拿掉，物件就一直停在 Terminating。處理這個標記的就是 spin-operator，所以要趁 operator 還在時刪 SpinAppExecutor，再拆 operator：
+第 2、3 層的順序要注意。SpinAppExecutor 身上帶著 `core.spinkube.dev/finalizer`。**finalizer** 是物件上的一個標記，表示「刪除前必須由某個 controller 先做完清理，再把標記拿掉」；標記沒被拿掉，物件就一直停在 Terminating。處理這個標記的就是 spin-operator，所以要趁 operator 還在時刪 SpinAppExecutor，再拆 operator。
+
+沿用 Day 7 的讀者只建立了 `wasmlab` 的 executor，應略過下方第一行 `-n default`，從第二行開始執行；修正後的寫法本課沒有實跑。下方保留的操作紀錄包含 `default` 與 `wasmlab` 兩個 namespace 的 executor，不能直接套用到只有 `wasmlab` 的環境：
 
 ```console
 $ kubectl -n default delete spinappexecutor containerd-shim-spin --timeout=60s
@@ -135,7 +137,15 @@ $ kubectl delete crd spinapps.core.spinkube.dev spinappexecutors.core.spinkube.d
 $ kubectl delete namespace spin-operator
 ```
 
-順序反過來，`kubectl delete` 會一直掛著不回來（見[疑難排解：先 helm uninstall operator](#mine-2)）。
+### 反例：先拆 operator，executor 無法完成刪除 {#mine-2}
+
+若先執行 `helm uninstall spin-operator`，再刪 `SpinAppExecutor`，物件會因為 `core.spinkube.dev/finalizer` 尚未移除而無法完成刪除。負責移除標記的 controller 已經被拆掉，`kubectl delete` 預設又會等待物件消失，因此持續等待。上面的順序先刪 executor，可避開這個問題。
+
+以下保留這次錯誤順序之後，手動移除 finalizer 的處理紀錄：
+
+```console
+$ kubectl -n <ns> patch spinappexecutor <name> --type=merge -p '{"metadata":{"finalizers":null}}'
+```
 
 ## 步驟 5: 情境 B——刪 Shim CR，看手改過的設定會怎樣
 
@@ -145,7 +155,15 @@ $ kubectl delete namespace spin-operator
 $ kubectl -n rcm delete job --all
 ```
 
-這一步省不得。uninstall Job 的名字固定是 `<節點名>-spin-v2-uninstall`，rcm 用 **server-side apply** 送出它：把「這個物件應該長這樣」交給 API server，由 API server 跟現有的物件合併。情境 A 那顆同名的 Job 還在、內容一模一樣，合併的結果就是什麼都不改，不會建新的 Job，pod 也不會重跑。controller 的 log 照樣寫 `Deploying uninstall-Job`，`kubectl get jobs` 照樣看得到一顆 `Complete 1/1`，但那是情境 A 留下的舊 Job，節點什麼都沒清（見[疑難排解：同名舊 Job 讓解除安裝什麼都不做](#mine-3)）。
+### 反例：沿用舊 uninstall Job，節點未重新清理 {#mine-3}
+
+uninstall Job 的名字固定是 `<節點名>-spin-v2-uninstall`，rcm 用 **server-side apply** 送出它：把「這個物件應該長這樣」交給 API server，由 API server 跟現有的物件合併。若省略上面的清除步驟，情境 A 留下的同名 Job 內容又與這次相同，合併後物件不變，pod 不會重跑。controller 的 log 仍會寫 `Deploying uninstall-Job`，`kubectl get jobs` 也仍有 `Complete 1/1`，但 Job 的 UID 與完成時間都是上一次解除安裝的紀錄，節點沒有重新清理。
+
+rcm 沒替 uninstall Job 設 ownerReference，chart 預設也沒設 TTL，所以舊 Job 不會自動消失。先清掉舊 Job 可避開這個問題；確認是否真的重跑時，要比對 Job 的 UID 或 `completionTime`。
+
+<span id="mine-5"></span>預防的做法：rcm 的 chart 有一個 helm value `rcm.nodeInstallerJob.ttl`，預設是 `0`，等於關閉，文件也沒有提到。安裝 rcm 時帶上 `--set rcm.nodeInstallerJob.ttl=<秒>`，Job 跑完一段時間後會自動刪除，舊 Job 就不會擋住下一次解除安裝，也不會留下 Day 7 那種指向舊節點的 install Job。這是讀 rcm 原始碼與 chart 預設值得出的結論，本課沒有在叢集上實際驗證。它管不到刪除順序（[先移標籤再刪 Shim CR](#mine-1)）和手改過的設定（[手改過 domain](#mine-4)）這兩個問題。
+
+### 清除舊 Job 後的解除安裝
 
 清掉之後重新套用 Shim CR，再刪除它，這次會派出一顆新的 uninstall Job。它的 log 只有兩行，退出碼 0：
 
@@ -203,7 +221,7 @@ pod 順利排上節點，kubelet 也找得到 handler，直到 containerd 要啟
 |---|---|---|
 | `Pending` | RuntimeClass 有 `scheduling`,沒有節點命中 | 排不上去 |
 | `no runtime for "…" is configured` | 節點沒有這個 handler | 排得上,kubelet 拒絕 |
-| **`invalid custom binary path`** | **handler 在、指向的檔案不在** | **排得上、handler 查得到,containerd 起 shim 時才炸** |
+| **`invalid custom binary path`** | **handler 在、指向的檔案不在** | **排得上、handler 查得到,containerd 啟動 shim 時失敗** |
 
 第三種最難查。`kubectl get runtimeclass`、`kubectl describe node` 的 `runtimeHandlers`、`containerd config dump`，三個地方看起來都正常，要實際 `ls` 那個路徑才看得出檔案不在。所以解除安裝之後不要只看 Job 的退出碼，要量兩件事：`containerd config dump | grep -c spin-v2` 必須是 0，`/opt/rcm/bin/containerd-shim-spin-v2` 必須不存在。
 
@@ -247,7 +265,9 @@ sed -i '${/^$/d}' /etc/containerd/config.toml
 
 ## 步驟 7: 跟 Day 1 基準比對
 
-最後一次取節點快照，跟 Day 1 基準比對三份關鍵檔案，再跟今天開機時那份快照比對全部七份：
+最後一次取節點快照時，依起點選擇比較對象。情境 A 從尚未安裝 rcm 的節點開始，以 `day8-s0` 比對全部七份快照；直接接續 Day 7 的情境 B，則以 `day8-before-removal` 確認拆除了哪些設定與檔案，拆前與拆後不應相同。B 路線還要另外與安裝前基準比對，才能判斷還原程度；若沒有保存安裝前基準，就只能確認拆除前後的差異。
+
+以下是從 `day8-s0` 開始、完成情境 A、B 與手動收尾的比對結果：先跟 Day 1 基準比對三份關鍵檔案，再跟同一台 VM 上尚未安裝 rcm 的 `day8-s0` 比對七份。這裡的「五份 IDENTICAL」不適用於 B 路線的 `day8-before-removal`：
 
 ```text
 day8-final 對 Day 1 基準:
@@ -261,13 +281,13 @@ day8-final 對 day8-s0(同一顆 VM、七份全比):
 
 三份關鍵檔案都回到 Day 1 的樣子。確認 Node 身分與 VM 未替換後，可以判斷這三項追蹤的設定已還原；這不是整台節點所有狀態的完整證明。
 
-同 VM 的七份比較中，兩份差異是目錄／設定檔的修改時間，以及 `wasmtime-spin-v2` RuntimeClass 已被刪除。後者是預期的叢集狀態變更，不能說完全沒有狀態差異。另一次「對 Day 1」的 shim 清單比較，才有取樣器空白壓縮方式不同的情況；兩種比較不能混在一起。
+上述 `day8-final` 與 `day8-s0` 的七份比較中，兩份差異是目錄／設定檔的修改時間，以及 `wasmtime-spin-v2` RuntimeClass 已被刪除。後者是預期的叢集狀態變更，不能說完全沒有狀態差異。另一次「對 Day 1」的 shim 清單比較，才有取樣器空白壓縮方式不同的情況；兩種比較不能混在一起。
 
 ## SpinKube 適合誰
 
 Day 6 到今天三天走完，再加上 Day 0 [判斷專案是否還活著的方法](sprint3-day0-wasm-concepts.md#health-method)查到的資料，可以替這條路線下判斷了。
 
-以下活動數字是 2026-08 課程查核的歷史結果，部署前應重新檢查。各層的維護狀況不一樣。最上層的 `spin` CLI 很活躍，查證時近 13 週有 219 個 commit，自動化機器人只佔 3%。中間層的 shim、rcm、operator 三個 repo，default branch 最近 7–8 週沒有任何人的 commit，唯一在動的是 dependabot（GitHub 自動提出相依套件升級的機器人）：三個 repo 共 41 個 open PR，其中 27 個是它開的。這幾天在 rcm 遇到的四個問題，三個在上游沒有 issue，一個有 issue 但開了 27 個月沒人跟進。公開的 GitHub 上寫過 rcm `Shim` CR 的檔案只有 7 份，寫過 `SpinApp` 的有 245 份：這只是當時公開搜尋可見的樣本，不能由檔案數推算實際使用者數，也不能據此判定問題沒有回報的原因。
+2026-08 課程查核時，`spin` CLI 持續有開發活動，但 shim、rcm、operator 的人工維護較少，rcm 也有長期未獲處理的問題。採用這條路線時，團隊需要能自行處理節點設定與解除安裝殘留，並評估對 rcm、operator 的依賴；部署前應重新檢查各層的維護狀況。
 
 **適合**：wasm 工作負載必須跟一般 Kubernetes 工作負載長得一樣的團隊。Day 4 的 WasmEdge 也使用 RuntimeClass；SpinKube 在此之外增加 Spin 應用的部署工具：真正執行 wasm 的是 containerd 加一支 shim，operator 和 rcm 都只是讓安裝方便一點，Day 7 已經證明同一支應用可以用普通 Deployment 部署，不經 operator 產生資源。若要減少對 operator 的依賴，可評估只使用 RuntimeClass 加 shim 這兩層，把 rcm 和 operator 當成可以替換的工具。
 
@@ -282,30 +302,6 @@ Day 6 到今天三天走完，再加上 Day 0 [判斷專案是否還活著的方
 **原因**:rcm 只在 Shim CR 被刪除的那一刻，對還符合 `nodeSelector` 而且帶 `spin-v2` 標籤的節點派 uninstall Job，標籤先拿掉，清單就是空的（步驟 1）。
 
 **修法**:節點上的 `spin-v2: provisioned` 標籤還在的話，重新套用 Shim CR、貼回 `spin=true`，等 Shim 回到 `READY 1`，再照「先刪 CR、再動標籤」的順序拆。`spin-v2` 標籤也沒了，就照步驟 6 手動清。
-
-### `kubectl delete spinappexecutor` 掛著不回來 {#mine-2}
-
-**症狀**:`helm uninstall spin-operator` 幾秒就成功。接著刪 `SpinAppExecutor`，一個停在 Terminating，另一個的 `kubectl delete` 直接掛住，等了好幾分鐘也不回來。
-
-**原因**:`SpinAppExecutor` 帶著 `core.spinkube.dev/finalizer`，負責拿掉它的是 spin-operator 的 controller，而 controller 已經被拆掉了。`kubectl delete` 預設會等物件真的消失，所以一直等下去（步驟 4）。
-
-**修法**:手動拿掉 finalizer：
-
-```console
-$ kubectl -n <ns> patch spinappexecutor <name> --type=merge -p '{"metadata":{"finalizers":null}}'
-```
-
-之後拆任何 operator 都照同一個順序：先刪 CR，再拆 controller，最後刪 CRD。SpinKube 的文件只寫了安裝順序，沒寫拆除順序。刪除時加上 `--timeout=60s`，逾時就去看物件的 `metadata.finalizers`，這樣分得出是慢還是永遠不會結束。
-
-### 刪了 Shim CR，看得到 `Complete 1/1`，節點卻沒清 {#mine-3}
-
-**症狀**:刪 Shim CR 後，controller log 寫 `Deploying uninstall-Job`，Shim 消失、RuntimeClass 被 GC，`kubectl -n rcm get jobs` 也有一顆 `…-spin-v2-uninstall Complete 1/1`，但節點上的東西都還在。仔細看，那顆 Job 的 UID 和完成時間是上一次解除安裝留下的。
-
-**原因**:uninstall Job 名字固定，用 server-side apply 送出，同名舊 Job 還在、內容相同時什麼都不會改（步驟 5）。rcm 沒替 uninstall Job 設 ownerReference，chart 預設也沒設 TTL，所以舊 Job 不會自己消失。同一台節點第二次解除安裝，一定會遇到。
-
-**修法**:解除安裝前先 `kubectl -n rcm delete job --all`。確認 Job 有沒有真的重跑，要比對 Job 的 UID 或 `completionTime`，不能只看 `Complete 1/1`。
-
-<span id="mine-5"></span>預防的做法：rcm 的 chart 有一個 helm value `rcm.nodeInstallerJob.ttl`，預設是 `0`，等於關閉，文件也沒有提到。安裝 rcm 時帶上 `--set rcm.nodeInstallerJob.ttl=<秒>`，Job 跑完一段時間後會自動刪除，舊 Job 就不會擋住下一次解除安裝，也不會留下 Day 7 那種指向舊節點的 install Job。這是讀 rcm 原始碼與 chart 預設值得出的結論，本課沒有在叢集上實際驗證。它管不到刪除順序（[先移標籤再刪 Shim CR](#mine-1)）和手改過的設定（[手改過 domain](#mine-4)）這兩個問題。
 
 ### 手改過 domain 之後，解除安裝回報成功，設定原封不動 {#mine-4}
 
@@ -329,7 +325,7 @@ rcm 的解除安裝只在 Shim CR 被刪除時觸發，而且只處理那一刻�
 
 想再深入，可以從這幾份開始：
 
-- **[Kubernetes:Finalizers](https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers/)** —— 步驟 4 拆除順序背後的機制。文件說物件會停在 terminating，直到控制平面「or other components」完成 finalizer 定義的動作；負責的元件已經被拆掉時，就是[疑難排解：掛著不回來](#mine-2)的情況。
+- **[Kubernetes:Finalizers](https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers/)** —— 步驟 4 拆除順序背後的機制。文件說物件會停在 terminating，直到控制平面「or other components」完成 finalizer 定義的動作；負責的元件已經被拆掉時，就是[先拆 operator 的反例](#mine-2)的情況。
 - **[Kubernetes:Server-Side Apply](https://kubernetes.io/docs/reference/using-api/server-side-apply/)** —— 步驟 5 舊 Job 擋住新 Job 的機制。Day 3 的[「`kubectl scale` 過的 Deployment 會讓下一次 `helm upgrade` 失敗」](sprint3-day3-wasmcloud-distributed.md#mine-4)遇到的是它的欄位所有權，這一章遇到的是對內容相同的物件 apply 時什麼都不改。
 - **[runtime-class-manager](https://github.com/spinframework/runtime-class-manager)** —— `internal/containerd/configure.go` 裡的 `RemoveRuntime()` 不到三十行，開頭的檢查、整段比對和固定的回傳值都在裡面，可以對照步驟 5 逐行讀。
 

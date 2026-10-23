@@ -6,7 +6,7 @@
 
 Day 1 處理的都是單顆 pod：誰先拿到卡、誰會被擠掉。這一章處理「一組 pod 要一起拿到資源才有用」的情況。我們會在兩張 T4 上重現上面那個畫面，然後讓 KAI 把三個 worker 當成一個單位排程，再看這個單位遇到搶占、遇到 spot 節點被雲端收走時，會發生什麼事。
 
-讀完之後，一份多 worker 的工作出現部分 Running、部分 Pending 時，你會知道該看 PodGroup 的 `minMember`，判斷它有沒有被當成一整組排程，也能預估它被搶占或節點被回收時，會不會整組重來。
+讀完之後，一份多 worker 的工作出現部分 Running、部分 Pending 時，你會知道該看 PodGroup 的 `minMember`（最低同時排程成員數），判斷它有沒有被當成一整組排程，也能預估它被搶占或節點被回收時，會不會整組重來。
 
 ## 少一個 worker，其他 worker 也動不了
 
@@ -21,7 +21,7 @@ Day 1 處理的都是單顆 pod：誰先拿到卡、誰會被擠掉。這一章�
 1. 上面那一列，兩張卡都有人佔著，但沒有任何進度。前兩個 worker 等第三個，第三個等一張卡，而唯一能放出卡的就是前兩個。沒有人介入的話，這個狀態會一直維持下去。
 2. 下面那一列，三個 worker 都沒排上，看起來比較糟，但兩張卡是空的，別的工作可以先用。等卡夠了，三個再一起排上。
 
-下面那一列的做法叫 **gang scheduling**：gang 是「一夥人」，把一組 pod 當成一夥，湊得齊就一起上，湊不齊就一顆都不放。
+下面那一列的做法叫 **gang scheduling**：以一組 pod 為排程單位，資源足夠才整組配置，不足時整組等待、不佔用資源。
 
 ## 開始之前
 
@@ -97,30 +97,6 @@ $ kubectl -n kai-lab get podgroups -o json \
 ```
 
 三顆 pod 確實被收進同一個 PodGroup，但 `minMember` 是 1。**`minMember`** 是 PodGroup 的一個欄位，意思是「至少要幾顆 pod 同時排得上，才排這一組」。它是 1，就表示排得上一顆就放一顆，等於沒有 gang。`status` 裡的 `allocated: 2` 也對得上：已經佔了兩張卡。
-
-PodGroup 有哪些欄位，可以直接問叢集：
-
-```console
-$ kubectl explain podgroup.spec --recursive
-GROUP:      scheduling.run.ai
-KIND:       PodGroup
-VERSION:    v2alpha2
-
-FIELD: spec <Object>
-
-FIELDS:
-  markUnschedulable	<boolean>
-  minMember	<integer>
-  minSubGroup	<integer>
-  preemptibility	<string>
-  enum: preemptible, non-preemptible
-  priorityClassName	<string>
-  queue	<string>
-  schedulingBackoff	<integer>
-  subGroups	<[]Object>
-```
-
-（PodGroup 的版本是 `v2alpha2`，跟 Day 1 的 Queue 用的 `v2` 不同。自己寫 PodGroup 時，apiVersion 要照這裡的版本寫。）
 
 為什麼是 1？`pod-grouper`（KAI 裡負責替 workload 建 PodGroup 的元件）替 `batch/v1` Job 建 PodGroup 時，預設 `minMember` 就是 1，不會拿 `parallelism` 當 gang 的大小。KAI 的官方文件 `docs/batch/README.md` 第一段也寫了，這樣的 Job 裡的 pod 會 "scheduled separately"。PyTorchJob（Kubeflow 用來跑 PyTorch 分散式訓練的工作類型）、JobSet（Kubernetes 社群把多個 Job 組成一份工作的 API）這類本身就描述「幾個 worker」的工作類型，才會自動推出 gang；`batch/v1` Job 要自己講。
 
@@ -391,6 +367,17 @@ sed -e 's/gang-prober/gang-preemptor/' \
 $ kubectl -n kai-lab delete job gang2
 ```
 
+完成上面的刪除後，以下列指令取代下方紀錄中的兩行 `apply`，等 gang2 的兩顆受害者都 Ready 才送出搶占者（依官方文件補上，本課沒有實跑）：
+
+```bash
+kubectl apply -f 04-gang2-job.yaml &&
+kubectl -n kai-lab wait job/gang2 \
+  --for=jsonpath='{.status.ready}'=2 --timeout=300s &&
+kubectl apply -f 05-gang-preemptor-inference.yaml
+```
+
+Kubernetes 1.35 的 [JobStatus API](https://v1-35.docs.kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#jobstatus-v1-batch) 定義 `status.ready` 為已 Ready 且未進入終止程序的活躍 pod 數量，因此用 [`kubectl wait`](https://v1-35.docs.kubernetes.io/docs/reference/kubectl/generated/kubectl_wait/) 等它等於 2；`&&` 讓建立或等待失敗時不會送出搶占者。
+
 ```console
 $ kubectl apply -f 04-gang2-job.yaml
 $ kubectl apply -f 05-gang-preemptor-inference.yaml
@@ -473,7 +460,7 @@ FailedScheduling  0/3 nodes are available: 3 Insufficient nvidia.com/gpu.
   1 Preemption is not helpful for scheduling, 2 No preemption victims found for incoming pod.
 ```
 
-這段訊息只講這一顆 pod：沒有節點有足夠的 GPU。它不知道另外兩顆是同一份工作、正佔著卡。KAI 在步驟 1 的訊息則會把整組的缺口講出來。
+這段訊息只講這一顆 pod：沒有節點有足夠的 GPU。預設排程以單顆 pod 為單位，不會把同一份工作的三顆 pod 當成一組處理。KAI 在步驟 1 的訊息則會把整組的缺口講出來。
 
 另外，這幾顆 pod 不在 KAI 的帳上：
 
@@ -553,6 +540,17 @@ sed -e '/^---$/,$d' -e 's/nogang-victim-1/nogang-preemptor/' \
     07-default-sched-victim-train.yaml > 08-default-sched-preemptor-inference.yaml
 ```
 
+以下列指令取代下方紀錄中的兩行 `apply`，等兩顆具名受害者都 Ready 才送出搶占者（依官方文件補上，本課沒有實跑）：
+
+```bash
+kubectl apply -f 07-default-sched-victim-train.yaml &&
+kubectl -n kai-lab wait pod/nogang-victim-1 pod/nogang-victim-2 \
+  --for=condition=Ready --timeout=300s &&
+kubectl apply -f 08-default-sched-preemptor-inference.yaml
+```
+
+Kubernetes 1.35 的 [`kubectl wait`](https://v1-35.docs.kubernetes.io/docs/reference/kubectl/generated/kubectl_wait/) 會等待列出的每個資源符合條件；這裡指定兩顆 pod 的 `Ready` 條件，並用 `&&` 讓建立或等待失敗時不會送出搶占者。
+
 ```console
 $ kubectl apply -f 07-default-sched-victim-train.yaml
 $ kubectl apply -f 08-default-sched-preemptor-inference.yaml
@@ -611,7 +609,7 @@ $ az vmss list-instances -g MC_<resource-group>_<cluster>_<region> \
  {"id": "7", "name": "aks-gpuspot-21249019-vmss000007"}]
 ```
 
-`priority: "Spot"` 那一組就是 GPU pool，它的 `name` 就是下面指令裡的 `<vmss-name>`。實例編號跟節點名稱的尾碼一致，例如上面的 `6` 就是 `vmss000006`；要收走哪一台，就把那台的 id 填進 `<instance-id>`。如果不確定節點所在的 resource group 名稱，可以用 `az aks show -g <resource-group> -n <cluster> --query nodeResourceGroup -o tsv` 查。
+`priority: "Spot"` 那一組就是 GPU pool，它的 `name` 就是下面指令裡的 `<vmss-name>`。要收走哪一台，先在 `list-instances` 輸出中找到該節點的 `name`，再把同一筆的 `id` 填進 `<instance-id>`。不要直接取節點名稱尾碼：Uniform VMSS 的 instance ID 是十進位，電腦名稱尾碼則是三十六進位，詳見 [Microsoft 的實例 ID 說明](https://learn.microsoft.com/en-us/azure/virtual-machine-scale-sets/virtual-machine-scale-sets-instance-ids)。如果不確定節點所在的 resource group 名稱，可以用 `az aks show -g <resource-group> -n <cluster> --query nodeResourceGroup -o tsv` 查。
 
 先刪掉步驟 6 留下的兩顆 pod。`gang2` Job 在步驟 6 開頭已經刪掉；如果還在，也要先刪，因為同名的 Job 重新 apply 不會產生新的 pod：
 
@@ -676,7 +674,7 @@ queue.scheduling.run.ai "batch-eval" deleted
 namespace "kai-lab" deleted
 ```
 
-GPU pool 照 Day 0 的做法縮回 0（指令同 Day 0 步驟 8）。scale 之後回查一次 `count`，確認真的是 0，不要只看指令的回傳：scale 指令回報成功時，pool 最後的 `count` 不一定是你要的數字，所以下完之後要再查一次。
+GPU pool 照 Day 0 的做法縮回 0（指令同 Day 0 步驟 8）。縮容完成後，用步驟 7 的 `az aks nodepool show` 指令回查，確認 `count` 是 0、`provisioningState` 是 `Succeeded`。
 
 ## 參考：另一種組 gang 的寫法
 
@@ -746,6 +744,30 @@ trap 'exit 143' TERM
 一組要一起跑的 pod，如果被一顆一顆排程，就可能出現部分 Running、部分 Pending，卡被佔著卻沒有進度。KAI 用 PodGroup 的 `minMember` 決定一組至少要幾顆一起排上，但 `batch/v1` Job 預設是 1，要在 Job 上加 `kai.scheduler/batch-min-member` 才有 gang；有沒有 gang，看 PodGroup 的 `minMember`。gang 的好處和代價來自同一件事：湊不齊時一張卡都不佔，排得上時整組同時上；但成員少了一個，60 秒後整組被收掉，被搶占時也是整組被驅逐。在 spot 節點上，這代表任何一台被收走都會讓整組重來，所以要搭配 autoscaler、checkpoint，以及預留一點節點數。之後看到多 worker 的工作只跑起一部分，或整組突然消失，可以回來對照這一章。
 
 ## 延伸閱讀
+
+PodGroup 有哪些欄位，可以直接問叢集：
+
+```console
+$ kubectl explain podgroup.spec --recursive
+GROUP:      scheduling.run.ai
+KIND:       PodGroup
+VERSION:    v2alpha2
+
+FIELD: spec <Object>
+
+FIELDS:
+  markUnschedulable	<boolean>
+  minMember	<integer>
+  minSubGroup	<integer>
+  preemptibility	<string>
+  enum: preemptible, non-preemptible
+  priorityClassName	<string>
+  queue	<string>
+  schedulingBackoff	<integer>
+  subGroups	<[]Object>
+```
+
+（PodGroup 的版本是 `v2alpha2`，跟 Day 1 的 Queue 用的 `v2` 不同。自己寫 PodGroup 時，apiVersion 要照這裡的版本寫。）
 
 想再深入，可以從這幾份開始：
 

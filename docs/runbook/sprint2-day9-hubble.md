@@ -20,13 +20,20 @@ Hubble:   Ok   Current/Max Flows: 2285/4095 (55.80%), Flows/s: 19.36   Metrics: 
 
 `Hubble: Ok`，而且已經存了 2285 筆 flow。Cilium 的 Helm chart 裡 `hubble.enabled` 預設就是 `true`，所以 Day 7、Day 8 那兩天 agent 一直在記，只是沒有人去讀。這一章要加的是讀取的那一端，Helm 變更不會碰到 agent 記錄的方式。
 
-`Current/Max Flows` 後面那個 4095 是這一章最要緊的數字，步驟 2 會回來量它。
+`Current/Max Flows` 後面那個 4095，是本章設定下每顆節點可保留的 flow 上限，滿了就會覆蓋最舊的紀錄。步驟 2 會量這個容量能保留多久的歷史。
 
 ## 步驟 1: 確認 Day 8 的環境還在
 
 這一章接在 Day 8 之後，用同一座叢集、同一組政策。叢集如果停機重啟過，裸 Pod（`client`、`probe`、`nsenter-box`）不會自己回來，要照 Day 7、Day 8 的 manifest 重新 apply；Deployment 與 DaemonSet 會自己回來。
 
 先確認 Day 7 換掉 kube-proxy 的修改還在：
+
+用以下完整指令查詢 kube-proxy 的預期、目前與就緒節點數，以及 Pod 的節點選擇器，依官方文件補上，本課沒有實跑，語法與欄位依 Kubernetes 1.35 的 [custom-columns 說明](https://v1-35.docs.kubernetes.io/docs/reference/kubectl/#custom-columns)與 [API 參考文件](https://v1-35.docs.kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#daemonsetstatus-v1-apps)：
+
+```bash
+kubectl -n kube-system get ds kube-proxy \
+  -o 'custom-columns=NAME:.metadata.name,DESIRED:.status.desiredNumberScheduled,CURRENT:.status.currentNumberScheduled,READY:.status.numberReady,NODESELECTOR:.spec.template.spec.nodeSelector'
+```
 
 ```console
 $ kubectl -n kube-system get ds kube-proxy -o custom-columns=…
@@ -69,7 +76,7 @@ flow 存在每顆節點的 agent 裡，要從叢集外讀，還需要兩個元�
 
 ![你的電腦上的 hubble CLI 經 port-forward 4245 連到 hubble-relay，瀏覽器經 port-forward 12000 連到 hubble-ui，hubble-ui 再向 relay 要 flow；relay 透過 gRPC 4244 向每顆節點上的 cilium-agent 讀取，agent 把每個事件寫進預設 4095 筆、滿了會蓋掉最舊資料的環狀緩衝區](../assets/diagrams/s2d9-hubble-parts.svg)
 
-照著箭頭從上往下看：CLI 和瀏覽器都不直接碰節點，一律經過 relay；真正存資料的只有最下面那塊緩衝區。本課的叢集只有一顆節點，所以 relay 跨節點合併資料這件事，這一章沒有驗證到。
+照著箭頭從上往下看：CLI 和瀏覽器都不直接碰節點，一律經過 relay；真正存資料的只有最下面那塊緩衝區。relay 將各節點的 flow 提供給同一個讀取端點，CLI 和 UI 就能從這個端點讀取多顆節點的紀錄。
 
 Helm values 用 Day 7 那份 values 檔，把下面這一段附加在檔案最後，另存成 `cilium-values-hubble.yaml`：
 
@@ -88,6 +95,15 @@ Release "cilium" has been upgraded.  REVISION: 3
 ```
 
 接著看 Cilium 自己的 pod 有沒有因為這次升級重啟：
+
+用以下完整指令列出 `kube-system` 各 Pod 的名稱與容器重啟次數，依官方文件補上，本課沒有實跑，欄位依 Kubernetes 1.35 的 [Pod 狀態定義](https://v1-35.docs.kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#podstatus-v1-core)與[容器狀態定義](https://v1-35.docs.kubernetes.io/docs/reference/generated/kubernetes-api/v1.35/#containerstatus-v1-core)：
+
+```bash
+kubectl -n kube-system get pods \
+  -o 'custom-columns=N:.metadata.name,RESTARTS:.status.containerStatuses[*].restartCount'
+```
+
+這條指令會列出該命名空間所有 Pod，讀取 `cilium-*` 與 `cilium-envoy-*` 對應列即可；多容器 Pod 會列出各容器的重啟次數。
 
 ```console
 $ kubectl -n kube-system get pods -o custom-columns=N:…,RESTARTS:…
@@ -131,7 +147,7 @@ chart 1.20.0 的 `values.yaml` 裡，這個參數是一行註解掉的 `# eventB
 
 ## 步驟 3: 讀懂三種 flow
 
-先把 relay 接到本機。本機要有 `hubble` CLI（本課用 1.19.4，連 1.20.0 的 relay 沒有問題）：
+先依官方的 [Install the Hubble Client](https://docs.cilium.io/en/stable/observability/hubble/setup/#install-the-hubble-client) 在本機安裝 `hubble` CLI，再把 relay 接到本機。本課實測 CLI 1.19.4，連 1.20.0 的 relay 沒有問題：
 
 ```console
 $ kubectl -n kube-system port-forward svc/hubble-relay 4245:80 &
@@ -244,7 +260,7 @@ $ kubectl -n kube-system port-forward svc/hubble-ui 12000:80 &
 http://localhost:12000/?namespace=netlab
 ```
 
-直接打 `http://localhost:12000/netlab` 會得到 404，打根目錄只會看到選命名空間的頁面，見[疑難排解：UI 網址打 `/netlab` 得到 404](#mine-3)。
+直接打 `http://localhost:12000/netlab` 會得到 404，打根目錄只會看到選命名空間的頁面。
 
 畫面上半是 **service map**（服務圖）：Hubble 把緩衝區裡的 flow 按「誰連到誰的哪個埠」合併成一條條線；下半是逐筆的 flow 表。
 
@@ -297,7 +313,37 @@ Aug  7 13:02:19.180: netlab/flowgen-…:39002 (ID:51695)
 
 `l7.http.headers` 這一欄存的是 header 原文，包括認證用的 token，見[疑難排解：flow 裡看得到 `Authorization` 的原文](#mine-4)。
 
+### service map 適合回答什麼
+
+步驟 4 的服務圖，資料就是緩衝區裡的 flow。UI 沒有匯出按鈕，所以本課用 `hubble observe --last 4000 -o json` 取出最近 4000 筆 flow，再用一小段腳本按「來源、目的、埠」加總，得到跟服務圖一樣的內容。腳本沒有放進本章，你可以用自己習慣的工具（例如 `jq`）做同樣的加總。下面節錄其中幾列，完整結果還有其他 `reserved:host` 開頭的列：
+
+```console
+SOURCE                      DESTINATION                        PORT    FLOWS  VERDICTS
+reserved:host               reserved:world                       80      784  FORWARDED=784
+reserved:host               kube-system/metrics-server         4443      364  FORWARDED=364
+netlab/flowgen              netlab/echo7                       8080      204  REDIRECTED=34, FORWARDED=153, DROPPED=17
+reserved:host               kube-system/hubble-relay           4222      136  FORWARDED=136
+netlab/flowgen              netlab/multiport                   9090      106  DROPPED=106
+```
+
+先看它擅長的事。`flowgen → echo7:8080` 那一列同時有 `FORWARDED=153` 和 `DROPPED=17`，代表這條線上有放行也有被擋的流量；`multiport:9090` 那一列全部是 `DROPPED`，代表那條政策確實在擋，而且持續有流量被它擋下。只讀政策 YAML 看得到規則，看不到實際發生了什麼。想知道「這條規則刪掉會不會出事」，從這裡開始查最快。
+
+再看它容易誤導的地方：
+
+1. **只有最近有流量的東西才在圖上。** 這份結果裡沒有 `client`、`probe`、`svc-backend`（Day 7 建的測試服務），它們都還在叢集裡，只是最近兩分鐘沒發流量。服務圖是最近的連線紀錄，不是完整的拓撲；把它當拓撲用，可能會刪掉一個每天只跑一次的批次工作需要的規則。「最近」有多近，由步驟 2 量到的緩衝區深度決定。
+2. **節點自己的流量佔大多數。** 排第一的是節點對外的流量，完整結果的前十列裡有八列來源是 `reserved:host`。應用之間的流量反而是少數。
+3. **觀測工具自己也在圖上。** relay、UI、metrics-server 都佔了好幾列，它們的流量也在消耗同一個只有 4095 筆的緩衝區。
+4. **`reserved:host` 底下什麼都混在一起。** 探針 C 的繞過流量都併進這一列，和 Envoy 的合法轉發混在一起，判定全是 `FORWARDED`。在服務圖上，那次繞過看起來就是節點在正常工作。
+
 ## 步驟 5: 拿 Day 8 的三種情況測 Hubble
+
+完成前面的 UI 與服務圖取樣後，先停止持續產生 HTTP 與 DROPPED 事件的 `flowgen`，避免它的流量混進探針結果：
+
+```console
+$ kubectl -n netlab delete deploy flowgen
+```
+
+用 `kubectl -n netlab get pod -o wide` 確認 `flowgen` 的 Pod 已經消失，再開始下面的探針。探針 C 要在發請求前另記時間，讓查詢範圍排除先前的 `flowgen` 流量與探針 A、B 的事件。
 
 ### 探針 A：被 L7 擋下的請求，應用真的沒收到 {#probe-a}
 
@@ -312,7 +358,7 @@ Day 8 的[「應用日誌查不到被拒絕的請求」](sprint2-day8-cilium-net
 | GET（放行） | 有 | **有**（5 筆） |
 | POST（被擋） | 有 | **完全沒有** |
 
-日誌只能告訴你「沒看到」；Hubble 上第二段整段不存在，說明 Envoy 沒有把請求轉給 `echo7`。被 proxy 截下的請求，客戶端和應用各自只看得到一半，要看全貌只能來 Hubble。
+日誌只能告訴你「沒看到」；Hubble 上第二段整段不存在，說明 Envoy 沒有把請求轉給 `echo7`。被 proxy 截下的請求，客戶端和應用各自只看得到一半，本例可用 Hubble 比對兩段連線。
 
 這裡也要記住步驟 3 的第二個觀察：那筆 403 在 Hubble 上記成 `<- netlab/echo7-… http-response FORWARDED`。看報表的人會以為是 `echo7` 回了 403，但 `echo7` 從頭到尾沒收到請求。
 
@@ -400,35 +446,9 @@ Proxy Status:   OK, ip 10.244.0.69, 1 redirects active on ports 10000-20000
 
 要控制本機 host 到 endpoint 的連線，Day 8 區分了 `--allow-localhost=policy` 搭配 endpoint 政策，以及另行管理主機流量的 host firewall。應先依流量路徑選擇設定、保留必要連線，再驗證拒絕結果與 Hubble 紀錄。本課沒有實作這些修法，不能保證只開一個旗標就會出現 `DROPPED`。
 
-## 步驟 6: service map 適合回答什麼
-
-步驟 4 的服務圖，資料就是緩衝區裡的 flow。UI 沒有匯出按鈕，所以本課用 `hubble observe --last 4000 -o json` 取出最近 4000 筆 flow，再用一小段腳本按「來源、目的、埠」加總，得到跟服務圖一樣的內容。腳本沒有放進本章，你可以用自己習慣的工具（例如 `jq`）做同樣的加總。下面節錄其中幾列，完整結果還有其他 `reserved:host` 開頭的列：
-
-```console
-SOURCE                      DESTINATION                        PORT    FLOWS  VERDICTS
-reserved:host               reserved:world                       80      784  FORWARDED=784
-reserved:host               kube-system/metrics-server         4443      364  FORWARDED=364
-netlab/flowgen              netlab/echo7                       8080      204  REDIRECTED=34, FORWARDED=153, DROPPED=17
-reserved:host               kube-system/hubble-relay           4222      136  FORWARDED=136
-netlab/flowgen              netlab/multiport                   9090      106  DROPPED=106
-```
-
-先看它擅長的事。`flowgen → echo7:8080` 那一列同時有 `FORWARDED=153` 和 `DROPPED=17`，代表這條線上有放行也有被擋的流量；`multiport:9090` 那一列全部是 `DROPPED`，代表那條政策確實在擋，而且持續有流量被它擋下。只讀政策 YAML 看得到規則，看不到實際發生了什麼。想知道「這條規則刪掉會不會出事」，從這裡開始查最快。
-
-再看它容易誤導的地方：
-
-1. **只有最近有流量的東西才在圖上。** 這份結果裡沒有 `client`、`probe`、`svc-backend`（Day 7 建的測試服務），它們都還在叢集裡，只是最近兩分鐘沒發流量。服務圖是最近的連線紀錄，不是完整的拓撲；把它當拓撲用，可能會刪掉一個每天只跑一次的批次工作需要的規則。「最近」有多近，由步驟 2 量到的緩衝區深度決定。
-2. **節點自己的流量佔大多數。** 排第一的是節點對外的流量，完整結果的前十列裡有八列來源是 `reserved:host`。應用之間的流量反而是少數。
-3. **觀測工具自己也在圖上。** relay、UI、metrics-server 都佔了好幾列，它們的流量也在消耗同一個只有 4095 筆的緩衝區。
-4. **`reserved:host` 底下什麼都混在一起。** 探針 C 的繞過流量都併進這一列，和 Envoy 的合法轉發混在一起，判定全是 `FORWARDED`。在服務圖上，那次繞過看起來就是節點在正常工作。
-
 ## 清理
 
-`flowgen` 會一直發請求、佔用緩衝區，用完就刪掉，並關掉前面放到背景執行的兩個 port-forward（relay 的 4245 和 UI 的 12000）：
-
-```console
-$ kubectl -n netlab delete deploy flowgen
-```
+關掉前面放到背景執行的兩個 port-forward（relay 的 4245 和 UI 的 12000）。
 
 ## 疑難排解
 
@@ -455,40 +475,22 @@ drop_reason      : (不存在)
 drop_reason_desc : (不存在)
 ```
 
-`verdict: DROPPED` 和 `Type: L7` 都在，只是沒有 `drop_reason`，UI 就照實寫成「不知道」。
+`verdict: DROPPED` 和 `Type: L7` 都在，只是沒有 `drop_reason`，UI 顯示 `Unknown drop reason`。
 
 **影響與修法**：
 
 - 追查時，L4 丟包可以按原因分類統計，L7 拒絕全部落在同一個「不知道」裡；是方法、路徑還是 header 不符合，flow 上沒有寫，要回去對照政策。
 - 告警規則如果按 drop reason 分流，會漏掉全部的 L7 拒絕，而 L7 拒絕代表有人在打你明確禁止的介面。要抓它，改用 `Type: L7` 或 `--protocol http --verdict DROPPED`（步驟 4 的 CLI 那一半）來篩。
 
-### UI 網址打 `/netlab` 得到 404 {#mine-3}
-
-**症狀**：把命名空間放在路徑裡，`http://localhost:12000/netlab` 得到：
-
-```text
-Unexpected Application Error!
-404 Not Found
-```
-
-只打根目錄，則只會看到一個「Choose namespace」下拉選單，沒有服務圖也沒有 flow 表。
-
-**原因**：UI 用查詢參數接收命名空間：
-
-```text
-http://localhost:12000/?namespace=netlab
-```
-
-**修法**：照步驟 4 的網址開。另外要知道，網址上的過濾參數多半不會生效：加上 `&verdict=dropped` 沒有作用（右上角仍是 `Any verdict`），只有 `&flows-filter=protocol%3Dhttp` 這種寫法會帶進過濾框。在 UI 裡設好的判定等過濾條件不會留在網址上，想讓同事看同一個畫面，截圖或給他 CLI 指令比較可靠。
-
 ### flow 裡看得到 `Authorization` 的原文 {#mine-4}
 
 **症狀**：對有 L7 政策的服務發帶認證資訊的請求，再用 CLI 看 flow：
 
 ```console
-$ curl -H 'Authorization: Bearer SUPERSECRET-DEMO-TOKEN-abc123' \
-       -H 'Cookie: session=demo-cookie-value' \
-       "http://svc-echo7.netlab/?apikey=demo-key-in-url"
+$ kubectl -n netlab exec client -- curl -s \
+    -H 'Authorization: Bearer SUPERSECRET-DEMO-TOKEN-abc123' \
+    -H 'Cookie: session=demo-cookie-value' \
+    "http://svc-echo7.netlab/?apikey=demo-key-in-url"
 
 $ hubble observe --protocol http -o json
 url: http://svc-echo7.netlab/?apikey=demo-key-in-url

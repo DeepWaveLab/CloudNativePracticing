@@ -2,15 +2,15 @@
 
 ![Kubernetes 官方標誌](../assets/logos/kubernetes-icon-color.svg){ align=right width="95" }
 
-[Day 1](sprint2-day1-bpftrace-basics.md) 的 `opensnoop` 在節點上跑 22 秒，印出 24,350 行。假設其中一行寫著某個 `cat` 開了 `/etc/shadow`：你看得到 PID、行程名稱和路徑，卻看不出是哪一顆 pod 做的。這台節點上同時跑著好幾顆 pod，還有 kubelet 這類節點自己的服務，而三支經典工具都沒有「pod」這個欄位。
+[Day 1](sprint2-day1-bpftrace-basics.md) 的 `opensnoop` 能看到節點上的開檔事件。假設其中一行寫著某個 `cat` 開了 `/etc/shadow`：你看得到 PID、行程名稱和路徑，卻看不出是哪一顆 pod 做的。這台節點上同時跑著好幾顆 pod，還有 kubelet 這類節點自己的服務，而三支經典工具都沒有「pod」這個欄位。
 
-這一章把核心事件接回 Kubernetes。核心在每個事件上能給的身分只有一個數字，叫 cgroup id。我們會從這個數字一路查到 pod 名字，全程只用節點上的檔案和工具，不呼叫 API server。查得到身分之後，再寫一支只追蹤一顆 pod 的 bpftrace 腳本，記下 nginx 啟動時執行了哪些程式、開了哪些檔案、連到哪裡，最後故意在 pod 裡做幾件不尋常的事，看這份紀錄抓不抓得到。
+這一章把核心事件接回 Kubernetes，選用 cgroup id 對應容器。我們會從這個數字一路查到 pod 名字，全程只用節點上的檔案和工具，不呼叫 API server。查得到身分之後，再寫一支只追蹤一顆 pod 的 bpftrace 腳本，記下 nginx 啟動時執行了哪些程式、開了哪些檔案、連到哪裡，最後故意在 pod 裡做幾件不尋常的事，看這份紀錄抓不抓得到。
 
 讀完之後，看到一筆帶 cgroup id 的核心事件，你能查出它來自哪顆 pod 的哪個容器，或是節點自己的服務；要追蹤一顆 pod 時，你能判斷過濾條件該綁在哪一層，也知道這種追蹤看不見哪些動作。
 
 ## 開始之前
 
-這一章沿用 Day 1 的叢集。本課的 `ebpf` 節點是 Ubuntu 24.04（kernel `6.8.0-1062-azure`、containerd 2.3.2），cgroup v2。先把 `ebpf` 節點池拉回 2 台：
+這一章沿用 Day 1 的 AKS 叢集與 Ubuntu 24.04 一般 CPU 節點。`ebpf` 節點需使用 cgroup v2，kubelet 與 containerd 都使用 systemd cgroup driver，後面的 `.slice`、`.scope` 路徑才會符合本章寫法。先把 `ebpf` 節點池拉回 2 台：
 
 ```console
 $ az aks nodepool scale -g <resource-group> --cluster-name <cluster> -n ebpf \
@@ -32,11 +32,11 @@ bpftrace --version
 nsenter -t 1 -m -- bpftool version
 ```
 
-本章用的是容器裡裝好的 bpftrace v0.20.2；節點的 `/usr/local/bin` 還有一支 2019 年的 v0.9.4，不要用到它。`bpftool` 不另外裝，用 `nsenter -t 1 -m` 借用節點上內建的那支。
+本章使用容器裡裝好的 bpftrace v0.20.2，執行前確認版本，避免誤用節點 `/usr/local/bin` 裡的舊版。`bpftool` 不另外裝，用 `nsenter -t 1 -m` 借用節點上內建的那支。
 
 本章用 `cat > 檔名 <<'EOF'` 建立的檔案都在工作站上建立：YAML 用 `kubectl apply` 套用，`.sh` 和 `.bt` 要在追蹤 pod 裡執行，得自己複製進追蹤 pod（例如用 `kubectl cp`）。步驟 5 的腳本預設 `05-podtrace.bt` 放在追蹤 pod 的 `/tmp/podtrace.bt`，複製時直接用這個路徑最省事。
 
-叢集如果停機過，重新啟動後 `kubectl` 可能找不到 API server，處理方式見 Day 1 的[「`az aks start` 之後 `kubectl` 回 `no such host`，`nslookup` 卻解得到」](sprint2-day1-bpftrace-basics.md#mine-1)。本課驗證時另外遇過一種情況：連 `nslookup` 都回 `NXDOMAIN`，快取在區域網路的 DNS 轉發器上，修法一樣是用 `--server` 加 `--tls-server-name` 直接連 IP。本課每次停機再開，API server 的 IP 都不一樣，所以這條指令裡的 IP 要每次重查，不要寫死在腳本裡。
+叢集重新啟動後，若 `kubectl` 因 DNS 解析失敗而連不到 API server，處理方式見 Day 1 的[「`az aks start` 之後 `kubectl` 回 `no such host`，`nslookup` 卻解得到」](sprint2-day1-bpftrace-basics.md#mine-1)。使用 `--server` 加 `--tls-server-name` 直接連 IP 前，先重新查詢 API server 的 IP，不要沿用停機前的位址。
 
 ## 步驟 1：部署被觀察的 nginx
 
@@ -162,7 +162,7 @@ EXEC cgroup=10431 pid=16585 comm=bash file=/tmp/d2m-140816
 ```
 
 
-`cgroup` 是 bpftrace 的內建變數，背後是核心的 `bpf_get_current_cgroup_id()`，回傳目前這個行程所在 cgroup 的編號。這就是核心在事件上能給的全部身分：沒有 pod 名字、沒有 namespace，只有 10431 這個數字。
+`cgroup` 是 bpftrace 的內建變數，背後是核心的 `bpf_get_current_cgroup_id()`，回傳目前這個行程所在 cgroup 的編號。bpftrace 也提供 `pid`、`tid`、`uid` 等身分欄位，定義見[官方手冊的變數說明](https://github.com/bpftrace/bpftrace/blob/v0.20.2/docs/reference_guide.md#variables)。本章選用 cgroup id 對應容器；上面的事件沒有直接帶出 pod 名字或 Kubernetes namespace，要從 10431 這個編號繼續查。
 
 這個數字可以直接從核心的資料結構讀出來。核心用 `task_struct` 這個結構描述每一個行程，bpftrace 的 `curtask` 就是指向目前行程那份 `task_struct` 的指標。沿著指標往下走：`cgroups->dfl_cgrp` 是這個行程在 cgroup v2 樹上所屬的 cgroup，`kn` 是這個 cgroup 在 kernfs 裡對應的那一筆項目（kernfs 是什麼，下一小節說明），`id` 是那筆項目的編號。讀出來的值和 `cgroup` 相同：
 
@@ -333,7 +333,7 @@ azuredisk liveness-probe node-driver-registrar                        ← 三個
 
 核心事件也帶著 `pid`，而 `/proc/<pid>/` 底下有這個行程的各種資訊，看起來也能用來查身分。這一步把這條路走一遍，看它卡在哪裡。
 
-先要知道容器裡的行程編號跟節點上的不一樣。Linux 用 **namespace** 讓一組行程看到自己的一份系統資源：PID namespace 有自己的一套行程編號，mount namespace 有自己的檔案系統，UTS namespace 有自己的 hostname，network namespace 有自己的網路。在 Kubernetes 裡，PID 和 mount namespace 是每個容器各一份；network、UTS（hostname）和 IPC 則由同一顆 pod 裡的容器共用。追蹤 pod 開了 `hostPID: true`，所以它跟節點共用同一個 PID namespace，nginx 則有自己的。nginx 主行程在節點上的 pid，可以在追蹤 pod 裡用 `nsenter -t 1 -m -p -- pgrep -a nginx` 查，選 `nginx: master process` 那一行，這裡是 13581：
+先要知道容器裡的行程編號跟節點上的不一樣。Linux 用 **namespace** 讓一組行程看到自己的一份系統資源：PID namespace 有自己的一套行程編號，mount namespace 有自己的檔案系統，UTS namespace 有自己的 hostname，network namespace 有自己的網路。在 Kubernetes 裡，PID 和 mount namespace 是每個容器各一份；network、UTS（hostname）和 IPC（行程間通訊，Inter-Process Communication）則由同一顆 pod 裡的容器共用。追蹤 pod 開了 `hostPID: true`，所以它跟節點共用同一個 PID namespace，nginx 則有自己的。nginx 主行程在節點上的 pid，可以在追蹤 pod 裡用 `nsenter -t 1 -m -p -- pgrep -a nginx` 查，選 `nginx: master process` 那一行，這裡是 13581：
 
 ```console
 host pid 1        : pid:[4026531836]
@@ -430,7 +430,7 @@ container id 和 container scope 的 cgroup id 都換了，pod slice 的 9916 �
 
 圖上有兩件事要注意：
 
-1. 綁在 10431 的過濾器，容器重啟後就再也收不到事件，而且不會報錯。
+1. 綁在 10431 的過濾器，容器重啟後就再也收不到事件，而且不會回報錯誤。
 2. 想看容器啟動時做了什麼，綁在容器那一層本來就來不及：那個 cgroup 要等容器建立才存在，等你查到號碼、掛好探針，啟動早就跑完了。
 
 綁在 pod slice 上就沒有這兩個問題，可以先掛好探針，再讓容器重啟。在 filter 裡拿到 pod slice 的 id，只要從容器那一層再往上走一步，取 `parent`：
@@ -579,6 +579,8 @@ EOF
 
 腳本掛好探針後印出 `ARMED`，接著記錄指定的秒數。在這段時間裡，nginx pod 要跑一段固定的工作負載：本課是 20 輪讀設定檔、查 DNS、對外 TCP 連線，以及打自己的 `/up` 讓 nginx 去 proxy。這段工作負載本課沒有附腳本，換成你自己的幾個動作也可以，只是數字會不同。
 
+新建的腳本不一定有執行權限，請用 `bash 06-noise-compare.sh <pod-slice-cgroup-id> 30` 執行，將 `<pod-slice-cgroup-id>` 換成步驟 2 的 `04-cgroup-to-pod.sh` 輸出中 `pod slice cgroup id=` 後面的數字；該值是用 `stat -c %i "$POD_SLICE"` 取得的 inode，不要填 container scope 的 id。修正後的寫法本課沒有實跑。下方保留原始執行紀錄，9916 是當時的 pod slice id。
+
 輸出最後兩行，`all` 是不過濾，`one` 是只看 pod slice 9916：
 
 ```console
@@ -638,7 +640,9 @@ Day 1 的結論是追蹤只能臨時開，因為 22 秒就印出 24,350 行。�
 ```
 
 
-第 5 步的暖機請求，是從叢集裡另一顆 pod 對 `baseline-nginx` 的 8080 port 發一個 HTTP 請求到 `/up`。不在 `baseline-nginx` 裡用 `kubectl exec` 發，是因為那樣容器執行期進入 pod 的事件也會被記進去。發請求的那顆 pod 要有 HTTP 用戶端：DaemonSet 用的 ubuntu 映像預設沒有 `curl`，要自己裝，或另外準備一顆帶 `curl` 的 pod。記錄的結果：
+`05-podtrace.bt` 的用法是 `bpftrace podtrace.bt <pod-slice-cgroup-id>`，最後一個參數填步驟 2 查到的 pod slice id。背景擷取與存檔的寫法可對照步驟 5 的 `06-noise-compare.sh`：它用 `bpftrace /tmp/podtrace.bt "$CGID" > /tmp/one.out 2>/tmp/one.err &` 啟動追蹤，把事件寫入 `/tmp/one.out`、錯誤訊息寫入 `/tmp/one.err`，再用 `ONE=$!` 保存追蹤器的行程編號。腳本最後用 `kill -INT $ALL $ONE 2>/dev/null` 停止兩份追蹤，並以 `wait $ALL $ONE 2>/dev/null` 等待結束。這是步驟 5 已有的擷取方式；上述重啟與暖機流程的完整操作指令，以及擷取檔取回工作站的指令，驗證素材沒有保存。
+
+第 5 步的暖機請求，是從叢集裡另一顆 pod 對 `baseline-nginx` 的 8080 port 發一個 HTTP 請求到 `/up`。不在 `baseline-nginx` 裡用 `kubectl exec` 發，是因為那樣容器執行期進入 pod 的事件也會被記進去。發請求的那顆 pod 要有 HTTP 客戶端：DaemonSet 用的 ubuntu 映像預設沒有 `curl`，要自己裝，或另外準備一顆帶 `curl` 的 pod。記錄的結果：
 
 ```console
 14:18:10 armed
@@ -651,7 +655,7 @@ Day 1 的結論是追蹤只能臨時開，因為 22 秒就印出 24,350 行。�
 
 容器換了新的 container id，pod slice 沒變，紀錄一路沒斷。暖機請求拿到 `301`，是 1.1.1.1 回的，代表 nginx 的 proxy 真的連出去了；整份輸出沒有格式錯亂的行。
 
-原始紀錄還不是基線。204 行裡有 106 筆是 runc 和 containerd 建立容器時的動作，每一顆 pod 都一樣。`07-baseline-build.sh` 在工作站上處理擷取下來的檔案：從 entrypoint 開始執行的那一筆起算，並把屬於容器執行期的事件分出去丟掉，最後留下 87 筆，輸出成 `08-nginx-startup-baseline.md`。參數依序是擷取檔、pod 名字、映像、container id 和 pod slice id，只用來填表頭：
+原始紀錄還不是基線。204 行裡有 106 筆是 runc 和 containerd 建立容器時的動作，每一顆 pod 都一樣。`07-baseline-build.sh` 在工作站上處理擷取下來的檔案：從 entrypoint 開始執行的那一筆起算，並把屬於容器執行期的事件分出去丟掉，最後留下 87 筆，輸出成 `08-nginx-startup-baseline.md`。第一個參數是要讀取的擷取檔，接著依序是 pod 名字、映像、container id 和 pod slice id，後四項只用來填表頭：
 
 ??? note "完整腳本：07-baseline-build.sh"
 
@@ -738,6 +742,10 @@ Day 1 的結論是追蹤只能臨時開，因為 22 秒就印出 24,350 行。�
     EOF
     ```
 
+若要先做離線整理，驗證素材目錄 `docs/plans/verify-logs/sprint2-day2-manifests/` 已有 `10-baseline-capture.txt` 和 `11-deviation-capture.txt`。取得這兩份檔案後，與本章的 `07-baseline-build.sh`、`09-deviation-check.sh` 放在工作站的同一個目錄，以下路徑都以該目錄為準。
+
+用 `bash` 執行 `07-baseline-build.sh`，第一個參數填 `10-baseline-capture.txt`；後四項填這份擷取對應的 pod 名字、映像、container id 和 pod slice id，可對照素材中的 `08-nginx-startup-baseline.md` 表頭。腳本將 Markdown 寫到標準輸出，需在呼叫時加上 `> 08-nginx-startup-baseline.md`，基線檔才會儲存在工作站目前目錄。第六個參數可省略，腳本預設從符合 `EXEC .*docker-entrypoint\.sh` 的第一筆事件開始整理。
+
 丟掉容器執行期這一層是取捨：丟了清單才讀得完，但也就看不到有人在 runc 那一層動手腳。分類時不能只看行程名稱，原因見[疑難排解：kubectl exec 開的 shell 從紀錄裡消失](#mine-7)。
 
 ### 基線的內容
@@ -784,7 +792,7 @@ id
 ```
 
 
-`<public-dns-a>` 和後面的 `<public-dns-b>` 是兩個公共 DNS 服務的位址，自己挑兩個即可；它們只要不在基線清單上，兩次用不同的位址，是為了分辨事件來自哪一次。這段期間同樣用 `05-podtrace.bt` 記錄。`09-deviation-check.sh` 在工作站上執行，兩個參數依序是基線的原始擷取和這次的擷取；它把兩份逐類比對，用三次 `comm -13` 列出只出現在這次擷取裡的項目：
+`<public-dns-a>` 和後面的 `<public-dns-b>` 是兩個公共 DNS 服務的位址，自己挑兩個即可；它們只要不在基線清單上，兩次用不同的位址，是為了分辨事件來自哪一次。這段期間同樣用 `05-podtrace.bt` 記錄。`09-deviation-check.sh` 在工作站上執行，兩個參數依序是基線的原始擷取和這次的擷取；它把兩份逐類比對，用三次 `comm -13` 列出只出現在這次擷取裡的項目。離線比對時，用 `bash` 執行這支腳本，第一個參數填同目錄的 `10-baseline-capture.txt`，第二個填 `11-deviation-capture.txt`，第三個參數省略即可沿用步驟 6 的起點。第一個輸入必須是原始擷取，不能填整理後的 `08-nginx-startup-baseline.md`：
 
 ??? note "完整腳本：09-deviation-check.sh"
 
@@ -955,7 +963,7 @@ $ curl -s https://mcr.microsoft.com/v2/mirror/docker/library/nginx/tags/list
 
 **修法**：追蹤器這一層沒有修法。要守住這個缺口，得限制誰能拿到節點的 root 權限；要讓資源算在目標容器上，得把 pid 寫進目標 cgroup 的 `cgroup.procs`。
 
-### 容器重啟後，過濾器不報錯也不再輸出 {#mine-3}
+### 容器重啟後，過濾器不回報錯誤也不再輸出 {#mine-3}
 
 **症狀**：用 `/cgroup == <container scope id>/` 追一個容器，抓不到它的啟動；容器重啟之後，再也沒有任何輸出。
 
@@ -1012,7 +1020,7 @@ raw=20480  newvar_shift=80  selfassign_shift=20480  selfassign_bswap=80
 
 指派給新變數或改用 `bswap()` 都得到 80，只有手寫位移指派回原變數時還是 20480。一般整數的自我指派（例如 `$x = $x + 1`）沒有這個問題。
 
-**修法**：一律用 `bswap()`，Ubuntu 內建的 `/usr/sbin/tcpconnect.bt` 也是這樣寫。錯的數字都在合法 port 範圍內，不會報錯，從網路上抄來的片段要特別檢查這一行。
+**修法**：一律用 `bswap()`，Ubuntu 內建的 `/usr/sbin/tcpconnect.bt` 也是這樣寫。錯的數字都在合法 port 範圍內，不會回報錯誤，從網路上抄來的片段要特別檢查這一行。
 
 ### 一行裡出現兩次時間 {#mine-6}
 
@@ -1050,7 +1058,7 @@ EXEC 06:20:09 35665   runc:[2:INIT]    /usr/bin/bash
 
 ## 小結
 
-核心事件裡唯一的身分是 cgroup id，而這個數字就是 `/sys/fs/cgroup` 底下某個目錄的 inode。順著它找到目錄，目錄名字裡有 container id 和 pod uid，再用 `crictl` 換成 pod 名字，整條查詢都在節點上完成；查到 `system.slice` 底下，就代表事件來自節點服務而不是 pod。要追蹤一顆 pod，過濾條件要綁在 pod slice 上，因為容器那一層的 id 每次重啟都會換。有了只屬於一顆 pod 的紀錄，就能做出行為基線，抓出不在清單上的動作。之後看到一筆不知來源的核心事件，或是一個追蹤突然沒了輸出，就回頭想這條查詢鏈和那兩層目錄的壽命；也要記得，這種以 cgroup 為範圍的追蹤，看不見從節點 `nsenter` 進來的動作。
+本章選用核心事件中的 cgroup id 對應容器，這個數字就是 `/sys/fs/cgroup` 底下某個目錄的 inode。順著它找到目錄，目錄名字裡有 container id 和 pod uid，再用 `crictl` 換成 pod 名字，整條查詢都在節點上完成；查到 `system.slice` 底下，就代表事件來自節點服務而不是 pod。要追蹤一顆 pod，過濾條件要綁在 pod slice 上，因為容器那一層的 id 每次重啟都會換。有了只屬於一顆 pod 的紀錄，就能做出行為基線，抓出不在清單上的動作。之後看到一筆不知來源的核心事件，或是一個追蹤突然沒了輸出，就回頭想這條查詢鏈和那兩層目錄的壽命；也要記得，這種以 cgroup 為範圍的追蹤，看不見從節點 `nsenter` 進來的動作。
 
 ## 延伸閱讀
 

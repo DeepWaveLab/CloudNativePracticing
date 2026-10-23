@@ -18,7 +18,17 @@ Nakama 不能在空資料庫裡直接讀寫自己的資料表。啟動前要先�
 
 ## 準備檔案與資料庫密碼
 
-延續前幾天的 Kubernetes 叢集，本章使用單副本 PostgreSQL 16 與 Nakama 3.40.0。叢集需要能配置 4Gi PVC 的預設 StorageClass；本機需要 `kubectl`、`openssl` 與 `curl`。這是理解串接方式的配置，尚未涵蓋資料庫高可用、備份還原或多使用者權限測試。
+延續前幾天的 Kubernetes 叢集，本章使用單副本 PostgreSQL 16 與 Nakama 3.40.0。**PVC（PersistentVolumeClaim）** 是向 Kubernetes 申請持久儲存空間的資源，本章用它申請保存 PostgreSQL 資料的磁碟空間。**StorageClass** 定義儲存空間的類型與配置方式，讓 Kubernetes 能依 PVC 的需求配置儲存空間。兩者的關係可參考 [Kubernetes 持久儲存文件](https://kubernetes.io/docs/concepts/storage/persistent-volumes/)。
+
+叢集需要具有名為 `default`、可配置 4Gi PVC 的 StorageClass；本機需要 `kubectl`、`openssl` 與 `curl`。這是理解串接方式的配置，尚未涵蓋資料庫高可用、備份還原或多使用者權限測試。
+
+先查詢叢集的 StorageClass 名稱與預設標記（依官方文件補上，本課沒有實跑），指令見 [Kubernetes v1.34 官方文件](https://v1-34.docs.kubernetes.io/docs/tasks/administer-cluster/change-default-storage-class/#changing-the-default-storageclass)：
+
+```bash
+kubectl get storageclass
+```
+
+`NAME` 欄列出 StorageClass 名稱，名稱後方的 `(default)` 才表示它是叢集預設值。完整的 `postgres.yaml` 明確指定 `storageClassName: default`，因此需要名稱為 `default` 的 StorageClass，不要求它同時是叢集預設值；指定名稱的行為見 [Kubernetes v1.34 PVC Class 文件](https://v1-34.docs.kubernetes.io/docs/concepts/storage/persistent-volumes/#class-1)。若查不到名為 `default` 的項目，就不符合本章前提，請先確認儲存配置再繼續；不能直接假設換成其他 StorageClass 也能成功。
 
 操作使用課程儲存庫的 `labs/sprint5/day5/` 目錄，請先在終端機切換到這個目錄。下面的 YAML 是閱讀用節錄；實際套用的是目錄內完整的 `postgres.yaml` 與 `nakama.yaml`，不能只把節錄存成檔案部署。
 
@@ -30,11 +40,13 @@ kubectl -n nakama create secret generic nakama-db \
   --from-literal=postgres-password="$(openssl rand -hex 24)"
 ```
 
-密碼使用十六進位字元，是因為稍後要把它放進 `username:password@host:port/database` 格式的連線字串。這樣可以避開本次實作曾遇到的特殊字元疑慮；故障的證據與限制放在[疑難排解](#mine-1)。
+<a id="mine-1"></a>
+
+稍後會把密碼放進 `username:password@host:port/database` 格式的連線字串，本章請沿用上面的 `openssl rand -hex 24`，產生只含十六進位字元的密碼。
 
 ## 先讓 PostgreSQL 可以保存資料
 
-完整的 [`postgres.yaml`](https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day5/postgres.yaml) 包含 StatefulSet、Service 與 PVC。閱讀節錄時，先找三個地方：資料庫名稱 `nakama`、密碼取自哪個 Secret，以及資料目錄掛到哪個 volume。
+完整的 [`postgres.yaml`](https://github.com/DeepWaveLab/CloudNativePracticing/blob/main/labs/sprint5/day5/postgres.yaml) 包含 StatefulSet、Service 與 PVC。**StatefulSet** 管理需要固定身分與持久儲存的 Pod，讓本章的 `postgres-0` 在重建後仍能掛回原本的資料儲存空間；這是 [StatefulSet](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/) 與 PVC 在這裡的用途。閱讀節錄時，先找三個地方：資料庫名稱 `nakama`、密碼取自哪個 Secret，以及資料目錄掛到哪個 volume。
 
 ```yaml
 apiVersion: apps/v1
@@ -118,7 +130,19 @@ containers:
         exec /nakama/nakama --name nakama-0 --database.address "$DB_ADDR" --logger.level INFO --session.token_expiry_sec 7200
 ```
 
-執行 `kubectl apply -f nakama.yaml` 後，先讀 `migrate` 容器的 log：
+執行 `kubectl apply -f nakama.yaml` 後，先查部署狀態。把 `<context-name>` 換成自己叢集的 kubectl context 名稱；若 Nakama Pod 尚未顯示 `1/1 Running`，稍後重複執行同一個查詢：
+
+```text
+$ kubectl --context <context-name> -n nakama get pods,deploy,sts,svc,pvc -o wide
+```
+
+若持續未就緒，查詢 events，並用下一個 log 指令檢查 `migrate` 容器，確認啟動停在哪個階段：
+
+```text
+$ kubectl --context <context-name> -n nakama get events --sort-by='.lastTimestamp'
+```
+
+等 Nakama Pod 顯示 `1/1 Running` 後，再依序讀 migration 與主容器的 log，確認是否有下面的成功訊息。先讀 `migrate` 容器：
 
 ```text
 $ kubectl -n nakama logs deployment/nakama -c migrate --tail=200
@@ -213,7 +237,9 @@ HTTP_STATUS:200
 
 `created: true` 表示建立了帳號；接著 `/v2/account` 回傳的 `user.id`，就是稍後讀取 storage 所需的 `<user-id>`。請記下自己回應中的值，且保持使用同一位玩家的 token。
 
-一筆 **storage object** 用 collection、key 與擁有者識別；本例是玩家自己的 `day5` collection 裡的 `gate`。`value` 存放 JSON 內容，`permission_read: 1` 與 `permission_write: 1` 允許擁有者讀寫。把 `<nonce>` 換成這次測試的識別字串，稍後便能確認讀回的是這一次寫入的資料。
+一筆 **storage object** 用 collection、key 與擁有者識別。**collection** 是資料分組，**key** 是該組裡的物件名稱；以玩家進度為例，可以用 `saves` 分組保存存檔，再用 `savegame` 命名其中一筆進度。這種分組方式可參考 [Nakama collections 文件](https://heroiclabs.com/docs/nakama/concepts/storage/collections/)。
+
+下面實作用玩家自己的 `day5` collection 裡的 `gate` 物件測試讀寫。`value` 存放 JSON 內容，`permission_read: 1` 與 `permission_write: 1` 允許擁有者讀寫。把 `<nonce>` 換成這次測試的識別字串，稍後便能確認讀回的是這一次寫入的資料。
 
 ```text
 $ curl -sS -w '\nHTTP_STATUS:%{http_code}\n' \
@@ -284,14 +310,6 @@ HTTP_STATUS:200
 
 比較 `value` 時，先解析成 JSON 再比欄位內容：回應改變了欄位順序與空白，字串不同不代表資料不同。這裡相同的 collection、key、user id、version 與內容，一起支持「這位玩家剛寫入的資料可以讀回」。單看 HTTP 200 只能證明請求成功回應。
 
-## 疑難排解
-
-### migration 沒有 log，先檢查資料庫連線設定 {#mine-1}
-
-曾出現 PostgreSQL 已 Ready、Service endpoint 存在，但 `migrate` initContainer 長時間 Running 且沒有 log；PostgreSQL 的 `pg_stat_activity` 也看不到 Nakama 連線。當時使用 base64 密碼，可能含有連線字串需要額外處理的特殊字元。
-
-這次紀錄只證明：重新建立練習環境並改用 hex 密碼後，migration 成功；「特殊字元造成解析失敗」仍是推測，沒有逐字元對照測試。新建環境可沿用前面的 hex 密碼做法。已有資料的環境應先核對 Secret 與資料庫實際密碼是否一致，再查連線字串的處理方式；不要把直接更換 Secret 當成資料庫已同步改密碼。URL encoding 的修法未在本次紀錄中驗證。
-
 ## 想一想
 
 1. healthcheck 回 HTTP 200，卻沒有測 storage，還缺少哪一段證據？
@@ -300,7 +318,7 @@ HTTP_STATUS:200
 
 ## 小結
 
-玩家資料跨越單場對戰的生命週期，所以本章用 Nakama 接收 API 請求、PostgreSQL 保存資料。追查問題時依序區分資料庫與 migration、API 入口、玩家憑證及 storage 內容；每一步都有自己的成功證據。正式服務還需要另外規劃資料庫備份與高可用、更換預設金鑰、設定對外入口與 TLS，並測試權限拒絕與並行寫入衝突，這些都不能由本章單一玩家的成功讀寫推論。
+玩家資料跨越單場對戰的生命週期，所以本章用 Nakama 接收 API 請求、PostgreSQL 保存資料。追查問題時依序區分資料庫與 migration、API 入口、玩家憑證及 storage 內容。正式服務還需要另外規劃資料庫備份與高可用、更換預設金鑰、設定對外入口與 TLS，並測試權限拒絕與並行寫入衝突，這些都不能由本章單一玩家的成功讀寫推論。
 
 ## 延伸閱讀
 

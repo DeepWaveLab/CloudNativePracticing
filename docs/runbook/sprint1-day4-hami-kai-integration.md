@@ -8,7 +8,34 @@ Day 3 結尾留下一顆排不上的 pod。團隊已經用 KAI 的佇列管 GPU 
 
 讀完之後，遇到一個叢集同時裝了兩套 GPU 方案，你會知道先查「節點上的 `nvidia.com/gpu` 是誰在宣告」，並從答案判斷它們會不會互相卡住。
 
-## 步驟 1：把 GPU 節點拉起來
+## 官方整合只借走 HAMi 的一個函式庫
+
+Day 3 那條路動用了 HAMi 的整組元件：webhook 把 pod 的 `schedulerName` 改成 `hami-scheduler`；`hami-scheduler` 挑一張卡，並記下誰用了多少 VRAM；`hami-device-plugin` 在容器啟動時，把一個叫 `libvgpu.so` 的動態函式庫送進容器。真正在執行期攔下 CUDA 的記憶體配置、讓容器裡的 `nvidia-smi` 只看到 4096 MiB 的，是最後這個函式庫。它在 HAMi 專案裡有自己的名字：**HAMi-core**。
+
+所以要讓 KAI 排的 pod 也有 VRAM 上限，只要把 HAMi-core 送進容器、再告訴它上限是多少就夠了。HAMi 官方的 KAI 整合文件一開頭就這樣劃界：
+
+> The integration uses **HAMi-core directly, not the full HAMi platform**. KAI Scheduler keeps its own scheduling capability and brings in HAMi-core only for GPU memory isolation.
+
+排程、記帳、配額都留在 KAI 手上，要裝的東西只剩下表三樣。admission 和 binder 是 Day 1 看過的 KAI 元件：前者在 pod 建立時補上欄位，後者在排程決定之後把 pod 綁到節點。這一章要動手的是前兩列：改 KAI admission 的設定，另外安裝 `kai-resource-isolator`。
+
+| 元件 | 做什麼 | 來自 |
+|---|---|---|
+| KAI 的 admission | 算出這顆 pod 分到多少 VRAM，產生一個記著上限的 ConfigMap | KAI，要開 `global.gpuSharing` 與 `binder.plugins.hamicore.enabled` |
+| `kai-resource-isolator` | DaemonSet 把 `libvgpu.so` 鋪到每台 GPU 節點；webhook 把它和 `/etc/ld.so.preload` 掛進 pod | HAMi 專案的獨立 chart |
+| HAMi-core `libvgpu.so` | 執行期攔 CUDA 配置呼叫，強制上限 | 同上 |
+
+下面這張圖把兩條路並排，左邊是 Day 3 走過的，右邊是今天要走的：
+
+![兩條路並排：左邊 Day 3 的 HAMi 平台路徑，pod 在 limits 寫 nvidia.com/gpumem，經過 HAMi webhook 與 hami-scheduler，再由 hami-device-plugin 送入 libvgpu.so；右邊 Day 4 的路徑，pod 用 gpu-memory annotation，經過 kai-scheduler 與 KAI admission，再由 kai-resource-isolator 送入 libvgpu.so；兩條路最後都由同一個 HAMi-core 執行 VRAM 上限](../assets/diagrams/s1d4-two-paths.svg)
+
+我們可以從圖上看到兩件事：
+
+1. 右邊那條路上沒有 `hami-scheduler`、`hami-device-plugin`，也沒有 HAMi 的 webhook。
+2. pod 要 VRAM 的寫法也換了：不再寫在 `resources.limits`，改成 annotation `gpu-memory`。步驟 3 會實際寫一份。
+
+兩條路的終點是同一個函式庫，隔離效果應該跟 Day 3 一樣，步驟 8 會驗證。
+
+## 步驟 1：擴增 GPU 節點
 
 GPU 節點池用完都會縮到 0（做法見 [Day 0](sprint1-day0-azure-aks-foundation.md)），先拉回 2 台，並回頭查節點池的 `count` 確認真的是 2，不要只看指令有沒有回傳。
 
@@ -20,7 +47,7 @@ $ kubectl create namespace day4-lab
 
 ## 選讀：HAMi 平台的集中與分散擺法
 
-這一節跟開場的問題無關，可以跳過。它談 HAMi 平台的另一個設定：同一組 pod 要集中在一張卡上，還是分散到幾台節點。實驗要用到 HAMi 平台，所以放在動 KAI 之前做；跑完把這八顆 pod 刪掉，再進步驟 2。
+這一節跟開場的問題無關，可以跳過。它談 HAMi 平台的另一個設定：同一組 pod 要集中在一張卡上，還是分散到幾台節點。實驗要用到 HAMi 平台，所以放在動 KAI 之前做；每組各跑四顆 pod，做完一組就清理，再做下一組或進步驟 2。
 
 HAMi 的 scheduler extender（掛在預設排程器旁邊、替它挑 GPU 節點的元件）會替每個候選節點算一個「這台已經多滿」的分數。往最高分放是集中，叫 **binpack**；往最低分放是分散，叫 **spread**。設定分兩個層級：
 
@@ -76,6 +103,8 @@ in-container  4096 MiB (all four)
 
 四顆都在同一張卡上。`4 × 4096 = 16384 MiB` 正好等於 HAMi 記錄的這張卡總 VRAM（`devmem`），剛好用滿也排得進去。
 
+先刪除對照組的 pod，再進行實驗組：`kubectl -n day4-lab delete pod -l 'run in (placement-default,placement-spread)'`。
+
 **實驗組**（`02-placement-spread.yaml`）把迴圈裡的 `bp-$n` 改成 `sp-$n`、`placement-default` 改成 `placement-spread`，並在 `metadata` 補上 annotation，其餘不動：
 
 ```yaml
@@ -124,36 +153,9 @@ binpack 那一輪，bp-4 去了 10.5 分、已經比較滿的 `vmss00000c`；spr
 
 binpack 能空出整台節點來縮掉，但 spot 節點被收回時四顆同時中斷；spread 分散影響，代價是兩台都得開著。這個 annotation 由寫 pod 的人自己決定，HAMi 不做限制，要強制得靠 OPA、Kyverno 這類在 pod 建立時檢查並改寫內容的 policy engine。
 
-跑完把兩組 pod 刪掉：`kubectl -n day4-lab delete pod -l 'run in (placement-default,placement-spread)'`。
+實驗組結束後，再執行同一條清理指令刪除 pod：`kubectl -n day4-lab delete pod -l 'run in (placement-default,placement-spread)'`。
 
-## 官方整合只借走 HAMi 的一個函式庫
-
-Day 3 那條路動用了 HAMi 的整組元件：webhook 把 pod 的 `schedulerName` 改成 `hami-scheduler`；`hami-scheduler` 挑一張卡，並記下誰用了多少 VRAM；`hami-device-plugin` 在容器啟動時，把一個叫 `libvgpu.so` 的動態函式庫送進容器。真正在執行期攔下 CUDA 的記憶體配置、讓容器裡的 `nvidia-smi` 只看到 4096 MiB 的，是最後這個函式庫。它在 HAMi 專案裡有自己的名字：**HAMi-core**。
-
-所以要讓 KAI 排的 pod 也有 VRAM 上限，只要把 HAMi-core 送進容器、再告訴它上限是多少就夠了。HAMi 官方的 KAI 整合文件一開頭就這樣劃界：
-
-> The integration uses **HAMi-core directly, not the full HAMi platform**. KAI Scheduler keeps its own scheduling capability and brings in HAMi-core only for GPU memory isolation.
-
-排程、記帳、配額都留在 KAI 手上，要裝的東西只剩下表三樣。admission 和 binder 是 Day 1 看過的 KAI 元件：前者在 pod 建立時補上欄位，後者在排程決定之後把 pod 綁到節點。這一章要動手的是前兩列：改 KAI admission 的設定，另外安裝 `kai-resource-isolator`。
-
-| 元件 | 做什麼 | 來自 |
-|---|---|---|
-| KAI 的 admission | 算出這顆 pod 分到多少 VRAM，產生一個記著上限的 ConfigMap | KAI，要開 `global.gpuSharing` 與 `binder.plugins.hamicore.enabled` |
-| `kai-resource-isolator` | DaemonSet 把 `libvgpu.so` 鋪到每台 GPU 節點；webhook 把它和 `/etc/ld.so.preload` 掛進 pod | HAMi 專案的獨立 chart |
-| HAMi-core `libvgpu.so` | 執行期攔 CUDA 配置呼叫，強制上限 | 同上 |
-
-下面這張圖把兩條路並排，左邊是 Day 3 走過的，右邊是今天要走的：
-
-![兩條路並排：左邊 Day 3 的 HAMi 平台路徑，pod 在 limits 寫 nvidia.com/gpumem，經過 HAMi webhook 與 hami-scheduler，再由 hami-device-plugin 送入 libvgpu.so；右邊 Day 4 的路徑，pod 用 gpu-memory annotation，經過 kai-scheduler 與 KAI admission，再由 kai-resource-isolator 送入 libvgpu.so；兩條路最後都由同一個 HAMi-core 執行 VRAM 上限](../assets/diagrams/s1d4-two-paths.svg)
-
-我們可以從圖上看到兩件事：
-
-1. 右邊那條路上沒有 `hami-scheduler`、`hami-device-plugin`，也沒有 HAMi 的 webhook。
-2. pod 要 VRAM 的寫法也換了：不再寫在 `resources.limits`，改成 annotation `gpu-memory`。步驟 3 會實際寫一份。
-
-兩條路的終點是同一個函式庫，隔離效果應該跟 Day 3 一樣，步驟 8 會驗證。
-
-## 步驟 2：裝上整合的兩個元件，並確認設定真的生效
+## 步驟 2：裝上整合的兩個元件，並確認設定真的生效 {#mine-1}
 
 官方文件第一步是 `helm install kai-scheduler oci://ghcr.io/nvidia/kai-scheduler ...`，這個位址抓不到 chart：
 
@@ -212,7 +214,7 @@ $ helm upgrade kai-scheduler \
     --set admission.gpuFractionRuntimeClassName="" --wait --timeout 8m
 ```
 
-完成後再看一次 admission 的參數，應該變成 `"--gpu-fraction-runtime-class-name", ""`。清空就好，AKS GPU 節點預設的容器執行環境本來就用得到 GPU，Day 3 整天沒有指定過 `runtimeClassName`。細節見[疑難排解：RuntimeClass "nvidia" not found](#mine-1)。
+完成後再看一次 admission 的參數，應該變成 `"--gpu-fraction-runtime-class-name", ""`。清空就好，AKS GPU 節點預設的容器執行環境本來就用得到 GPU，Day 3 整天沒有指定過 `runtimeClassName`。佔位 pod 的 RuntimeClass 則由 `binder.resourceReservation.runtimeClassName` 設定，v0.16.8 的 `values.yaml` 沒有替它設預設值，這裡不需要修改。
 
 第二個元件是裝在節點端的 isolator：
 
@@ -527,7 +529,7 @@ Warning  FailedScheduling  default-scheduler
 | 節點 annotation `hami.io/node-nvidia-register` | **殘留**(整串卡規格) |
 | 節點 `capacity: nvidia.com/gpu: 10` | **殘留**(`allocatable` 已歸 0) |
 
-helm 建的物件都刪乾淨了，留下來的是它不認得的東西：hook 產生的 secret、device plugin 寫在節點物件上的 annotation，以及 kubelet 還沒更新的 `capacity`（Day 3 的[「`helm uninstall` 之後，`capacity` 還寫著有卡」](sprint1-day3-hami-memory-isolation.md#mine-1)是同一件事）。步驟 9 收尾時會一併清掉，原因見[疑難排解：卸載 HAMi 之後，節點上還留著它的資料](#mine-5)。
+helm 建的物件都刪乾淨了，留下來的是不屬於 Helm release 的資源：hook 產生的 secret、device plugin 寫在節點物件上的 annotation，以及 kubelet 還沒更新的 `capacity`（Day 3 的[「`helm uninstall` 之後，`capacity` 還寫著有卡」](sprint1-day3-hami-memory-isolation.md#mine-1)是同一件事）。secret 與 annotation 會在步驟 9 清掉；`capacity` 會在步驟 7 裝回原廠 plugin 後更新，原因見[疑難排解：卸載 HAMi 之後，節點上還留著它的資料](#mine-5)。
 
 ## 步驟 7：裝回原廠 device plugin，把同一份 YAML 重跑一次
 
@@ -682,15 +684,7 @@ final held MiB: 4096
 
 那 4259 是怎麼來的？KAI 內部不用 MiB 記帳，而是把一張卡當成 1，每顆共卡的 pod 分到一個兩位小數的比例，叫 **GPU fraction**。步驟 7 的 ConfigMap 裡 `GPU_PORTION: 0.26` 就是它。照 KAI v0.16.8 的原始碼，排程器讀節點標籤 `nvidia.com/gpu.memory`（16384）時，會先無條件捨去到 100 的倍數，當成 16300；4096 / 16300 約 0.2513，再以 0.01 為單位無條件進位，得到 0.26。binder 算上限時則拿標籤原值 16384 乘 0.26，得到 4259.84，取整數就是 `4259m`。
 
-現在同一張卡上有三顆 pod，各 0.26，加起來 0.78。再送第四顆：
-
-```text
-12:53:22   kai-fourth   Pending   <none>
-  Normal  Pipelined  0s (x20 over 19s)  kai-scheduler
-    Pod day4-lab/kai-fourth was pipelined to node aks-gpuspot-21249019-vmss00000b
-```
-
-第四顆排不上，事件是 `Pipelined`：KAI 已經把它指派到已有三顆 pod 的那台節點，正在等那裡的資源被釋放，釋放之前 pod 不會真的綁上去。在那張卡上，0.78 再加 0.26 是 1.04，超過一張卡。另一台節點當時的佔用沒有記錄下來，所以這裡只能確定一件事：照 0.26 換算，一張卡最多放三顆。HAMi 平台以 MiB 記帳，四顆 4096 MiB 正好填滿 16384 MiB（前面選讀那一節的對照組就是這樣擺的）。規劃方式見[疑難排解：每張卡少放一個 pod](#mine-6)。
+按每顆 0.26 計算，三顆合計 0.78，四顆合計 1.04，超過單卡容量 1，因此一張卡最多放三顆。HAMi 平台以 MiB 記帳，四顆 4096 MiB 正好填滿 16384 MiB（前面選讀那一節的對照組就是這樣擺的）。規劃方式見[疑難排解：每張卡少放一個 pod](#mine-6)。
 
 ## 步驟 9：把叢集還原成整合前
 
@@ -725,16 +719,6 @@ Config CR:  admission.gpuSharing                  = False
 
 ## 疑難排解
 
-### KAI 替共卡 pod 指定 RuntimeClass "nvidia"，AKS 沒有，pod 建不出來 {#mine-1}
-
-步驟 2 已經清空這個值的話，可以跳過這一項。
-
-**症狀**：`kubectl apply` 直接回 `Forbidden ... RuntimeClass "nvidia" not found`。pod 物件根本沒建成，所以不會出現 Pending 或 CrashLoop，`kubectl get pods` 什麼都查不到，很容易誤以為 YAML 寫錯。
-
-**原因**：KAI chart 的 `admission.gpuFractionRuntimeClassName` 預設是 `nvidia`，admission 會把它寫到每顆共卡 pod 上（見步驟 2）。KAI 的 GPU sharing 文件有一句：「By default, KAI Scheduler uses the `nvidia` Runtime Class, which is typically configured by the NVIDIA device plugin.」這句講的是 binder 建立的佔位 pod，不是 admission 這個預設值，但背後是同一個假設：叢集裡已經有 device plugin 或 GPU Operator 建好的 `nvidia` RuntimeClass。
-
-**修法**：`--set admission.gpuFractionRuntimeClassName=""`。佔位 pod 那邊的設定是 `binder.resourceReservation.runtimeClassName`，v0.16.8 的 `values.yaml` 沒有替它設預設值，這一章的佔位 pod 也沒有被擋過，不用動。在 AKS、EKS、GKE 這類託管叢集上裝 NVIDIA 相關的 chart 之前，先跑一次 `kubectl get runtimeclass`，這些 chart 大多預設叢集裡有 GPU Operator。
-
 ### KAI 不知道卡有多大，當成 100 MiB，`gpu-memory` 的 pod 永遠 Pending {#mine-2}
 
 步驟 3 已經補上節點標籤的話，可以跳過這一項。
@@ -751,7 +735,7 @@ GpuMemoryLabel   = "nvidia.com/gpu.memory"
 
 這個標籤平常由 GFD 打上；HAMi 的 device plugin 不打，它把卡的規格寫在 annotation `hami.io/node-nvidia-register` 裡，KAI 讀不到。
 
-**修法**：`kubectl label node <gpu-nodes> nvidia.com/gpu.memory=16384 nvidia.com/gpu.count=1 --overwrite`。要在節點重建後還留著，得寫到 node pool 層級（`az aks nodepool update --labels`）。這個預設值不會報錯，只會讓請求永遠放不下；遇到「卡看得到、VRAM 卻不夠」這種訊息，先查 KAI 讀的那個標籤在不在、值對不對，不要反覆調整請求量。
+**修法**：`kubectl label node <gpu-nodes> nvidia.com/gpu.memory=16384 nvidia.com/gpu.count=1 --overwrite`。要在節點重建後還留著，得寫到 node pool 層級（`az aks nodepool update --labels`）。這個預設值不會回傳錯誤，只會讓請求永遠放不下；遇到「卡看得到、VRAM 卻不夠」這種訊息，先查 KAI 讀的那個標籤在不在、值對不對，不要反覆調整請求量。
 
 ### 兩套方案同時裝著，KAI 的 pod 無限重排 {#mine-3}
 
@@ -767,7 +751,7 @@ GpuMemoryLabel   = "nvidia.com/gpu.memory"
 
 **症狀**：`helm uninstall hami` 之後 release、webhook、pod 都不見了，但節點的 `hami.io/node-nvidia-register` annotation 原封不動（整串 UUID、`devmem 16384`、`mode hami-core`），`capacity.nvidia.com/gpu` 還是 10，只有 `allocatable` 變成 0。下一套 GPU 方案接手時，讀 `capacity` 或節點 annotation 的工具會拿到錯的資料。
 
-**原因**：annotation 是 device plugin 寫在節點物件上的，helm 不知道要刪；`capacity` 要等節點重啟才更新。
+**原因**：annotation 是 device plugin 寫在節點物件上的，不屬於 Helm release；device plugin 重新註冊並回報裝置後，kubelet 就能更新節點資源，不必等節點重啟。步驟 7 裝回原廠 plugin 後，原來兩台節點的 `capacity` 與 `allocatable` 都已變成 1，符合 [Kubernetes 的 device plugin 註冊機制](https://kubernetes.io/docs/concepts/extend-kubernetes/compute-storage-net/device-plugins/#device-plugin-registration)。
 
 **修法**：
 
@@ -775,14 +759,13 @@ GpuMemoryLabel   = "nvidia.com/gpu.memory"
 $ kubectl -n kube-system delete secret hami-scheduler-tls
 $ kubectl annotate node <gpu-nodes> \
     hami.io/node-handshake- hami.io/node-nvidia-register-
-# capacity only clears on node recreation; this pool scales to 0, next boot is a fresh VM
 ```
 
 檢查卸載乾不乾淨，不能只看 `helm list` 和 namespace，要分四類各查一次：cluster 層級的物件（webhook、RBAC、CRD）、其他 namespace 裡的殘留、寫在節點物件上的 label 與 annotation，以及 `--create-namespace` 建出來、現在已經空掉的 namespace。
 
 ### `gpu-memory` 換算成 GPU 比例後進位，每張卡少放一個 pod {#mine-6}
 
-**症狀**：要 4096 MiB，容器裡 `nvidia-smi` 顯示 4259 MiB，多了 163 MiB。同樣四顆 pod，在 HAMi 平台路徑放得進一張 T4，在 KAI 路徑第四顆一直 `Pipelined`。
+**症狀**：要 4096 MiB，容器裡 `nvidia-smi` 顯示 4259 MiB，多了 163 MiB。每顆換算後的 GPU fraction 是 0.26，四份合計 1.04，超過單卡容量 1。
 
 **原因**：KAI 把 `gpu-memory` 換算成兩位小數的 GPU fraction，換算方式見步驟 8：4096 MiB 變成 0.26，`1 / 0.26` 約 3.8，一張卡只放得下三顆。官方文件也警告過這件事，舉的例子是 15360 MiB 的卡上要 4096，會變成 0.27 與 4147m，跟同一套算法對得上。
 
@@ -804,7 +787,7 @@ HAMi 官方的 KAI 整合只借用 HAMi-core：選卡、記帳、配額交給 KA
 
 - **[HAMi 官方的 KAI Scheduler 整合指南](https://project-hami.io/docs/next/userguide/kai-scheduler/how-to-use-kai-scheduler)** ——(HAMi 文件站僅 next 版本收錄此頁,對應版本路徑不存在,截至 2026-08)本章整合路徑的依據,包含 `gpu-memory` annotation 的寫法與 fraction 換算的警告,以及那句劃界的 "not the full HAMi platform"。
 - **[HAMi 排程政策文件](https://project-hami.io/docs/userguide/nvidia-device/scheduling-policy)** —— `binpack`/`spread` 的 node 與 GPU 兩個層級、預設值,以及「只有 node 層級能逐 pod 覆寫」的規定。
-- **[KAI Scheduler GPU Sharing 說明(v0.16.8)](https://github.com/NVIDIA/KAI-Scheduler/blob/v0.16.8/docs/gpu-sharing/README.md)** —— `gpu-fraction` 與 `gpu-memory` 兩種要法、佔位 pod 機制、`nvidia` RuntimeClass 預設值的出處,對應本章疑難排解的 RuntimeClass 那一項。
+- **[KAI Scheduler GPU Sharing 說明(v0.16.8)](https://github.com/NVIDIA/KAI-Scheduler/blob/v0.16.8/docs/gpu-sharing/README.md)** —— `gpu-fraction` 與 `gpu-memory` 兩種要法、佔位 pod 機制、`nvidia` RuntimeClass 預設值的出處,對應[步驟 2 的 RuntimeClass 設定](#mine-1)。
 - **[KAI Scheduler 節點資訊原始碼(v0.16.8)](https://github.com/NVIDIA/KAI-Scheduler/blob/v0.16.8/pkg/scheduler/api/node_info/node_info.go)** —— `DefaultGpuMemory = 100` 與 `GpuMemoryLabel` 的定義處,也就是 KAI 把卡當成 100 MiB 的原因。
 
 ## 下一步

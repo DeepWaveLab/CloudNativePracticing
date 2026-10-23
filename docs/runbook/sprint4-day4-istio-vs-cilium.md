@@ -30,16 +30,18 @@ Cilium 在本課同時提供 Pod 網路。採用 Istio ambient 時，Cilium 仍�
 
 圖中的差別提醒你：ztunnel 的用量只是新增元件之一。若需求包含 Day 2 的 HTTP 連線池限制，還得計入 waypoint，不能用 2Mi 當成完整 mesh 的預算。
 
-以下數據來自兩節點、低負載環境的 `kubectl top` 觀測。DaemonSet（表內標 DS）在每個節點各有一份；表中是元件 Pod 的觀測範圍，並非整個叢集加總。
+以下數據來自兩節點、低負載環境的 `kubectl top` 觀測。DaemonSet（表內標 DS）在每個節點各有一份，因此各 DS 都有 2 個 Pod；控制平面的 cilium-operator 有 2 個 Pod，istiod 有 1 個。表中 CPU 與記憶體是每個 Pod 的觀測範圍，並非整個叢集加總。
 
-| 配置 | 元件 | CPU | 記憶體 |
-|---|---|---|---|
-| Cilium | cilium agent DS | 41–280m | 約 200Mi |
-| Cilium | cilium-envoy DS | 3m | 13Mi，L7 閒置 |
-| Cilium | cilium-operator | 1–8m | 27–45Mi |
-| 新增 ambient | ztunnel DS | 3–4m | 2Mi |
-| 新增 ambient | istio-cni DS | 2–3m | 17Mi |
-| 新增 ambient | istiod | 21m | 41Mi |
+| 配置 | 元件 | Pod 數量 | CPU／Pod | 記憶體／Pod |
+|---|---|---|---|---|
+| Cilium | cilium agent DS | 2 | 41–280m | 約 200Mi |
+| Cilium | cilium-envoy DS | 2 | 3m | 13Mi，L7 閒置 |
+| Cilium | cilium-operator | 2 | 1–8m | 27–45Mi |
+| 新增 ambient | ztunnel DS | 2 | 3–4m | 2Mi |
+| 新增 ambient | istio-cni DS | 2 | 2–3m | 17Mi |
+| 新增 ambient | istiod | 1 | 21m | 41Mi |
+
+依表中數值換算，兩節點的 ambient 新增記憶體約為 2 ×（2 + 17）+ 41 ＝ 79Mi：兩份 ztunnel 與 istio-cni，再加上一份 istiod。這個加總未含 waypoint；若需要 HTTP 處理，還要另外計入其用量。
 
 Cilium agent 的用量包含網路管理工作，不能全算成 mesh 的額外成本；同樣地，ztunnel 的 2Mi 不能代表 ambient 所有元件。正式容量規劃還需要實際負載下的變化與高峰，這份單次觀測只能提供起始參考。
 
@@ -71,6 +73,8 @@ Day 3 已提供 WireGuard 與方法／路徑政策的正反例。可以先評估
 Day 2 的 Istio ambient 已涵蓋這兩類功能，可作為優先驗證的候選配置。下一步要補上所需的授權政策、正式負載與 waypoint 成本。Cilium 仍提供底層網路，因此要一併維護兩套元件的相容設定。
 
 ### 已有 sidecar，正在考慮遷移
+
+Istio sidecar 模式會在每個應用 Pod 內配置一個 Envoy 代理，由代理處理該 Pod 的服務通訊。ambient 則由每個節點的 ztunnel 處理 L4 通訊與 mTLS，需要 HTTP 處理時再加入獨立部署的 waypoint。遷移時，原本由 Pod 內代理承擔的功能，會改由這些元件分工。
 
 本課沒有量測 sidecar 的資源與延遲，也沒有完整列出遷移功能差異。不能用上面的表直接決定移除 sidecar。應先盤點目前使用的功能，再依目標版本確認 ambient 是否涵蓋，最後做小範圍遷移驗證。
 

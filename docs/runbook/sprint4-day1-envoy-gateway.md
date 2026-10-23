@@ -2,11 +2,15 @@
 
 ![Envoy 官方標誌](../assets/logos/envoy-icon-color.svg){ align=right width="76" }
 
-同一個 nginx 網站已經可以透過 Service 存取。現在要讓外部使用者用 `demo.mesh.lab` 連進來，並且支援 HTTP/3。頁面能打開，只能說明某條路徑成功；它不能告訴你主機名稱規則是否生效，也不能證明使用了 HTTP/3。這章會用對照請求與協定資訊，分別判斷這兩件事。
+同一個 nginx 網站已經可以透過 Service 存取。接續 [Day 0](sprint4-day0-mesh-concepts.md) 的入口需求，現在要讓外部使用者用 `demo.mesh.lab` 連進來，並且支援 HTTP/3。
+
+本章採用 **Envoy Gateway**，透過 Gateway API 這組 Kubernetes 資源管理入口。Envoy Gateway 控制器讀取這些資源，建立 Envoy 代理與對外的 LoadBalancer Service，並把入口規則轉成代理設定；實際接收連線、處理 TLS 與轉送請求的是 **Envoy 代理**。這樣就能用 Kubernetes 資源管理主機名稱、路由與協定，不必直接撰寫底層 Envoy 設定，分工可參考[官方概念文件](https://gateway.envoyproxy.io/docs/concepts/gateway-api/)。若不使用 Envoy Gateway，就需要自行管理 Envoy 設定，或採用其他入口控制器。
+
+頁面能打開，只能說明某條路徑成功；它不能告訴你主機名稱規則是否生效，也不能證明使用了 HTTP/3。這章會用對照請求與協定資訊，分別判斷這兩件事。
 
 ## 先備妥 Pod 網路與入口控制器
 
-本章使用 AKS、Cilium 1.20.0、Envoy Gateway v1.8.3 與 Kubernetes 1.35.6 的驗證結果。實作前需備妥可使用的 AKS 叢集、Helm，以及命名空間 `mesh-demo` 中名為 `web`、連接埠為 80 的 nginx Service 與後端 Pod。範例網域不需要公開 DNS；後續以 Host 標頭或 `--resolve` 指定路由與位址。
+重現本章時，請採用 AKS、Cilium 1.20.0、Envoy Gateway v1.8.3 與 Kubernetes 1.35.6 的版本組合；這些版本不是最低版本要求。實作前需備妥可使用的 AKS 叢集、Helm，以及命名空間 `mesh-demo` 中名為 `web`、連接埠為 80 的 nginx Service 與後端 Pod。範例網域不需要公開 DNS；後續以 Host 標頭或 `--resolve` 指定路由與位址。
 
 這組練習環境使用 **BYOCNI（自行安裝 CNI）**：建立 AKS 時選用 `network-plugin none`，再自行安裝 Cilium。它讓後續章節可以調整 Cilium 與 Istio 共存所需的設定；已有其他 CNI 的叢集不能直接照下面安裝指令覆蓋。本章不提供既有叢集的 CNI 遷移程序。
 
@@ -38,9 +42,25 @@ Envoy DaemonSet:   OK
 Cluster Pods:      5/5 managed by Cilium
 ```
 
-驗證環境仍有 AKS 管理的 kube-proxy DaemonSet。`kubeProxyReplacement=true` 不代表 AKS 會自動刪除它；本章僅確認這組環境的路由功能，沒有驗證手動移除受管元件的後果。
+AKS 管理的 kube-proxy DaemonSet 不會因為設定 `kubeProxyReplacement=true` 就自動刪除；檢查 Cilium 狀態時，仍可能看到它。
 
 接著需要先安裝 Envoy Gateway 控制器及它使用的 Gateway API CRD；安裝方式見[官方快速入門](https://gateway.envoyproxy.io/docs/tasks/quickstart/)。以下以控制器與 CRD 已就緒為前提，繼續設定入口與路由。
+
+全新安裝時，依 [v1.8 安裝文件](https://gateway.envoyproxy.io/v1.8/install/install-helm/)安裝控制器與兩組 CRD，版本固定為本章的 [v1.8.3](https://github.com/envoyproxy/gateway/releases/tag/v1.8.3)，再用 Kubernetes v1.35 的 [wait](https://v1-35.docs.kubernetes.io/docs/reference/kubectl/generated/kubectl_wait/) 等待 CRD 與控制器就緒（依官方文件補上，本課沒有實跑）：
+
+```sh
+helm install eg oci://docker.io/envoyproxy/gateway-helm \
+  --version v1.8.3 --namespace envoy-gateway-system --create-namespace
+
+kubectl wait --for=condition=Established --timeout=5m \
+  crd/gatewayclasses.gateway.networking.k8s.io \
+  crd/gateways.gateway.networking.k8s.io \
+  crd/httproutes.gateway.networking.k8s.io \
+  crd/clienttrafficpolicies.gateway.envoyproxy.io
+
+kubectl wait -n envoy-gateway-system deployment/envoy-gateway \
+  --for=condition=Available --timeout=5m
+```
 
 ## 把入口選擇、監聽與路由分開
 
@@ -93,6 +113,22 @@ spec:
 ```
 
 `hostnames` 限定 `demo.mesh.lab`，`PathPrefix: /` 則匹配它底下的路徑。Gateway 與 HTTPRoute 放在同一個 `mesh-demo` 命名空間，符合 listener 的 `allowedRoutes` 設定。
+
+將上方完整 YAML 存成 `gateway-http.yaml` 後，套用資源並等待 Gateway 完成配置，再依 [v1.8 狀態查詢文件](https://gateway.envoyproxy.io/v1.8/troubleshooting/configuration/)與 Kubernetes v1.35 的 [get](https://v1-35.docs.kubernetes.io/docs/reference/kubectl/generated/kubectl_get/) 查詢資源狀態與入口 IP（依官方文件補上，本課沒有實跑）：
+
+```sh
+kubectl apply -f gateway-http.yaml
+
+kubectl wait -n mesh-demo gateway/eg \
+  --for=condition=Programmed --timeout=5m
+
+kubectl get gatewayclass eg -o yaml
+kubectl get -n mesh-demo gateway/eg httproute/web -o yaml
+
+kubectl get svc -n envoy-gateway-system \
+  -l gateway.envoyproxy.io/owning-gateway-namespace=mesh-demo,gateway.envoyproxy.io/owning-gateway-name=eg \
+  -o wide
+```
 
 控制器接受設定後，應再確認它已完成配置，且後端參照可解析。驗證結果如下：
 
@@ -162,6 +198,7 @@ apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: ClientTrafficPolicy
 metadata:
   name: enable-http3
+  namespace: mesh-demo
 spec:
   targetRefs:
     - group: gateway.networking.k8s.io
@@ -169,6 +206,22 @@ spec:
       name: eg
   http3: {}
 ```
+
+備妥 `mesh-demo/demo-tls` 後，將上方含 HTTPS listener 的 Gateway YAML 存成 `gateway-https.yaml`、ClientTrafficPolicy YAML 存成 `enable-http3.yaml`，依 [v1.8 HTTP/3 文件](https://gateway.envoyproxy.io/v1.8/tasks/traffic/http3/)套用並查詢資源狀態與 Service 連接埠（依官方文件補上，本課沒有實跑）：
+
+```sh
+kubectl apply -f gateway-https.yaml
+kubectl apply -f enable-http3.yaml
+
+kubectl get -n mesh-demo gateway/eg httproute/web \
+  clienttrafficpolicy/enable-http3 -o yaml
+
+kubectl get svc -n envoy-gateway-system \
+  -l gateway.envoyproxy.io/owning-gateway-namespace=mesh-demo,gateway.envoyproxy.io/owning-gateway-name=eg \
+  -o yaml
+```
+
+查詢後，確認各資源 conditions 的 `observedGeneration` 對應目前的 `metadata.generation`，再檢查 Gateway 的 listener 狀態與 Service 的 TCP／UDP 443；控制器尚未處理完這次變更時，請稍候重查。
 
 在驗證版本中，`http3: {}` 會讓 Envoy Gateway 為同一個 LoadBalancer Service 加入 UDP 443。觀察輸出時要看協定欄，不能只看同樣出現的數字 443：
 
@@ -179,7 +232,7 @@ envoy-mesh-demo-eg-dd08789d   LoadBalancer   <LB-IP>   PORTS: 80,443,443  PROTOS
   https-443-h3: UDP/443      ← http3 帶出來的 QUIC port
 ```
 
-TCP 443 供既有 HTTPS 連線使用，UDP 443 供 QUIC 使用。這組 AKS 與 Envoy Gateway 版本可以在一個 Service 內提供兩者；本課未測試其他版本或雲端負載平衡器的混合協定限制。
+TCP 443 供既有 HTTPS 連線使用，UDP 443 供 QUIC 使用。本章採用的 AKS 與 Envoy Gateway 版本可以在一個 Service 內提供兩者；換用其他版本或雲端負載平衡器時，需先確認是否支援同一個 Service 混用 TCP 與 UDP。
 
 ## 先讀廣告，再確認實際連線
 
@@ -203,7 +256,7 @@ $ curl --http3 -v --resolve demo.mesh.lab:443:<LB-IP> https://demo.mesh.lab/
 < alt-svc: h3=":443"; ma=86400
 ```
 
-這個命令未使用 `-k`，因此要求 curl 信任站台憑證；若使用未受信任的測試憑證，會先遇到憑證錯誤。日誌中的另一個測試以 `--http3-only -k` 驗證測試端點，不能把略過驗證的方式用來判定正式站台的憑證正確。
+這個命令未使用 `-k`，因此要求 curl 信任站台憑證；若使用未受信任的測試憑證，會先遇到憑證錯誤。加上 `-k` 會略過憑證驗證，不能據此判定正式站台的憑證正確。
 
 `using HTTP/3` 與 `HTTP/3 200` 才是這次連線使用 HTTP/3 的證據。範圍到 Envoy 為止，不能據此宣稱 Envoy 到 nginx 也使用 HTTP/3。
 
@@ -223,11 +276,11 @@ performance.getEntriesByType('navigation')[0].nextHopProtocol   // → "h3"
 
 ### curl 不支援 --http3
 
-HTTP/3 是否可用取決於 curl 的編譯功能，不能只依作業系統或版本號推斷。若出現 `the installed libcurl version doesn't support this`，請使用有 HTTP/3 功能的 curl，並確認實際呼叫的是該執行檔。原驗證的系統 curl 不支援，因此改用具備 HTTP/3 的用戶端完成測試。
+HTTP/3 是否可用取決於 curl 的編譯功能，不能只依作業系統或版本號推斷。若出現 `the installed libcurl version doesn't support this`，請使用有 HTTP/3 功能的 curl，並確認實際呼叫的是該執行檔。
 
 ### 瀏覽器一直沒有使用 h3
 
-先確認憑證受信任、主機名稱符合憑證，再確認 UDP 443 的 Service、負載平衡器與防火牆路徑。`alt-svc` 存在而連線仍是 h2，不能直接判定 HTTPRoute 錯誤。驗證環境換成受信任憑證後才完成瀏覽器測試；單一 QUIC 錯誤碼不足以推定所有環境都是相同原因。
+先確認憑證受信任、主機名稱符合憑證，再確認 UDP 443 的 Service、負載平衡器與防火牆路徑。`alt-svc` 存在而連線仍是 h2，不能直接判定 HTTPRoute 錯誤；單一 QUIC 錯誤碼也不足以推定所有環境都是相同原因。
 
 ## 想一想
 

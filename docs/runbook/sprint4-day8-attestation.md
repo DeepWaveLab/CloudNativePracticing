@@ -6,11 +6,13 @@
 
 ## 先認識誰驗證、誰決定釋出
 
-**MAA（Microsoft Azure Attestation）**驗證執行環境提供的證據，並簽發包含 **claim（已簽署屬性）**的權杖。**SKR（Secure Key Release）**sidecar 協助工作負載取得證明並向 Key Vault 要求金鑰。
+**MAA（Microsoft Azure Attestation）**驗證執行環境提供的證據，並簽發包含 **claim（已簽署屬性）**的權杖。**SKR（Secure Key Release）**sidecar 協助工作負載取得證明並向 Key Vault 要求金鑰。Key Vault 是 Azure 管理金鑰、秘密與憑證的服務，本章用它保存金鑰並控制釋出條件。
 
 Key Vault 的 **release policy（金鑰釋出政策）**則指定：接受哪個證明服務，以及權杖中哪些屬性必須符合條件。這和 Day 7 限制 guest agent 操作的安全政策，是兩份不同用途的政策。
 
-先沿著下圖看證據與決策的方向。金鑰是否釋出，由 Key Vault 根據請求者權限及 release policy 判斷，不是 Pod 自己宣告。
+本章的 **hostdata** 是 SNP 證據中用來綁定安全政策雜湊的欄位。**SHA-256** 將政策內容轉成固定長度的摘要；只要政策位元組改變，摘要通常也會改變。它不是完整 Pod YAML 的直接雜湊。
+
+先沿著下圖看證據與決策的方向。金鑰是否釋出，由 Key Vault 根據請求者權限及 release policy 判斷。Pod Running 狀態不能決定金鑰是否釋出。
 
 ![MAA 驗證證據，Key Vault 依身分與 release policy 決定釋出](../assets/diagrams/s4d8-release-flow.svg)
 
@@ -18,9 +20,11 @@ Key Vault 的 **release policy（金鑰釋出政策）**則指定：接受哪個
 
 ## 準備金鑰服務與工作負載身分
 
-本章沿用 Day 7 的 kata-cc 環境，以及已啟用的 OIDC issuer 與 workload identity。下列命令建立 Key Vault Premium、MAA 與 managed identity，會產生 Azure 資源。
+本章沿用 Day 7 的 kata-cc 環境，以及已啟用的 OIDC issuer 與 workload identity。managed identity（受控識別）是由 Azure 管理認證資訊的身分，供工作負載向 Azure 服務驗證身分，不必在程式中保存認證密碼。本章使用的 HSM（硬體安全模組）提供硬體保護來儲存金鑰及執行密碼編譯作業。下列命令建立 Key Vault Premium、MAA 與 managed identity，會產生 Azure 資源。
 
 `<rg>`、`<kv>`、`<maa>`、`<mid>` 分別是資源群組與三種資源名稱；名稱須符合 Azure 規則。`<叢集 OIDC issuer>` 取自 AKS 的 OIDC issuer URL；`<mid client id>`、`<mid principal>` 分別取 managed identity 的 clientId、principalId；`<kv id>` 是 Key Vault 的完整資源 ID。不要把這三種 ID 互換。
+
+先執行下方三行資源建立命令，再執行後面的查詢區塊取得 URL 與 ID，填回對應位置後，才繼續執行聯合身分與角色指派命令。
 
 ```bash
 # Key Vault Premium(HSM 金鑰)、MAA 證明服務、managed identity
@@ -40,13 +44,36 @@ az role assignment create --role "Key Vault Crypto Officer" --assignee-object-id
 az role assignment create --role "Key Vault Crypto User"    --assignee-object-id <mid principal> --scope <kv id>
 ```
 
+[Workload Identity 官方文件](https://learn.microsoft.com/en-us/azure/aks/workload-identity-deploy-cluster?pivots=azure-cli&tabs=new-cluster)要求 Azure CLI 2.47.0 以上；本章未記錄 Azure CLI 版號，以下採用官方文件的標準查詢寫法。先將引號中的名稱換成自己的資源名稱，`CLUSTER` 填 Day 7 的叢集名稱。
+
+以下查詢 OIDC issuer、managed identity 的 clientId／principalId 與 Key Vault 資源 ID，依官方文件補上，本課沒有實跑。
+
+```bash
+RG='<rg>'
+CLUSTER='<aks-cluster-name>'
+MID='<mid>'
+KV='<kv>'
+
+az aks show -g "$RG" -n "$CLUSTER" \
+  --query oidcIssuerProfile.issuerUrl -o tsv
+
+az identity show -g "$RG" -n "$MID" \
+  --query clientId -o tsv
+
+az identity show -g "$RG" -n "$MID" \
+  --query principalId -o tsv
+
+az keyvault show -g "$RG" -n "$KV" \
+  --query id -o tsv
+```
+
+四個查詢依序對應 `<叢集 OIDC issuer>`、`<mid client id>`、`<mid principal>`、`<kv id>`；最後一項是 Vault 資源 ID，不能換成金鑰 ID 或 Vault URL。參數說明見官方的 [az identity show](https://learn.microsoft.com/en-us/cli/azure/identity?view=azure-cli-latest#az-identity-show) 與 [az keyvault show](https://learn.microsoft.com/en-us/cli/azure/keyvault?view=azure-cli-latest#az-keyvault-show)。
+
 聯合身分設定把 `cc-lab/skr-sa` 這個 ServiceAccount 連到 managed identity。consumer Pod 也必須指定此 ServiceAccount，並依 workload identity 的要求啟用注入，才能使用這條身分路徑。
 
-以上保留練習時的兩個角色指派。`Crypto Officer` 包含金鑰管理權限，不能將這組寬權限配置直接視為正式環境的最小權限設計。實際部署應分開管理金鑰的人與只需要求釋出的工作負載，確認各自操作權限；本課未驗證最小角色組合。
+`Crypto Officer` 包含金鑰管理權限，不能將這組寬權限配置直接視為正式環境的最小權限設計。實際部署應分開管理金鑰的人與只需要求釋出的工作負載，確認各自操作權限。
 
 ## 先產生政策，再計算它的雜湊
-
-本章的 **hostdata** 是 SNP 證據中用來綁定安全政策雜湊的欄位。**SHA-256** 將政策內容轉成固定長度的摘要；只要政策位元組改變，摘要通常也會改變。它不是完整 Pod YAML 的直接雜湊。
 
 準備包含 app 與 `mcr.microsoft.com/aci/skr:2.7` 的 consumer manifest，使用 `kata-cc-isolation` 與 `skr-sa`，再依 [Day 7](sprint4-day7-katacc.md) 的方式產生政策，保存為 `consumer-policy.yaml`。app 需呼叫 SKR 的 `/key/release`，提供 MAA endpoint、Key Vault endpoint 與金鑰 ID；請求格式見 [SKR API](https://github.com/microsoft/confidential-sidecar-containers/blob/main/cmd/skr/README.md)。
 
@@ -99,7 +126,7 @@ az keyvault key create --vault-name <kv> -n skr-key --kty RSA-HSM --size 3072 \
 $ curl http://<service>/          →  RELEASED
 ```
 
-`RELEASED` 是 app 整理後的結果，表示這組測試完成金鑰釋出。它不是原始 SNP report，也不是完整 MAA 權杖；驗證紀錄沒有提供 guest report 原文，因此這裡不把狀態字串當成可供獨立解析的硬體證據。
+`RELEASED` 是 app 整理後的結果，表示這組測試完成金鑰釋出。它不是原始 SNP report，也不是完整 MAA 權杖，不能當成可供獨立解析的硬體證據。
 
 ## 改環境變數，重新產生政策，再測拒絕
 
@@ -113,7 +140,9 @@ a07958c9891de4f177cf6f1bf207b75d1c6ee78250f8064b968308e730c912b0
 # ≠ 金鑰綁定的 ca8442bb…720d
 ```
 
-將變更版部署為另一個 Pod 與狀態 Service，並繼續要求同一把金鑰。金鑰的 release policy 仍綁原雜湊。結果是：
+將變更版部署為另一個 Pod 與狀態 Service，並繼續要求同一把金鑰。金鑰的 release policy 仍綁原雜湊。
+
+`skr-tampered` 位於 `cc-lab` namespace，查詢應寫成 `kubectl get pod skr-tampered -n cc-lab`。修正後的寫法本課沒有實跑。下方保留原查詢與結果：
 
 ```console
 $ kubectl get pod skr-tampered            →  2/2 Running   （自己的政策相符自己）
@@ -122,17 +151,13 @@ $ curl http://<tampered-service>/         →  DENIED
 
 變更版 2/2 Running，表示它符合自己的啟動政策；狀態服務回 DENIED，則呈現它沒有取得金鑰。這組對照支持「釋出條件綁定核准的政策雜湊」；它沒有測試任意 Pod 欄位變更，也沒有保證所有欄位都會被政策產生器納入。
 
-實作時若只有 DENIED，仍需區分 RBAC、證明服務、網路與 release policy 的拒絕原因。此處留存的是結果摘要，沒有原始 Key Vault 錯誤明細，不能把任意同名回應都直接歸因 hostdata。
+實作時若只有 DENIED，仍需區分 RBAC、證明服務、網路與 release policy 的拒絕原因，不能單憑這個回應判定 hostdata 不符合條件。
 
 ## 疑難排解
 
-### 建立 MAA 的命令逾時，資源狀態尚未就緒 {#mine-1}
-
-用戶端逾時不代表雲端建立作業一定已停止。先檢查同一資源的 provisioning 狀態，再決定等待或重試，避免立即重複建立。給長時間作業足夠的等待時間，不要只以本機命令是否在兩分鐘內結束判定成功。
-
 ### 算出的 SHA-256 是空字串摘要 {#mine-2}
 
-`e3b0c442…` 是空輸入的 SHA-256。驗證時曾因工具映像缺少抽取所用的程式，導致後段對空輸入計算。先檢查 annotation 抽取、base64 解碼與各命令狀態，再計算雜湊。換到本機計算能避開該容器工具缺口，仍不能省略輸入檢查。
+`e3b0c442…` 是空輸入的 SHA-256。先確認 annotation 抽取結果非空、base64 解碼成功與各命令狀態正常，再計算雜湊。
 
 ### 預設政策不允許 exec 或 logs {#mine-3}
 

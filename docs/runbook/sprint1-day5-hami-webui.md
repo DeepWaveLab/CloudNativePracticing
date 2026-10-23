@@ -64,12 +64,9 @@ helm install hami hami-charts/hami --version 2.9.0 \
   -n kube-system -f 01-hami-values.yaml
 ```
 
-```text
-11:50:27  install 下達
-11:50:44  install 返回(17 秒)
-11:51:00  hami-device-plugin ×2 ContainerCreating／hami-scheduler 已 2/2 Running
-11:51:40  兩台節點 allocatable nvidia.com/gpu = 10   ← install 到切片就緒共 73 秒
+安裝後先確認 hami-scheduler 和兩顆 hami-device-plugin 都已就緒，兩台 GPU 節點各有 10 份 `allocatable nvidia.com/gpu`。節點的 annotation 會列出卡片資訊：
 
+```text
 hami.io/node-nvidia-register =
   [{"id":"GPU-3a42fadb-…","count":10,"devmem":16384,"devcore":100,
     "type":"NVIDIA-Tesla T4","mode":"hami-core","health":true}]
@@ -93,6 +90,12 @@ WebUI 的用量數字不是自己量的，而是向 **Prometheus** 查來的。P
 subchart 是包在另一個 chart 裡、當成相依元件一起安裝的 chart，由父 chart 的 values 開關決定裝不裝。我們的叢集還沒有任何 Prometheus，所以走 (b)，接下來要做的是把這套 stack 縮到最小。
 
 ## 步驟 2:安裝 WebUI 和精簡過的 Prometheus
+
+先加入 HAMi-WebUI 的 chart repo 並更新索引：
+
+```bash
+helm repo add hami-webui https://project-hami.github.io/HAMi-WebUI && helm repo update hami-webui
+```
 
 `helm pull hami-webui/hami-webui --version 1.2.0 --untar` 把 chart 拉下來之後，`Chart.yaml` 列出兩個 subchart：
 
@@ -160,10 +163,9 @@ EOF
 
 這份值還少兩處設定，步驟 3 和步驟 6 會各遇到一處、補上。先照這一版裝，才看得到少了會怎樣。
 
-chart 內建的 `prometheus.prometheusSpec.serviceMonitorSelector.matchLabels.jobRelease=hami-webui-prometheus` 保留不動。有這一行，這顆 Prometheus 只抓帶了這個標籤的三份 ServiceMonitor，不會去掃整座叢集的每一個 Service，記憶體用量也就不會隨叢集變大而增加。
+chart 內建的 `prometheus.prometheusSpec.serviceMonitorSelector.matchLabels.jobRelease=hami-webui-prometheus` 保留不動。有這一行，這顆 Prometheus 只抓帶了這個標籤的三份 ServiceMonitor，縮小監控範圍。不過，每組不同的指標標籤都會形成一條時間序列並消耗記憶體；受監控的 GPU 節點、pod 或標籤組合增加時，時間序列數量和記憶體用量仍可能增加，詳見 [Prometheus 官方說明](https://prometheus.io/docs/practices/instrumentation/#do-not-overuse-labels)。
 
 ```bash
-helm repo add hami-webui https://project-hami.github.io/HAMi-WebUI && helm repo update hami-webui
 helm install hami-webui hami-webui/hami-webui --version 1.2.0 \
   -n kube-system -f 02-hami-webui-values.yaml
 ```
@@ -274,22 +276,23 @@ webui-b2 NODE_B_PLACEHOLDER 512  2048
 TABLE
 ```
 
-manifest 用 `nodeSelector: kubernetes.io/hostname` 把 pod 固定在指定節點上。節點名每次重建都會變，所以檔案裡先放佔位符。下面指令裡的兩個 hostname 是驗證時那兩台節點的名字，你要換成自己叢集當下兩台 GPU 節點的 hostname（`kubectl get nodes` 查）。六顆 pod 都放在 `day5-lab` namespace，先建立它：
+manifest 用 `nodeSelector: kubernetes.io/hostname` 把 pod 固定在指定節點上。節點名每次重建都會變，所以檔案裡先放佔位符。先用 `kubectl get nodes` 查自己叢集當下兩台 GPU 節點的 hostname。六顆 pod 都放在 `day5-lab` namespace，先建立它：
 
 ```console
 $ kubectl create namespace day5-lab
 ```
 
+將查到的兩個 hostname 分別填入 `NODE_A='<node-a-hostname>'`、`NODE_B='<node-b-hostname>'`，可用 `sed -e "s/NODE_A_PLACEHOLDER/${NODE_A}/" -e "s/NODE_B_PLACEHOLDER/${NODE_B}/" 03-webui-workloads.yaml | kubectl apply -f -` 套用。修正後的寫法本課沒有實跑。下方保留直接填入 hostname 的原寫法，執行前須把 `<node-a-hostname>`、`<node-b-hostname>` 換成查到的值：
+
 ```bash
-sed -e 's/NODE_A_PLACEHOLDER/aks-gpuspot-21249019-vmss00000d/' \
-    -e 's/NODE_B_PLACEHOLDER/aks-gpuspot-21249019-vmss00000e/' 03-webui-workloads.yaml | \
+sed -e 's/NODE_A_PLACEHOLDER/<node-a-hostname>/' \
+    -e 's/NODE_B_PLACEHOLDER/<node-b-hostname>/' 03-webui-workloads.yaml | \
 kubectl apply -f -
 ```
 
-```text
-11:52:10  apply(映像已由 prepuller DaemonSet 預熱)
-11:52:59  六顆全部 Running(49 秒)
+等六顆 pod 全部變成 `Running`，再比對容器內的 VRAM 總量和 pod annotation：
 
+```text
 容器裡看到的是切片:
   webui-a1  total_MiB = 4096      webui-a4  total_MiB = 2048
   webui-b1  total_MiB = 4096
@@ -300,7 +303,7 @@ pod annotation(HAMi 的帳本):
   webui-b1  GPU-361043c7-…,NVIDIA,4096,0:;
 ```
 
-第一行的 prepuller 是 [Day 3](sprint1-day3-hami-memory-isolation.md) 用來預先把 pytorch 映像拉到 GPU 節點上的 DaemonSet，沒有它也能跑，只是第一次啟動要等映像下載。看下面兩段：容器裡看到的 VRAM 總量就是自己的配額（4096 或 2048 MiB），而 pod annotation 記著每顆 pod 配到哪張卡（GPU UUID）、多少 MiB。接下來 WebUI 讀的配額，就是這些 annotation。
+容器裡看到的 VRAM 總量就是自己的配額（4096 或 2048 MiB），而 pod annotation 記著每顆 pod 配到哪張卡（GPU UUID）、多少 MiB。接下來 WebUI 讀的配額，就是這些 annotation。
 
 ## 畫面上的數字從兩個地方來
 
@@ -328,16 +331,18 @@ vgpu:
   pathRewrite: { '^/api/vgpu': '' }
 ```
 
+**PromQL** 是 Prometheus 的查詢語言，可以在大括號裡寫標籤條件，篩選符合條件的指標。下表的 `/api/vgpu/v1/monitor/query/instant-vector` 端點會由 WebUI 後端代為向 Prometheus 執行 PromQL 查詢，再把結果回傳給前端。
+
 | 瀏覽器實際打的路徑(:3000) | 後端路由 | 方法 | 用途 |
 |---|---|---|---|
 | `/api/vgpu/v1/summary` | `/v1/summary` | POST | 首頁統計 |
 | `/api/vgpu/v1/nodes` | `/v1/nodes` | POST | 節點列表 |
 | `/api/vgpu/v1/gpus` | `/v1/gpus` | POST | 顯卡列表 |
 | `/api/vgpu/v1/containers` | `/v1/containers` | POST | 任務列表 |
-| `/api/vgpu/v1/monitor/query/instant-vector` | 同左 | POST | 圖表用的 PromQL 代打 |
+| `/api/vgpu/v1/monitor/query/instant-vector` | 同左 | POST | 由後端代查 Prometheus，供圖表使用 |
 | `/health_check` | —(前端自己) | GET | 存活探測 |
 
-要記的只有一件事：資料 API 全部用 POST，而且至少要帶 `{"filters":{}}`，送空物件 `{}` 會回 500（見[疑難排解：送 `{}` 回 500](#mine-5)）。路徑打錯也不會報錯：前端對不認得的路徑一律回網頁本身的 HTML（它是在瀏覽器裡自己切換頁面的單頁應用，SPA），所以拿到一整頁 HTML 就代表路徑錯了。
+要記的只有一件事：資料 API 全部用 POST，而且至少要帶 `{"filters":{}}`，送空物件 `{}` 會回 500。路徑打錯也不會回報錯誤：前端對不認得的路徑一律回網頁本身的 HTML（它是在瀏覽器裡自己切換頁面的單頁應用，SPA），所以拿到一整頁 HTML 就代表路徑錯了。
 
 ```bash
 kubectl -n kube-system port-forward svc/hami-webui 13000:3000
@@ -392,6 +397,15 @@ count = 6
 
 ## 步驟 6:用量顯示 0——把用量資料接通
 
+在已連上本章叢集的本機終端機，將 Prometheus 的 9090 埠轉到本機 19090，並保持此終端機開啟（依官方文件補上，本課沒有實跑；語法見 [Kubernetes 1.35 port-forward 文件](https://v1-35.docs.kubernetes.io/docs/reference/kubectl/generated/kubectl_port-forward/)）：
+
+```bash
+kubectl -n kube-system port-forward \
+  svc/hami-webui-kube-prometheus-prometheus 19090:9090
+```
+
+在本機瀏覽器開啟 `http://127.0.0.1:19090/targets` 查看抓取對象與狀態。
+
 上面任務列表裡的 `mem` 和 `cores` 都是配額。同一份回應裡另有一組用量欄位，此時六顆全是 0。步驟 3 已經修好後端的位址，所以這次不是連不上 Prometheus。先看 Prometheus 有沒有抓到資料，它自己的 target 頁面（Prometheus 定期去抓的對象清單）五個都是 `up`：
 
 ```text
@@ -402,11 +416,18 @@ hami-device-plugin-monitor  10.244.2.201:9394  up
 hami-webui                  10.244.0.135:8000  up
 ```
 
+本章使用的 [kube-prometheus-stack 62.6.0 預設映像](https://raw.githubusercontent.com/prometheus-community/helm-charts/kube-prometheus-stack-62.6.0/charts/kube-prometheus-stack/values.yaml)是 Prometheus v2.54.1，另開本機終端機，透過 API 查詢 `hami_vgpu_memory_used_bytes` 的目前數值（依官方文件補上，本課沒有實跑；語法見 [Prometheus v2.54.1 即時查詢文件](https://github.com/prometheus/prometheus/blob/v2.54.1/docs/querying/api.md#instant-queries)）：
+
+```bash
+curl -fsS --get 'http://127.0.0.1:19090/api/v1/query' \
+  --data-urlencode 'query=hami_vgpu_memory_used_bytes'
+```
+
 在 Prometheus 裡查 `hami_vgpu_memory_used_bytes` 這個指標，也有真實數值。指標有了、Prometheus 抓得到、後端也連得上，數字卻還是 0，那問題就出在後端的查詢條件。
 
 ### 查詢條件和標籤對不上
 
-Prometheus 的每一筆指標都帶著一組標籤（label），例如這筆數字屬於哪個 namespace、哪顆 pod。查詢用的語言叫 **PromQL**，大括號裡寫標籤條件，只有標籤完全符合的資料才會被算進去。後端算每顆 pod 的 VRAM 用量時，下的查詢長這樣：
+Prometheus 的每一筆指標都帶著一組標籤（label），例如這筆數字屬於哪個 namespace、哪顆 pod。後端算每顆 pod 的 VRAM 用量時，用 PromQL 指定標籤條件：
 
 ```text
 avg(hami_vgpu_memory_used_bytes{device_uuid="GPU-…", namespace="day5-lab", pod="webui-a1", container="app"})
@@ -447,9 +468,9 @@ NAME               DESIRED   CURRENT   READY   NODE SELECTOR
 toleration-probe   0         0         0       gpu=on
 ```
 
-`DESIRED` 欄位是這個 DaemonSet 認為應該跑幾顆，這裡是 0。GPU 節點帶著 `kubernetes.azure.com/scalesetpriority=spot:NoSchedule` 這個 taint，DaemonSet 遇到不能容忍的 taint，會直接把那台節點當成「不需要跑」，不會留下 Pending 的 pod。`kubectl get pods` 什麼都看不到，`kubectl describe` 也沒有事件，沒有任何訊息提醒你少裝了。換成 dcgm-exporter，畫面上的溫度、功耗、使用率就會全空。所以驗 DaemonSet 時要看 `DESIRED`：`kubectl -n kube-system get ds hami-webui-dcgm-exporter` 的 `DESIRED` 應該等於 GPU 節點數。
+`DESIRED` 欄位是這個 DaemonSet 的預期執行數，這裡是 0。GPU 節點帶著 `kubernetes.azure.com/scalesetpriority=spot:NoSchedule` 這個 taint，DaemonSet 遇到不能容忍的 taint，會直接把那台節點當成「不需要跑」，不會留下 Pending 的 pod。`kubectl get pods` 什麼都看不到，`kubectl describe` 也沒有事件，沒有任何訊息提醒你少裝了。換成 dcgm-exporter，畫面上的溫度、功耗、使用率就會全空。所以驗 DaemonSet 時要看 `DESIRED`：`kubectl -n kube-system get ds hami-webui-dcgm-exporter` 的 `DESIRED` 應該等於 GPU 節點數。
 
-確認 dcgm-exporter 有在回報，可以透過 WebUI 自己的 PromQL 代打端點查整卡使用率。端點名稱裡的 instant-vector 指「查某一個時間點的值」，相對於查一段時間的曲線：
+確認 dcgm-exporter 有在回報，可以透過 WebUI 的 PromQL 查詢端點查整卡使用率。端點名稱裡的 instant-vector 指「查某一個時間點的值」，相對於查一段時間的曲線：
 
 ```bash
 curl -s -X POST -H 'Content-Type: application/json' -d '{"query":"DCGM_FI_DEV_GPU_UTIL"}' \
@@ -552,7 +573,7 @@ spot 節點隨時可能被 Azure 收回。Overview 截圖下方那兩張趨勢�
 printf "http://%s-kube-prometh-prometheus.%s.svc.cluster.local:9090" (fullname) (namespace)
 ```
 
-subchart(kube-prometheus-stack 62.6.0)實際建出來的 Service 叫 `...-kube-prometheus-prometheus`。chart 用的是舊版截短名稱的規則,兩邊都不會報錯。
+subchart(kube-prometheus-stack 62.6.0)實際建出來的 Service 叫 `...-kube-prometheus-prometheus`。chart 用的是舊版截短名稱的規則,兩邊都不會回報錯誤。
 
 **修法**:改用 `externalPrometheus` 明寫位址,見步驟 3。
 
@@ -572,30 +593,6 @@ subchart(kube-prometheus-stack 62.6.0)實際建出來的 Service 叫 `...-kube-p
 
 **修法**:設 `honorLabels: true`,見步驟 6。
 
-### dcgm-exporter 一顆都沒排上 spot GPU 節點,也沒有 Pending pod {#mine-4}
-
-**症狀**:溫度、功耗、整卡使用率全空,GPU 節點上沒有 dcgm-exporter 的 pod,也沒有 Pending。
-
-**原因**:chart 的 `dcgm-exporter.tolerations` 預設是 `[]`,GPU 節點帶 spot taint,DaemonSet 的 `DESIRED` 是 0。
-
-**修法**:補上和 HAMi device plugin 同一段 toleration(步驟 2 的 values 已經加了,說明見步驟 6):
-
-```yaml
-dcgm-exporter:
-  tolerations:
-    - { key: kubernetes.azure.com/scalesetpriority, operator: Equal, value: spot, effect: NoSchedule }
-```
-
-Day 0 疑難排解裡的[「device plugin 的 desired 是 0,節點沒有 `nvidia.com/gpu`」](sprint1-day0-azure-aks-foundation.md#mine-1)也是用同一個欄位判斷。
-
-### 送 `{}` 回 500 {#mine-5}
-
-**症狀**:`curl -X POST -d '{}' …/v1/nodes` 回 `{"code":500,"reason":"UNKNOWN","message":"unknown request error"}`,看起來像伺服器壞了,去查後端 log、Prometheus、RBAC 都沒問題。
-
-**原因**:API 定義寫在 repo 的 `.proto` 檔(Protocol Buffers 的定義檔,寫明每個 API 的路徑、方法和欄位),請求是 `GetAllNodesReq { Filters filters = 1; }`。送 `{}` 時 `filters` 是空值,後端沒有檢查就往下取值。
-
-**修法**:所有列表端點一律帶 `{"filters":{}}`,`/v1/containers` 另外要帶 `pageSize`(步驟 5 的寫法)。從 proto 產生 HTTP API 的服務(例如用 gRPC-gateway 或 Go 的 Kratos 框架寫的),回 500 常常是請求內容的結構不對,直接去 repo 讀 `.proto` 最快。另外 `/v1/monitor/summary` 在 v1.2.0 回 `501 method Summary not implemented`,是官方還沒實作。
-
 ## 想一想
 
 - 你接手一座叢集，WebUI 上每顆 pod 的 VRAM 配額都正常，但 `Memory Usage` 一直是 0%。你會依序查哪些地方？
@@ -610,7 +607,7 @@ HAMi-WebUI 把 HAMi 散在 pod annotation、節點物件和 metrics 裡的數字
 
 想再深入，可以從這幾份開始：
 
-- **[HAMi-WebUI 專案首頁](https://github.com/Project-HAMi/HAMi-WebUI)** —— 本章主題的原始碼,後端 `server/api/v1/*.proto` 的路由定義與 `server/internal/exporter/exporter.go` 的 PromQL 查詢都在裡面,對應疑難排解裡的[「`exported_` 前綴」](#mine-3)和[「送 `{}` 回 500」](#mine-5)。
+- **[HAMi-WebUI 專案首頁](https://github.com/Project-HAMi/HAMi-WebUI)** —— 本章主題的原始碼,後端 `server/api/v1/*.proto` 的路由定義與 `server/internal/exporter/exporter.go` 的 PromQL 查詢都在裡面,對應步驟 5 的 API 寫法和疑難排解裡的[「`exported_` 前綴」](#mine-3)。
 - **[HAMi-WebUI Helm 安裝指南](https://github.com/Project-HAMi/HAMi-WebUI/blob/main/docs/installation/helm/index.md)** —— 官方的前置條件(Prometheus > 2.8.0)與 `externalPrometheus.address` 的寫法,本章外接、自帶兩條路的出處。
 - **[Prometheus scrape_config 設定說明](https://prometheus.io/docs/prometheus/latest/configuration/configuration/)** —— `honor_labels` 的完整定義,包含「設為 false 時衝突標籤會被改名成 `exported_<原名>`」這句話,步驟 6 的標籤問題就出在這裡。
 - **[NVIDIA dcgm-exporter](https://github.com/NVIDIA/dcgm-exporter)** —— `DCGM_FI_DEV_GPU_UTIL` 等指標的定義與 DaemonSet 部署方式,卡片詳情頁的溫度、功耗、整卡使用率全部由它提供。

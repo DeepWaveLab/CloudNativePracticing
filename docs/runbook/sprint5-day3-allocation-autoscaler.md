@@ -2,7 +2,7 @@
 
 ![Agones 官方標誌](../assets/logos/agones-icon-color.svg){ align=right width="90" }
 
-Fleet 有兩台 Ready 伺服器，第一組玩家取得其中一台後，空閒容量就剩一台。總副本數仍是兩台，上一章的 Fleet 不需要再補建。這章會先把一台分配給玩家，再用 FleetAutoscaler 保留兩台 Ready，並用狀態變化確認兩個動作各自完成。
+Fleet 有兩台 Ready 伺服器，第一組玩家取得其中一台後，空閒容量就剩一台。總副本數仍是兩台，上一章的 Fleet 不需要再補建。這章會先用 FleetAutoscaler 設定預留兩台 Ready，再把一台分配給玩家並觀察補建，用狀態變化確認分配與補建各自完成。
 
 ## Allocation 把 Ready 容量變成玩家入口
 
@@ -76,7 +76,7 @@ STATE=Allocated  GS=simple-game-server-ql5ws-fbkn4  ADDR=<NODE-IP>:7040
 
 ## 步驟 3:等待 autoscaler 補回 Ready buffer
 
-allocation 之後，Ready 少了一顆。`FleetAutoscaler` 的控制迴圈再次比較目標與目前狀態後，把 replicas 拉到 3：
+allocation 之後，Ready 少了一顆。`FleetAutoscaler` 的控制迴圈再次比較目標與目前狀態後，把 replicas 拉到 3。每隔幾秒重複執行下方的 `kubectl get fleet simple-game-server -o wide`，直到 `ALLOCATED=1`、`READY=2`、`CURRENT=3`，再用 `kubectl get gameserver` 查看各實例狀態：
 
 ```console
 $ kubectl get fleet simple-game-server -o wide    # 下面節錄 DESIRED 到 AGE 欄
@@ -84,17 +84,15 @@ NAME                 DESIRED   CURRENT   ALLOCATED   READY   AGE
 simple-game-server   3         3         1           2       104s
 $ kubectl get gameserver
 simple-game-server-ql5ws-cpqgc   Ready       7263    ← buffer 新補
-simple-game-server-ql5ws-fbkn4   Allocated   7040    ← 受保護,未被縮掉
+simple-game-server-ql5ws-fbkn4   Allocated   7040
 simple-game-server-ql5ws-qdsfl   Ready       7358
 ```
 
-最後有 3 顆 server：`fbkn4` 是 Allocated，`qdsfl` 是原本留下來的 Ready，`cpqgc` 是 buffer 新補出來的 Ready。
+最後有 3 顆 server：`fbkn4` 是本次分配的實例，狀態為 Allocated，`qdsfl` 是原本留下來的 Ready，`cpqgc` 是 buffer 新補出來的 Ready。
 
 Day 2 的 `replicas: 2` 是固定宣告；裝上 autoscaler 後，replicas 改由 buffer policy 決定：allocated 數量是 0 時 desired 是 2，變成 1 時 desired 就是 3。這是 game server pool 常見的容量模型：已分配出去的 server 不算庫存，庫存是 Ready。autoscaler 另外補新的 Ready server，已分配出去的那顆維持 Allocated。
 
 補建不是同步完成的，要等 autoscaler 下一次協調，再加上新伺服器的排程與啟動。監控或測試腳本要把這段延遲算進去，不要在 allocation 回應後立刻檢查 Ready 數。
-
-這次觀察到 Allocated 實例在擴容時持續存在，沒有被替換。輸出中的「受保護」註記不能當成縮容測試：本章沒有把副本目標調小，也沒有測試節點故障。要驗證活躍對戰在維護時的行為，需要另外的測試情境。
 
 ## 想一想
 

@@ -22,7 +22,7 @@ RuntimeClass.handler → 節點 config.toml 的 runtimes.<name> → runtime_type
 
 ![本章要接起來的鏈：叢集側的 Pod 寫 runtimeClassName: wasmedge，指到 RuntimeClass wasmedge（步驟 3）；它的 handler 名稱要逐字對應節點 config.toml 裡的 runtimes.wasmedge（步驟 2，以橘色強調），那一段的 runtime_type 決定 containerd 去找哪個 shim；shim 是 /usr/local/bin/containerd-shim-wasmedge-v1（步驟 1），由它執行 .wasm](../assets/diagrams/s3d4-chain.svg)
 
-我們可以從圖上看到兩件事：
+圖中的設定範圍與作用如下：
 
 1. 下半部的兩樣東西（shim 執行檔、config.toml 的那一段）都在節點上，每一台要跑 wasm 的節點都得各做一次。上半部的 RuntimeClass 只要在叢集建一次。
 2. 中間那段設定是唯一會讓 containerd 改變行為的地方。後面每一步都會比對節點，看這件事是不是真的。
@@ -31,7 +31,7 @@ RuntimeClass.handler → 節點 config.toml 的 runtimes.<name> → runtime_type
 
 AKS 自己的 WASI node pool 已經退役，Day 1 對它下過指令，拿到的是 `InvalidWorkloadRuntimeSettingError`。`az` 的 `--help` 和訂閱層的 feature flag 到現在都還列著它，不能拿來判斷這個功能還在不在，見[疑難排解：`--help` 和 feature flag 都說有](#mine-1)。
 
-WasmEdge 官網有兩份相關文件。用 crun 的那份（`…/kubernetes/kubernetes-containerd-crun`）步驟寫的是 `go1.17.1`、`git checkout v1.22.2`、`./hack/local-up-cluster.sh`，是 Kubernetes 1.22 時代的做法，本課的叢集是 1.35.6，這條路本課沒有實測。另一份 containerd 整合頁（`…/cri-runtime/containerd`）只說「containerd-shim `runwasi` 專案支援 WasmEdge」，就轉介到 runwasi。所以接下來照 runwasi 走。
+WasmEdge 的 containerd 整合文件轉介到 runwasi，本章採用這條路，透過 shim 接上節點既有的 containerd。
 
 ### 節點上原本有什麼
 
@@ -49,10 +49,10 @@ $ (逐一 command -v)
 $ find /usr /opt /var/lib -maxdepth 4 -type f -name "*wasm*"
 /usr/share/mime/application/wasm.xml              ← 命中數 1
 $ find /usr/bin /usr/local/bin -maxdepth 1 -type f | wc -l
-947                                               ← 證明 find 有在工作,上面那個 1 是真的
+947
 ```
 
-所有 wasm 相關的執行檔都是 `NOT FOUND`，搜尋範圍內只找到一個 MIME 類型定義檔。第二個 `find` 是 Day 3 用過的做法：拿「找不到」當結論之前，先證明搜尋本身有看到東西（947 個檔案）。
+所有 wasm 相關的執行檔都是 `NOT FOUND`，搜尋範圍內只找到一個 MIME 類型定義檔。
 
 再看 `/etc/containerd/` 底下：只有 `config.toml` 與 `kubenet_template.conf`，沒有放額外設定檔的子目錄，`config.toml` 裡也沒有 `imports`。所以要加 handler，就只能直接改 `config.toml` 這一個檔。
 
@@ -89,7 +89,7 @@ snap() {
 snap s0-baseline
 ```
 
-`ls -l` 只列寫死的完整路徑，不用 `grep runc` 這類模糊比對，Day 3 遇過 `grep runc` 連 `runcon`、`truncate` 都抓進來。之後每一步做完就 `snap s1-…`、`snap s2-…`，再用 `diff` 逐份比對前一次。
+`ls -l` 使用執行檔的完整路徑，避免模糊比對混入其他檔案。之後每一步做完就 `snap s1-…`、`snap s2-…`，再用 `diff` 逐份比對前一次。
 
 ## 步驟 1：把 shim 放上節點 {#install-shim}
 
@@ -199,9 +199,18 @@ $ containerd -c /tmp/cfg-2x.toml config dump      # io.containerd.cri.v1.runtime
     112:    runtime_type = 'io.containerd.wasmedge.v1'
 ```
 
-1.x 寫法那一段整個不見了，containerd 沒印任何錯誤或警告。這裡的「零命中」可以信，因為同一份輸出有 308 行，而且和基準逐字相同，表示指令本身有正常執行。2.x 寫法則出現在有效設定的第 111–112 行。
+加入 1.x 路徑的副本解析後，`wasmedge` 設定沒有出現在有效設定裡，containerd 未針對被忽略的設定發出警告。stderr 有一則設定從 version 2 遷移的警告，與這段設定被忽略是兩件事。這份有效設定共 308 行，與基準逐字相同；2.x 寫法則出現在有效設定的第 111–112 行。
 
-更容易誤判的是，1.x 路徑裡的 `io.containerd.grpc.v1.cri` 這個名字在 2.3.3 的有效設定裡還找得到，所以 grep 這個鍵不能證明舊教學適用，見[疑難排解：1.x 路徑被靜默丟棄](#mine-2)。
+<span id="mine-2"></span>在這台 containerd 2.3.3 節點的有效設定裡，`io.containerd.grpc.v1.cri` 仍存在，但只剩 streaming server 的欄位，runtime 設定已移到 `io.containerd.cri.v1.runtime`。因此，搜尋到舊 plugin 名稱，不代表 `runtimes.wasmedge` 已生效。以下節錄舊 plugin 的有效設定：
+
+```console
+  [plugins.'io.containerd.grpc.v1.cri']
+    disable_tcp_service = true
+    stream_server_address = '127.0.0.1'
+    …                                    ← runtimes 已經搬走了
+```
+
+對加入舊路徑的副本執行 `containerd config migrate`，輸出雖然從 version 2 轉成 version 4，仍沒有 `wasmedge` 設定。套用前要在副本的 `config dump` 裡確認完整的 handler 設定，再依下一節重啟 containerd。
 
 ### 套用設定，讓 containerd 重新讀取
 
@@ -222,7 +231,7 @@ $ kubectl get node -o jsonpath='{…runtimeHandlers}'
 ['', 'runc', 'untrusted', 'wasmedge']           ← 生效
 ```
 
-`reload` 直接被 systemd 拒絕；送 `SIGHUP` 不會報錯，但 handler 清單沒變；`systemctl restart` 之後，kubelet 回報的清單才多了 `wasmedge`。
+`reload` 直接被 systemd 拒絕；送 `SIGHUP` 不會顯示錯誤，但 handler 清單沒變；`systemctl restart` 之後，kubelet 回報的清單才多了 `wasmedge`。
 
 重啟 containerd 聽起來會影響節點上所有的容器。實際比對重啟前後全叢集 pod 的 `RESTARTS`，再看節點的 `Ready` 狀態：
 
@@ -481,7 +490,7 @@ $ kubectl -n wasmlab logs wasmedge-wasmcloud-cmd
 
 `Bytecode offset: 0x00000004` 就是圖上箭頭指的位置：WasmEdge 讀完 `\0asm`，看到第 5 個位元組是 component 的版本號，就停下來了。第二行訊息也直接說出原因：要開啟 Component Model 才能載入。這兩種失敗的分辨方式，見[疑難排解：同一個映像兩種失敗](#mine-4)。
 
-WasmEdge 執行期本身支援 Component Model，但 runwasi 的 wasmedge shim 沒有把它打開，也沒有任何 pod annotation、環境變數或 containerd 設定可以打開。同一個 repo 的 wasmtime shim 有 Component Model 相關實作，可作為下一個驗證選項；本章沒有驗證它能執行這份 wasmCloud 映像與所需介面。原始碼的證據見[疑難排解：shim 沒有開 component model](#mine-5)。
+本章使用的 wasmedge shim v0.6.1 透過 `wasmedge_sdk` 的 `Module::from_bytes` 載入 core module，使用預設設定，沒有啟用 Component Model，也未提供 pod annotation、環境變數或 containerd 設定來啟用。這個限制針對本章採用的 shim 版本；WasmEdge 執行期本身支援 Component Model，不代表這個 shim 能載入 component。
 
 ### 反方向：把 core module 交給 wasmCloud
 
@@ -585,23 +594,6 @@ WasmWasi. WebAssembly System Interface (WASI) node pools (preview) are no longer
 
 **修法**：先查官方退役公告，不要把 `--help` 或 feature flag 的狀態當成服務仍可用的證明。本次建立請求被拒絕且沒有建立 node pool，這個結果不能推廣成所有預覽功能請求都不會產生資源。錯誤訊息建議改用 SpinKube，那是本 sprint Day 6–7 的另一條路，不是 WasmEdge 的替代方案。另外，註冊 feature flag 是訂閱層級的變更（Day 1 說明過為什麼不建議），確認用完要 `az feature unregister`。
 
-### 1.x 的 plugin 路徑被靜默丟棄，而那個鍵還 grep 得到 {#mine-2}
-
-**症狀**：照多數教學（以及 runwasi 自己的 CI）寫 `[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.wasmedge]`，containerd 不報錯，但有效設定裡沒有這一段，handler 不會出現。
-
-**原因**：containerd 2.x 把 runtime 設定搬到 `io.containerd.cri.v1.runtime` 底下，見步驟 2。容易誤判的地方是 `io.containerd.grpc.v1.cri` 這個 plugin 在 2.3.3 的有效設定裡還在，只剩 streaming server 的五個欄位：
-
-```console
-  [plugins.'io.containerd.grpc.v1.cri']
-    disable_tcp_service = true
-    stream_server_address = '127.0.0.1'
-    …                                    ← runtimes 已經搬走了
-```
-
-所以 grep 得到這個鍵，不代表那篇教學適用。`containerd config migrate` 也轉不過來：輸出 308 行、`wasmedge` 零命中，`version` 從 2 升到 4，那一段直接消失。
-
-**修法**：改節點之前，先在副本上跑 `containerd -c <副本> config dump`，確認那一段出現在有效設定裡（步驟 2）。改完要 `systemctl restart containerd`，`reload` 與 `SIGHUP` 都不會讓新 handler 生效。
-
 ### pod 停在 `parent snapshot … does not exist` {#mine-3}
 
 **症狀**：shim 裝好、kubelet 也回報了 `wasmedge` handler，pod 卻是 `CreateContainerError`，訊息是 `parent snapshot sha256:… does not exist: not found`，而事件顯示映像拉成功了。
@@ -629,7 +621,6 @@ $ grep -rniE "component_model|ComponentModel|enable_component" crates/
 containerd-shim-wasmtime/src/instance.rs:69:   config.wasm_component_model(true);
 containerd-shim-wasmtime/src/instance.rs:141:  config.wasm_component_model(true);
 containerd-shim-wasmtime/src/tests.rs:333:     config.wasm_component_model(true);
-命中 3 行;crates 下共 92 個 .rs 檔(證明輸入非空)
 ```
 
 三行全部在 wasmtime 的 shim 裡，wasmedge 的 shim 一行都沒有。

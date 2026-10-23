@@ -26,7 +26,7 @@ WasmEdge 與 SpinKube 的路線則讓 Pod 指定 `runtimeClassName`。Kubernetes
 
 WasmEdge 的手動路線同樣經過 Pod、RuntimeClass 與 shim，不能只因為要用 Kubernetes 物件就把它排除。它在這門課的用途是讓你直接看到每一層的設定，並執行 core module。若應用需要 component 格式，先回看 [Day 4 的格式差異](sprint3-day4-wasmedge.md)，確認程式產物能被選定的執行期接受。
 
-Day 7 的驗證涵蓋 Deployment、Service 與日誌；產出的 `resources` 是空的，沒有實測 CPU／記憶體限制。正式環境還會用到的 HPA、PDB、NetworkPolicy，這門課沒有逐項實測，導入時需要連同你的服務一起驗證。
+Day 7 的驗證涵蓋 Deployment、Service 與日誌；產出的 `resources` 是空的，沒有實測 CPU／記憶體限制。正式環境還會用到 HPA、PDB、NetworkPolicy。HPA（HorizontalPodAutoscaler）依觀測指標自動調整副本數；PDB（PodDisruptionBudget）在透過 Eviction API 進行自願性中斷時，限制可同時不可用的副本數，詳見 [HPA 官方文件](https://kubernetes.io/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/)與 [PDB 官方文件](https://kubernetes.io/docs/concepts/workloads/pods/disruptions/)。這些功能在這門課沒有逐項實測，導入時需要連同你的服務一起驗證。
 
 ## 想用 wasmCloud 組合元件時
 
@@ -42,7 +42,7 @@ Day 3 驗證了跨節點的 host 與共享儲存，尚未驗證跨雲部署、�
 
 兩批各 50 次取樣沒有得到一致的速度差異判定。因此，這組資料不足以支持「換成 WasmEdge 就會明顯縮短啟動時間」。它也沒有直接量測 SpinKube 的同等工作負載，不能把 WasmEdge 的數字當成 SpinKube 的效能結論。
 
-記憶體也要看節點總量。Day 5 由 1–3 個並行容器的 PSS 樣本推估，WasmEdge 的固定項約 38.8 MiB，每增加一個容器約增加 9.3 MiB；runc 對照組約為 0.1 MiB 與 4.5 MiB。PSS 是依共享比例分攤的實體記憶體；這些固定項是從樣本推估，不是零容器時直接量到的常駐用量。在這組小程式與版本組合裡，wasm 沒有呈現比較省記憶體的結果。應用本身變大、執行時間改變，結果是否不同，要用實際工作負載重新量。
+以下比較 shim 行程的 PSS；容器自身的 cgroup 用量另行採集，這裡的數字不代表節點總用量。Day 5 由 1–3 個並行容器下的 shim PSS 樣本推估，WasmEdge 的固定項約 38.8 MiB，每增加一個容器約增加 9.3 MiB；runc 對照組約為 0.1 MiB 與 4.5 MiB。PSS 是依共享比例分攤的實體記憶體；這些固定項是從樣本推估，不是零容器時直接量到的常駐用量。在這組小程式與版本組合裡，WasmEdge 的 shim 沒有呈現比較省記憶體的結果。應用本身變大、執行時間改變，結果是否不同，要用實際工作負載重新量。
 
 wasmCloud 沒有可與上述測試直接比較的冷啟動與每元件記憶體資料，映像大小也沒有完成一致的比較。三條路線的效能排名，這門課給不出來。
 

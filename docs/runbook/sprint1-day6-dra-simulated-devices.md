@@ -6,7 +6,7 @@
 
 這一章介紹 Kubernetes 裡另一種要裝置的寫法：Dynamic Resource Allocation（DRA，動態資源配置）。我們不開真卡，改用官方的模擬 driver 在一台 CPU 節點上變出幾顆假的 GPU，把「挑符合條件的裝置」「排除某個型號」「兩顆 pod 共用同一顆裝置」都實際做一次。
 
-讀完之後，遇到「要符合某些條件的裝置」或「兩顆 pod 要用同一顆裝置」這類需求時，你能決定條件該寫在 DeviceClass 還是 claim 裡，以及該用具名 claim 還是 template。
+讀完之後，你能判斷裝置條件該由管理者統一定義，還是由個別工作提出，也能選擇讓兩顆 pod 共用一顆裝置，或各自取得裝置的寫法。
 
 ## 整數寫不出條件
 
@@ -22,11 +22,11 @@ DRA 換了一個做法：裝置不再是節點上的一個數字，而是一個�
 
 模擬裝置學得到東西，是因為 DRA 從頭到尾的流程跟真卡一樣：driver 回報裝置、使用者寫條件、排程器挑一顆、節點上的 driver 把裝置交給容器。唯一的差別在最後一步：真卡要把 `/dev/nvidia*` 和函式庫掛進容器，模擬裝置只放進幾個環境變數。這一章要學的是前面那一整段。
 
-官方 quickstart 用的是 kind（Kubernetes in Docker，在自己電腦上用 Docker 容器跑一座叢集的工具），在本機 build 映像再載入叢集。我們改在 Day 0 建好的 AKS 上臨時開一個 CPU 的 spot 節點池 `drasim`（spot 是 Day 0 用過的折扣 VM，Azure 需要容量時可能把它收回），用完就刪。
+你需要 Day 0 建好的 AKS，以及一個只有一台 CPU 節點的 spot 節點池 `drasim`（spot 是 Day 0 用過的折扣 VM，Azure 需要容量時可能把它收回）。步驟 1 會建立這個節點池，完成練習後再刪除；本章不需要 GPU 節點。
 
 ## 步驟 1:先確認映像拉得到，再開節點
 
-不走 kind，就要先確定有公開的映像可以直接拉；如果沒有，就得自己 build，那是另一件事。先把 driver 的原始碼 clone 下來，切到這一章用的 `v0.4.0` tag。安裝用的 chart 和後面要讀的原始碼都在裡面，這一章後面的指令都在這個目錄裡執行：
+先把 driver 的原始碼 clone 下來，使用這一章的 `v0.4.0` tag。安裝用的 chart 和後面要讀的原始碼都在裡面。後續指令都在 `dra-example-driver` 目錄執行，chart 的相對路徑是 `./deployments/helm/dra-example-driver`：
 
 ```bash
 git clone --branch v0.4.0 --depth 1 https://github.com/kubernetes-sigs/dra-example-driver.git
@@ -61,7 +61,7 @@ $ az aks nodepool add -g <resource-group> --cluster-name <cluster> -n drasim \
 
 ## 步驟 2:裝 driver，讀出第一份 ResourceSlice
 
-先寫安裝值。大部分欄位一看就懂：用哪個映像、每個節點模擬幾顆裝置、driver 要跑在哪個節點池。
+先寫安裝值。`image` 指定映像來源與版本，`kubeletPlugin.numDevices` 設定每個節點模擬幾顆裝置，`nodeSelector` 與 `tolerations` 讓 driver 排到帶有 spot taint 的 `drasim` 節點。
 
 值檔裡有幾行註解提到 `DRA` 開頭的名字，例如 `DRAConsumableCapacity`。這些是 DRA 周邊功能的開關名稱：`BETA=1` 表示這項功能在 beta 階段，而且這座叢集有開；`which is 0` 表示沒開。註解寫 0 的，表示它依賴的功能在這座叢集沒開，所以把對應的設定關掉。步驟 3 會實際查出這些開關的狀態：
 
@@ -202,9 +202,9 @@ kubernetes_feature_enabled{name="DRASchedulerFilterTimeout",stage="BETA"} 1
 
 第一行的 partition 是把一顆裝置切成幾份；第二行是多個 claim 按容量分用同一顆裝置。三個在這座叢集上都用不了。還能用的是 `gpuDeviceStatus`，它依賴的 `DRAResourceClaimDeviceStatus` 是 beta、已開啟，作用是讓 driver 把裝置資訊寫回 claim。
 
-在託管叢集上做 DRA，這張表最好在設計示範或規劃功能之前就先查。先裝再查的話，想做的事多半做不了，而且失敗的樣子常常是「設定寫了，什麼都沒發生」（見[疑難排解：做出裝置差異的設定都依賴被關掉的 alpha 功能](#mine-1)）。
+在託管叢集上做 DRA，這張表最好在設計示範或規劃功能之前就先查。先裝再查的話，想做的事多半做不了，而且失敗的樣子常常是「設定寫了，什麼都沒發生」。
 
-### 把差異做在 driver 這一層
+### 把差異做在 driver 這一層 {#mine-1}
 
 裝置層做不出差異，就利用步驟 2 最後提到的網域。chart 有一個 `driverName` 設定，沒寫時用預設的 `gpu.example.com`，它同時決定 driver 名、屬性網域和 chart 建立的 DeviceClass 名稱。同一份 chart、同一種模擬裝置，只把 `driverName` 換成 `retro-gpu.example.com`、裝置數改成 3，再裝一次。新 driver 的裝置屬性掛在另一個網域下，等於多了一批「另一個廠牌」的卡。
 
@@ -264,7 +264,7 @@ retro-gpu.example.com   gpu-0 … gpu-2   model=LATEST-GPU-MODEL   mem=80Gi     
 
 ## 步驟 4:六組示範，把核心 API 走一遍
 
-接下來的測試 pod 都固定在 `drasim` 上（`nodeSelector: pool=drasim` 加 spot toleration）。映像用 `registry.k8s.io/e2e-test-images/busybox:1.36.1-1`，避開 Docker Hub 的拉取次數限制。容器一啟動先執行 `env | sort` 再睡著，所以 driver 往容器裡放了什麼，看 pod log 就知道。
+接下來的測試 pod 都固定在 `drasim` 上（`nodeSelector: pool=drasim` 加 spot toleration）。映像用 `registry.k8s.io/e2e-test-images/busybox:1.36.1-1`，避開 Docker Hub 的拉取次數限制。容器一啟動先執行 `env | sort`，再用 `sleep 9999 & wait` 保持執行，所以 driver 往容器裡放了什麼，看 pod log 就知道。
 
 ### 4a. 最小可行：一份 template、一顆 pod、一顆裝置
 
@@ -279,7 +279,7 @@ retro-gpu.example.com   gpu-0 … gpu-2   model=LATEST-GPU-MODEL   mem=80Gi     
 3. ResourceClaim、ResourceClaimTemplate 和 Pod 都在使用者這一端。pod 可以寫 template，讓每顆 pod 各產生一份 claim；也可以直接引用一份事先建好的具名 claim（虛線）。4e 會比較這兩種寫法。
 4. 排程器的 `dynamicresources` 外掛把供給和需求對起來，挑好之後寫回 claim 的 status。
 
-pod 這一端的寫法分兩段：pod 層的 `spec.resourceClaims` 宣告這顆 pod 會用到哪些 claim、各從哪來；容器層的 `resources.claims` 再按名字引用，表示哪個容器要用。下面是完整的檔案，裡面有三個物件：一個 namespace、一份只說「從 `gpu.example.com` 這一類裡要一顆」的 ResourceClaimTemplate，以及引用它的 `pod0`。pod 除了上面講的兩段，還照步驟 1 的標籤和 taint 寫了 `nodeSelector` 與 toleration；容器一啟動先執行 `env | sort` 把環境變數印到 log，再睡著等待：
+pod 這一端的寫法分兩段：pod 層的 `spec.resourceClaims` 宣告這顆 pod 會用到哪些 claim、各從哪來；容器層的 `resources.claims` 再按名字引用，表示哪個容器要用。下面是完整的檔案，裡面有三個物件：一個 namespace、一份只說「從 `gpu.example.com` 這一類裡要一顆」的 ResourceClaimTemplate，以及引用它的 `pod0`。pod 除了上面講的兩段，還照步驟 1 的標籤和 taint 寫了 `nodeSelector` 與 toleration；容器一啟動先執行 `env | sort` 把環境變數印到 log，再用 `sleep 9999 & wait` 保持執行：
 
 ```bash
 cat > 03-a-basic-claimtemplate.yaml <<'EOF'
@@ -383,15 +383,93 @@ driver 是透過 **CDI**（Container Device Interface，描述「要讓容器用
 
 ### 4b. 用 CEL 設門檻：一個挑得到，一個挑不到
 
-現在回到開場的需求：「VRAM 40Gi 以上」。從這一組開始，Namespace 和 Pod 的寫法都跟 4a 一樣，只列出不同的部分；寫成檔案後同樣用 `kubectl apply -f` 套用。條件寫在 claim 的 request 裡，用的是步驟 2 看過的 CEL。排程器會拿每一顆候選裝置代入運算式算一次，結果是 true 的才留下。
+現在回到開場的需求：「VRAM 40Gi 以上」。接下來依序套用 4b 到 4e 的檔案，保留前面已建立的物件，讓後續結果對應累積的裝置配置。條件寫在 claim 的 request 裡，用的是步驟 2 看過的 CEL。排程器會拿每一顆候選裝置代入運算式算一次，結果是 true 的才留下。
 
 下面兩份 template 只差一個數字。比較記憶體大小要用 Kubernetes 為 CEL 加的 `quantity()` 和 `.compareTo()`，**quantity 不能直接跟字串比**，不能寫成 `>= '40Gi'`，要先用 `quantity('40Gi')` 轉型，再用 `compareTo` 比較：
 
+將以下內容存成 `03-b-cel-memory.yaml`，再套用：
+
 ```yaml
-# gpu-mem-40gi:  80Gi >= 40Gi  → all 8 devices qualify
-- cel: { expression: "device.capacity['gpu.example.com'].memory.compareTo(quantity('40Gi')) >= 0" }
-# gpu-mem-160gi: 80Gi < 160Gi  → none qualify
-- cel: { expression: "device.capacity['gpu.example.com'].memory.compareTo(quantity('160Gi')) >= 0" }
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dra-3b
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  namespace: dra-3b
+  name: gpu-mem-40gi
+spec:
+  spec:
+    devices:
+      requests:
+        - name: gpu
+          exactly:
+            deviceClassName: gpu.example.com
+            selectors:
+              - cel:
+                  expression: "device.capacity['gpu.example.com'].memory.compareTo(quantity('40Gi')) >= 0"
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  namespace: dra-3b
+  name: gpu-mem-160gi
+spec:
+  spec:
+    devices:
+      requests:
+        - name: gpu
+          exactly:
+            deviceClassName: gpu.example.com
+            selectors:
+              - cel:
+                  expression: "device.capacity['gpu.example.com'].memory.compareTo(quantity('160Gi')) >= 0"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: dra-3b
+  name: pod-ok
+spec:
+  nodeSelector: {pool: drasim}
+  tolerations:
+    - {key: kubernetes.azure.com/scalesetpriority, operator: Equal, value: spot, effect: NoSchedule}
+  containers:
+    - name: ctr0
+      image: registry.k8s.io/e2e-test-images/busybox:1.36.1-1
+      command: ["sh", "-c"]
+      args: ["env | sort; trap 'exit 0' TERM; sleep 9999 & wait"]
+      resources:
+        claims: [{name: gpu}]
+  resourceClaims:
+    - name: gpu
+      resourceClaimTemplateName: gpu-mem-40gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: dra-3b
+  name: pod-impossible
+spec:
+  nodeSelector: {pool: drasim}
+  tolerations:
+    - {key: kubernetes.azure.com/scalesetpriority, operator: Equal, value: spot, effect: NoSchedule}
+  containers:
+    - name: ctr0
+      image: registry.k8s.io/e2e-test-images/busybox:1.36.1-1
+      command: ["sh", "-c"]
+      args: ["env | sort; trap 'exit 0' TERM; sleep 9999 & wait"]
+      resources:
+        claims: [{name: gpu}]
+  resourceClaims:
+    - name: gpu
+      resourceClaimTemplateName: gpu-mem-160gi
+```
+
+```bash
+kubectl apply -f 03-b-cel-memory.yaml
 ```
 
 每顆裝置都是 80Gi，所以第一份八顆都合格，第二份一顆都不合格。兩顆 pod 各用一份：
@@ -423,6 +501,124 @@ Warning  FailedScheduling  default-scheduler
 | `pod-not-bleeding-edge` | `model != 'BLEEDING-EDGE-GPU'`(排掉不存在的型號) | 8 顆全合格 | Running,配到 `gpu-3` |
 | `pod-not-latest` | `model != 'LATEST-GPU-MODEL'`(排掉唯一存在的型號) | 全被排掉 | Pending |
 
+將以下內容存成 `03-c-cel-exclude.yaml`，再套用：
+
+```yaml
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: mixed-gpu.example.com
+spec:
+  selectors:
+    - cel:
+        expression: "device.driver == 'gpu.example.com' || device.driver == 'retro-gpu.example.com'"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dra-3c
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  namespace: dra-3c
+  name: not-retro
+spec:
+  spec:
+    devices:
+      requests:
+        - name: gpu
+          exactly:
+            deviceClassName: mixed-gpu.example.com
+            selectors:
+              - cel:
+                  expression: "device.driver != 'retro-gpu.example.com'"
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  namespace: dra-3c
+  name: not-bleeding-edge
+spec:
+  spec:
+    devices:
+      requests:
+        - name: gpu
+          exactly:
+            deviceClassName: gpu.example.com
+            selectors:
+              - cel:
+                  expression: "device.attributes['gpu.example.com'].model != 'BLEEDING-EDGE-GPU'"
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  namespace: dra-3c
+  name: not-latest
+spec:
+  spec:
+    devices:
+      requests:
+        - name: gpu
+          exactly:
+            deviceClassName: gpu.example.com
+            selectors:
+              - cel:
+                  expression: "device.attributes['gpu.example.com'].model != 'LATEST-GPU-MODEL'"
+---
+apiVersion: v1
+kind: Pod
+metadata: {namespace: dra-3c, name: pod-not-retro}
+spec:
+  nodeSelector: {pool: drasim}
+  tolerations:
+    - {key: kubernetes.azure.com/scalesetpriority, operator: Equal, value: spot, effect: NoSchedule}
+  containers:
+    - name: ctr0
+      image: registry.k8s.io/e2e-test-images/busybox:1.36.1-1
+      command: ["sh", "-c"]
+      args: ["env | sort; trap 'exit 0' TERM; sleep 9999 & wait"]
+      resources: {claims: [{name: gpu}]}
+  resourceClaims:
+    - {name: gpu, resourceClaimTemplateName: not-retro}
+---
+apiVersion: v1
+kind: Pod
+metadata: {namespace: dra-3c, name: pod-not-bleeding-edge}
+spec:
+  nodeSelector: {pool: drasim}
+  tolerations:
+    - {key: kubernetes.azure.com/scalesetpriority, operator: Equal, value: spot, effect: NoSchedule}
+  containers:
+    - name: ctr0
+      image: registry.k8s.io/e2e-test-images/busybox:1.36.1-1
+      command: ["sh", "-c"]
+      args: ["env | sort; trap 'exit 0' TERM; sleep 9999 & wait"]
+      resources: {claims: [{name: gpu}]}
+  resourceClaims:
+    - {name: gpu, resourceClaimTemplateName: not-bleeding-edge}
+---
+apiVersion: v1
+kind: Pod
+metadata: {namespace: dra-3c, name: pod-not-latest}
+spec:
+  nodeSelector: {pool: drasim}
+  tolerations:
+    - {key: kubernetes.azure.com/scalesetpriority, operator: Equal, value: spot, effect: NoSchedule}
+  containers:
+    - name: ctr0
+      image: registry.k8s.io/e2e-test-images/busybox:1.36.1-1
+      command: ["sh", "-c"]
+      args: ["env | sort; trap 'exit 0' TERM; sleep 9999 & wait"]
+      resources: {claims: [{name: gpu}]}
+  resourceClaims:
+    - {name: gpu, resourceClaimTemplateName: not-latest}
+```
+
+```bash
+kubectl apply -f 03-c-cel-exclude.yaml
+```
+
 三份 claim 實際配到的裝置：
 
 ```console
@@ -440,6 +636,52 @@ pod-not-retro-gpu-24pkg           gpu.example.com/gpu-2
 ### 4d. 一個 request 要兩顆
 
 在 `exactly` 裡加上 `allocationMode: ExactCount` 和 `count: 2`，一個 request 就會要兩顆：
+
+將以下內容存成 `03-d-multi-device.yaml`，再套用：
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dra-3d
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  namespace: dra-3d
+  name: two-gpus
+spec:
+  spec:
+    devices:
+      requests:
+        - name: gpus
+          exactly:
+            deviceClassName: gpu.example.com
+            allocationMode: ExactCount
+            count: 2
+---
+apiVersion: v1
+kind: Pod
+metadata: {namespace: dra-3d, name: pod-two}
+spec:
+  nodeSelector: {pool: drasim}
+  tolerations:
+    - {key: kubernetes.azure.com/scalesetpriority, operator: Equal, value: spot, effect: NoSchedule}
+  containers:
+    - name: ctr0
+      image: registry.k8s.io/e2e-test-images/busybox:1.36.1-1
+      command: ["sh", "-c"]
+      args: ["env | sort; trap 'exit 0' TERM; sleep 9999 & wait"]
+      resources: {claims: [{name: gpus}]}
+  resourceClaims:
+    - {name: gpus, resourceClaimTemplateName: two-gpus}
+```
+
+```bash
+kubectl apply -f 03-d-multi-device.yaml
+```
+
+套用後，查看配置結果與容器 log：
 
 ```console
 $ kubectl -n dra-3d get resourceclaims -o json | jq …
@@ -464,6 +706,106 @@ GPU_DEVICE_GPU_5_RESOURCE_CLAIM=7ba5eeb3-…
 
 - 左邊先建一份**具名 ResourceClaim** `shared-gpu`，也就是使用者自己建立、有固定名字的 claim。兩顆 pod 都寫 `resourceClaimName: shared-gpu`。
 - 右邊是一份 ResourceClaimTemplate，兩顆 pod 都寫 `resourceClaimTemplateName`，各自產生一份。
+
+將以下內容存成 `03-e-sharing.yaml`，再套用：
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dra-3e
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaim
+metadata:
+  namespace: dra-3e
+  name: shared-gpu
+spec:
+  devices:
+    requests:
+      - name: gpu
+        exactly:
+          deviceClassName: gpu.example.com
+---
+apiVersion: v1
+kind: Pod
+metadata: {namespace: dra-3e, name: share-a}
+spec:
+  nodeSelector: {pool: drasim}
+  tolerations:
+    - {key: kubernetes.azure.com/scalesetpriority, operator: Equal, value: spot, effect: NoSchedule}
+  containers:
+    - name: ctr0
+      image: registry.k8s.io/e2e-test-images/busybox:1.36.1-1
+      command: ["sh", "-c"]
+      args: ["env | sort; trap 'exit 0' TERM; sleep 9999 & wait"]
+      resources: {claims: [{name: gpu}]}
+  resourceClaims:
+    - {name: gpu, resourceClaimName: shared-gpu}
+---
+apiVersion: v1
+kind: Pod
+metadata: {namespace: dra-3e, name: share-b}
+spec:
+  nodeSelector: {pool: drasim}
+  tolerations:
+    - {key: kubernetes.azure.com/scalesetpriority, operator: Equal, value: spot, effect: NoSchedule}
+  containers:
+    - name: ctr0
+      image: registry.k8s.io/e2e-test-images/busybox:1.36.1-1
+      command: ["sh", "-c"]
+      args: ["env | sort; trap 'exit 0' TERM; sleep 9999 & wait"]
+      resources: {claims: [{name: gpu}]}
+  resourceClaims:
+    - {name: gpu, resourceClaimName: shared-gpu}
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata: {namespace: dra-3e, name: own-gpu}
+spec:
+  spec:
+    devices:
+      requests:
+        - name: gpu
+          exactly:
+            deviceClassName: gpu.example.com
+---
+apiVersion: v1
+kind: Pod
+metadata: {namespace: dra-3e, name: own-a}
+spec:
+  nodeSelector: {pool: drasim}
+  tolerations:
+    - {key: kubernetes.azure.com/scalesetpriority, operator: Equal, value: spot, effect: NoSchedule}
+  containers:
+    - name: ctr0
+      image: registry.k8s.io/e2e-test-images/busybox:1.36.1-1
+      command: ["sh", "-c"]
+      args: ["env | sort; trap 'exit 0' TERM; sleep 9999 & wait"]
+      resources: {claims: [{name: gpu}]}
+  resourceClaims:
+    - {name: gpu, resourceClaimTemplateName: own-gpu}
+---
+apiVersion: v1
+kind: Pod
+metadata: {namespace: dra-3e, name: own-b}
+spec:
+  nodeSelector: {pool: drasim}
+  tolerations:
+    - {key: kubernetes.azure.com/scalesetpriority, operator: Equal, value: spot, effect: NoSchedule}
+  containers:
+    - name: ctr0
+      image: registry.k8s.io/e2e-test-images/busybox:1.36.1-1
+      command: ["sh", "-c"]
+      args: ["env | sort; trap 'exit 0' TERM; sleep 9999 & wait"]
+      resources: {claims: [{name: gpu}]}
+  resourceClaims:
+    - {name: gpu, resourceClaimTemplateName: own-gpu}
+```
+
+```bash
+kubectl apply -f 03-e-sharing.yaml
+```
 
 ```console
 $ kubectl -n dra-3e get pods
@@ -505,6 +847,23 @@ dra-3e/own-b-gpu-j5qrn                   (空)             pods=(空)           
 
 我們可以從圖上看到，同樣兩顆 pod，左邊只用掉一顆裝置，右邊要兩顆。差別只在 manifest 裡的一個欄位名：`resourceClaimName` 或 `resourceClaimTemplateName`。要讓兩顆 pod 共用一顆裝置，就用具名 claim；要每顆 pod 各拿各的，就用 template。
 
+#### 刪除 pod 前，先看節點物件
+
+在 device plugin 的世界，要知道一台節點還剩幾張卡，`kubectl describe node` 就看得到。現在 11 顆裝置裡有 8 顆正在被用，同樣看一次節點：
+
+```console
+$ kubectl describe node aks-drasim-30601265-vmss000000
+Capacity / Allocatable:  只有 cpu、ephemeral-storage、hugepages-1Gi、hugepages-2Mi、memory、pods 六項
+
+Non-terminated Pods:          (16 in total)
+  Namespace   Name                    CPU Requests  CPU Limits  Memory Requests  Memory Limits
+  dra-3a      pod0                    0 (0%)        0 (0%)      0 (0%)           0 (0%)
+  dra-3b      pod-ok                  0 (0%)        0 (0%)      0 (0%)           0 (0%)
+  dra-3c/3d/3e   pod-not-bleeding-edge / pod-not-retro / pod-two / own-a / share-a / share-b …
+```
+
+`Capacity` 和 `Allocatable` 裡沒有任何裝置，正在用裝置的 pod 在節點的資源欄位裡全部是 `0 (0%)`。原因是 DRA 的裝置不走 device plugin 那種「節點上的擴充資源」，根本不寫進節點物件。
+
 ### 4f. 生命週期：哪種 claim 會跟著 pod 消失
 
 兩種寫法在刪除時也不一樣。先刪 4a 的 `pod0`，它的 claim 是 template 產生的：
@@ -540,36 +899,21 @@ claim 跟著 pod 一起消失了，原因寫在物件上。第二個指令看的
 
 ```console
 16:09:49 $ kubectl -n dra-3e delete pod share-a
-          shared-gpu   gpu-6   reservedFor=share-b       ← 還在,因為 share-b 還活著
+          shared-gpu   gpu-6   reservedFor=share-b
 16:09:58 $ kubectl -n dra-3e delete pod share-b
           shared-gpu   pending   allocation: NULL   reservedFor=(空)
 ```
 
-具名 claim 是使用者自己建的，沒有指向任何 pod 的 ownerReference，所以 pod 都刪了，物件還在。但 `reservedFor` 清空之後，`status.allocation` 變回空值、狀態回到 `pending`，裝置已經釋放。所以 template 產生的 claim 跟 pod 同生同死；具名 claim 忘了刪，留下的只是一個 API 物件，不會一直佔著裝置。
+刪除 `share-a` 後，`share-b` 仍在使用 `shared-gpu`，所以配置會保留。具名 claim 是使用者自己建的，沒有指向任何 pod 的 ownerReference，所以 pod 都刪了，物件還在。但 `reservedFor` 清空之後，`status.allocation` 變回空值、狀態回到 `pending`，裝置已經釋放。所以 template 產生的 claim 會隨 pod 刪除；具名 claim 則保留 API 物件，不會一直佔著裝置。
 
 ## 步驟 5:回頭看節點物件
-
-在 device plugin 的世界，要知道一台節點還剩幾張卡，`kubectl describe node` 就看得到。現在 11 顆裝置裡有 8 顆正在被用，同樣看一次節點：
-
-```console
-$ kubectl describe node aks-drasim-30601265-vmss000000
-Capacity / Allocatable:  只有 cpu、ephemeral-storage、hugepages-1Gi、hugepages-2Mi、memory、pods 六項
-
-Non-terminated Pods:          (16 in total)
-  Namespace   Name                    CPU Requests  CPU Limits  Memory Requests  Memory Limits
-  dra-3a      pod0                    0 (0%)        0 (0%)      0 (0%)           0 (0%)
-  dra-3b      pod-ok                  0 (0%)        0 (0%)      0 (0%)           0 (0%)
-  dra-3c/3d/3e   pod-not-bleeding-edge / pod-not-retro / pod-two / own-a / share-a / share-b …
-```
-
-`Capacity` 和 `Allocatable` 裡沒有任何裝置，正在用裝置的 pod 在節點的資源欄位裡全部是 `0 (0%)`。原因是 DRA 的裝置不走 device plugin 那種「節點上的擴充資源」，根本不寫進節點物件。
 
 把三種做法放在一起比較：
 
 | | 資源在節點物件上長什麼樣 | 查「誰佔了什麼」看哪裡 |
 |---|---|---|
 | device plugin(Day 0／3) | `Capacity` 與 `Allocatable` 都有 `nvidia.com/gpu: 1`,`Allocated resources` 直接算給你看 | `describe node` 就夠 |
-| HAMi(Day 3–4) | 一樣是擴充資源(`nvidia.com/gpu`、`nvidia.com/gpumem`),切卡帳本另外塞在 `hami.io/*` annotation | `describe node` 加解析 annotation 加 WebUI |
+| HAMi(Day 3–4) | `Capacity` 與 `Allocatable` 只有 `nvidia.com/gpu` 這項擴充資源,記憶體與算力規格在節點的 `hami.io/node-nvidia-register` annotation,配置量在 scheduler extender 記憶體與 pod annotation | `describe node` 加解析 annotation 加 WebUI |
 | DRA(本日) | 完全不出現,節點物件上零痕跡 | `kubectl get resourceslices`(供給)加 `kubectl get resourceclaims -A`(需求) |
 
 Day 3 的[「`kubectl describe node` 查不到 VRAM 餘額」](sprint1-day3-hami-memory-isolation.md#mine-2)只是少了一項；DRA 是整套裝置都不在節點物件上。所以多數讀節點 `allocatable` 來算剩餘容量的工具，都看不到 DRA 的裝置，要改成讀 ResourceSlice 和 ResourceClaim，見[疑難排解：節點上看不到 DRA 的裝置](#mine-3)。
@@ -580,7 +924,13 @@ Day 3 的[「`kubectl describe node` 查不到 VRAM 餘額」](sprint1-day3-hami
 
 ## 步驟 6:卸載，並確認 ResourceSlice 什麼時候才消失
 
-先刪掉所有測試 pod、template、具名 claim 和自建的 `mixed-gpu.example.com`，這時全叢集已經沒有 claim，但 chart 建的兩個 DeviceClass 還在，因為 driver 還沒卸。接著卸載兩個 release，並在前後各看一次 ResourceSlice：
+依檔案刪掉所有測試 pod、template、具名 claim 和自建的 `mixed-gpu.example.com`：
+
+```bash
+kubectl delete -f 03-a-basic-claimtemplate.yaml -f 03-b-cel-memory.yaml -f 03-c-cel-exclude.yaml -f 03-d-multi-device.yaml -f 03-e-sharing.yaml
+```
+
+這時全叢集已經沒有 claim，但 chart 建的兩個 DeviceClass 還在，因為 driver 還沒卸。接著卸載兩個 release，並在前後各看一次 ResourceSlice：
 
 ```console
 16:15:37 $ kubectl get resourceslices --no-headers | wc -l
@@ -620,21 +970,6 @@ gpuspot  1.35.6              Standard_NC4as_T4_v3   0       Succeeded           
 
 ## 疑難排解
 
-### 做出裝置差異的設定都依賴被關掉的 alpha 功能 {#mine-1}
-
-**症狀**：driver 裝好，裝置也都在，但每顆的 `model`、`driverVersion`、`memory`、`compute` 完全相同，CEL 條件寫得出來卻分不出裝置。chart 裡能做出差異的三個設定（`kubeletPlugin.gpuPartitions`、`gpuAllowMultipleAllocations`、`deviceClass.extendedResourceName`）在託管叢集上都用不了。
-
-**原因**：模擬裝置的屬性在原始碼裡就是固定值；能做出差異的設定都依賴 alpha 功能，而 AKS（1.35.6）上 DRA 的 alpha 功能全部關閉，也不能改。
-
-**修法**：照步驟 3 的做法換一個 `driverName` 再裝一次，把差異做在 driver 這一層。步驟 3 做過就跳過。值檔要帶著 `drasim` 的 nodeSelector 和 spot toleration，只用 `--set` 帶 `driverName` 和裝置數的話，DaemonSet 會排不上節點：
-
-```bash
-helm install retro-gpu <chart> -n dra-example-driver \
-  -f 02-dra-driver-retro-values.yaml --wait
-```
-
-在託管叢集上規劃 DRA 功能前，先用 `kubectl get --raw /metrics | grep kubernetes_feature_enabled` 查哪些功能有開。
-
 ### `cannot allocate all claims` 不說是哪個 claim、哪條條件 {#mine-2}
 
 **症狀**：pod Pending，事件只有一行 `0/2 nodes are available: 1 cannot allocate all claims`。
@@ -665,7 +1000,7 @@ kubectl get resourceclaims -A -o json | \
 
 **原因**：ResourceSlice 是 driver 執行時自己發佈的，不在 helm release 裡，`uninstall` 刪不到它。driver 消失後，由 Kubernetes 另外回收，不是同步完成的。
 
-**修法**：判斷 driver 有沒有卸乾淨，看 ResourceSlice，不要只看 helm release；`kubectl get resourceslices` 隔一段時間再確認一次。在 driver 已卸、ResourceSlice 還沒清掉的那段時間裡另外建 claim 測過一次，當時沒有被配到這份殘留的裝置清單上，但這只代表測試當下，不保證整段時間內任何時刻都不會配到。升級 driver 版本時，chart `values.yaml` 裡的 `maxSurge: 1` 就是為了避開這段空檔：滾動更新時新舊 driver 會重疊一段時間，不會出現沒有 driver 的時候。
+**修法**：判斷 driver 有沒有卸乾淨，看 ResourceSlice，不要只看 helm release；`kubectl get resourceslices` 隔一段時間再確認一次，直到清空。升級 driver 版本時，chart `values.yaml` 裡的 `maxSurge: 1` 就是為了避開這段空檔：滾動更新時新舊 driver 會重疊一段時間，不會出現沒有 driver 的時候。
 
 ## 想一想
 

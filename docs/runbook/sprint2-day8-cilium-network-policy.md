@@ -6,6 +6,8 @@
 
 這個 sprint 處理過兩次「工作負載連到不該連的地方」：[Day 4](sprint2-day4-falco-custom-rules.md) 用 Falco 在事情發生時發告警，[Day 6](sprint2-day6-tetragon-enforcement.md) 用 Tetragon 殺掉做出違規動作的行程。這一章用第三種做法：Cilium 的網路政策，在封包層讓連線建立不起來，或在 HTTP 層拒絕特定的方法。
 
+要擋，就要寫**網路政策**：描述「哪些來源可以連到哪些 pod 的哪些埠」的規則。Kubernetes 有內建的 NetworkPolicy；Cilium 另外提供自己的資源 **CiliumNetworkPolicy**（簡稱 CNP），除了來源和埠，還能寫網域名稱和 HTTP 方法。這一章用的都是 CNP。
+
 讀完之後，一條網路政策套上去、流量卻沒照預期被擋時，你能判斷是政策根本沒被 Cilium 收下、被另一條較寬的規則蓋過，還是流量來自 hostNetwork pod，本來就不受政策管；呼叫端看到的是逾時還是 403，也能告訴你擋下它的是哪一層的規則。
 
 ## 步驟 1: 重開叢集，重建實驗用的 pod
@@ -160,8 +162,6 @@ probe → echo7 的 pod IP                 200      ← 連 Service 都不用經
 
 同命名空間全通，對外的 `example.com` 也通。要注意的是最後一行：`probe` 在另一個命名空間，直接打 `echo7` 的 pod IP 也拿到 200。Kubernetes 的命名空間只是把 API 物件分組，本身不擋任何網路流量。
 
-要擋，就要寫**網路政策**：描述「哪些來源可以連到哪些 pod 的哪些埠」的規則。Kubernetes 有內建的 NetworkPolicy；Cilium 另外提供自己的資源 **CiliumNetworkPolicy**（簡稱 CNP），除了來源和埠，還能寫網域名稱和 HTTP 方法。這一章用的都是 CNP。
-
 ### Cilium 怎麼認出一顆 pod
 
 政策寫的是「誰可以連誰」，所以 Cilium 得先能認出「誰」。直覺會想用 IP，可是 pod 重建之後 IP 就變了。來看 Cilium 實際怎麼記這些 pod。Cilium 把它管理的每個網路端點（一般就是一顆 pod）叫 **endpoint**，並替每個 endpoint 建一個 `CiliumEndpoint` 物件，縮寫是 `cep`：
@@ -196,7 +196,7 @@ $ cilium-dbg identity get 53393
 
 ![netlab 命名空間裡 client、echo7、multiport 各有自己的 identity，兩顆 svc-backend 共用 identity 53393；netlab-b 的 probe 是 17242。53393 由 app、namespace、serviceaccount、cluster 這幾個標籤決定，pod-template-hash 與 topology 標籤不列入](../assets/diagrams/s2d8-identity.svg)
 
-我們可以從圖上看到兩件事。第一，號碼跟著標籤走，不跟著 pod 走：兩顆 `svc-backend` 標籤相同，號碼就相同。把 `svc-backend` 從 2 顆擴到 3 顆，第三顆的 identity 仍然是 53393。第二，命名空間本身就是 identity 的一部分，所以 `netlab-b` 的 pod 不可能跟 `netlab` 的 pod 共用號碼，這是下一步命名空間隔離能成立的原因。反過來，替 pod 加一個標籤，identity 就會換掉，見[疑難排解：改了標籤，同一組副本短暫套用不同政策](#mine-1)。
+我們可以從圖上看到兩件事。第一，號碼跟著標籤走，不跟著 pod 走：兩顆 `svc-backend` 標籤相同，號碼就相同。把 `svc-backend` 從 2 顆擴到 3 顆，第三顆的 identity 仍然是 53393。第二，命名空間本身就是 identity 的一部分，所以 `netlab-b` 的 pod 不可能跟 `netlab` 的 pod 共用號碼，這是下一步命名空間隔離能成立的原因。反過來，替 pod 加上參與 identity 計算的標籤，identity 就會換掉，見[選做觀察：改了標籤，同一組副本的 identity 更新不同步](#mine-1)。
 
 ## 步驟 3: default-deny 與命名空間隔離 {#step-3}
 
@@ -213,17 +213,25 @@ spec:
   endpointSelector: {}                        # every endpoint in this namespace
   enableDefaultDeny: {ingress: true, egress: false}
   ingress:
-    - {}    # an empty rule: puts the endpoints into ingress enforcement mode
-            # while allowing no source. THIS is what makes it take effect —
-            # enableDefaultDeny alone is rejected, and `ingress: []` loads but
-            # enforces nothing. See mines 2 and 3.
+    - {}
 EOF
 kubectl apply -f default-deny-ingress.yaml
 ```
 
 `endpointSelector: {}` 選中這個命名空間的所有 endpoint。讓政策生效的是最後那條空規則 `- {}`：它讓選中的 endpoint 開始檢查進來的連線，卻沒有列出任何允許的來源，結果就是全部拒絕。`enableDefaultDeny` 只是把意圖寫明，單靠它不夠，下一小節會看到少了空規則會怎樣。
 
-套上之後，要確認政策有沒有在執行，得問節點上的 Cilium agent，`kubectl` 在這件事上看不到（見[疑難排解：`kubectl get cep` 的政策欄是空的](#mine-4)）。下面每一行依序是 endpoint 編號、identity、正在檢查的方向、標籤，最後兩行是實際打的結果：
+<a id="mine-4"></a>
+
+套上之後，要確認政策有沒有在執行，得問節點上的 Cilium agent。這個部署的 `CiliumEndpoint` 沒有同步 `.status.policy`，所以用 `kubectl get cep` 查政策欄位會得到 `<none>`，不能據此判斷政策未生效：
+
+```console
+$ kubectl get cep -n netlab -o custom-columns=NAME:…,IN:.status.policy.ingress.enforcing
+NAME       IN
+client     <none>       ← 政策明明在執行
+multiport  <none>
+```
+
+`kubectl get cnp` 的 `VALID` 欄只說明政策被 agent 收下，不代表它正在某個 endpoint 上執行。用 `cilium-dbg endpoint list` 查執行方向，逐條規則與計數器則用步驟 4 的 `cilium-dbg bpf policy get <endpoint 編號>` 查。下面每一行依序是 endpoint 編號、identity、正在檢查的方向、標籤，最後兩行是實際打的結果：
 
 ```console
 $ cilium-dbg endpoint list -o json | …
@@ -254,7 +262,7 @@ xx drop (Policy denied) flow … to endpoint 680, file bpf_lxc.c:2410,
 3. 目的位址是 `multiport` 的 pod IP 和 8080，不是 Service 的 ClusterIP 和 80。Day 7 的 socket LB 在 `connect()` 時就把 ClusterIP 換成了後端位址（Day 7 的[「`kubeProxyReplacement: false` 不代表 kube-proxy 在做事」](sprint2-day7-cilium-kubeproxy.md#mine-8)），政策看到的是換過之後的位址。`×4` 是同一個 SYN 被丟了四次：TCP 一直重送，呼叫端最後逾時。
 
 
-### 少了那條空規則會怎樣
+### 少了那條空規則會怎樣 {#mine-2}
 
 寫 default-deny 時，很自然會先試兩種更短的寫法。這一小節的兩段輸出是示範，取自還沒套上正確版時的紀錄。想自己試，記得試完要把正確版套回去，否則後面的步驟結果會不同。第一種只寫 `enableDefaultDeny`、不寫 `ingress`，API server 直接退件：
 
@@ -266,6 +274,8 @@ The CiliumNetworkPolicy "default-deny-ingress" is invalid:
 ```
 
 CRD 要求 `spec` 裡至少要有一個規則區段。對有寫該方向規則的政策而言，`enableDefaultDeny` 預設就是 `true`，這個欄位的用途其實是設成 `false`：讓一條政策套上去時，不要把 endpoint 切成預設拒絕。它是規則的修飾，不能單獨成為一條規則。這種失敗至少看得到，API server 退件，原本套著的政策不受影響。
+
+<a id="mine-3"></a>
 
 第二種補上一個空陣列 `ingress: []`，`kubectl apply` 就成功了，但流量完全沒變：
 
@@ -291,7 +301,7 @@ probe  → svc-multiport   PORT-8080     ← 完全沒變
 
 `kubectl apply` 回 `created`，結束碼是 0，沒有任何警告。如果你已經套過正確版，同名的政策會被這一版覆蓋，這裡顯示的會是 `configured`，而且套著正確版時被擋住的流量會重新通過。唯一的線索是 `kubectl get cnp` 的 `VALID` 欄是 `False`，以及 `.status.conditions` 裡的原因：一條規則至少要有 Ingress、IngressDeny、Egress、EgressDeny 其中一個，空陣列不算。agent 沒有收下這條政策，所以流量照舊。
 
-換句話說，無效的網路政策不會讓流量停下來，而是讓流量照常通過，跟沒套一樣。套完政策，先看 `VALID` 欄，再實際打一次，不要只看 `kubectl apply` 有沒有成功。
+換句話說，無效的網路政策不會讓流量停下來，而是讓流量照常通過，跟沒套一樣。套完政策，先看 `VALID` 欄，再實際打一次，不要只看 `kubectl apply` 有沒有成功。在 CI 裡要擋這種情況，檢查 `.status.conditions[?(@.type=="Valid")].status`，不要只看 `kubectl apply` 的結束碼。
 
 如果你照著試了這兩種寫法，用步驟一開始那份正確的檔案重新套回去：
 
@@ -422,17 +432,20 @@ Allow    Egress      ANY                        ANY          NONE            -  
 ```yaml
   egress:
     - toEndpoints:
-        - matchLabels: {"k8s:k8s-app": kube-dns}
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
       toPorts:
-        - ports: [{port: "53", protocol: ANY}]
+        - ports:
+            - {port: "53", protocol: ANY}
           rules:
-            dns: [{matchPattern: "*"}]    # without this there is no DNS proxy,
-                                          # and toFQDNs never learns any address
+            dns:
+              - matchPattern: "*"
     - toFQDNs:
         - matchName: "example.com"
 ```
 
-完整檔案（kube-dns 的標籤在完整檔案裡寫成兩個鍵，意思相同）：
+這裡的 `toEndpoints` 同時指定 `kube-system` 命名空間與 `k8s-app: kube-dns`，選取叢集 DNS 的 pod。[Cilium 官方跨命名空間範例](https://docs.cilium.io/en/stable/security/policy/kubernetes/#specifying-namespace-in-endpointselector-fromendpoints-toendpoints)也使用這兩個條件。完整檔案如下：
 
 ```bash
 cat > fqdn-egress.yaml <<'EOF'
@@ -496,7 +509,7 @@ Endpoint  Source  FQDN                TTL   IPs
 2272      lookup  www.google.com.     30    <addr-d>,…
 ```
 
-Cilium 並沒有事先把 `example.com` 解析成固定的 IP，而是站在 DNS 查詢的路上，看到答案才放行。這就是第一段 `rules.dns` 不能省的原因：沒有它，DNS 不會經過 proxy，Cilium 看不到任何解析結果，`toFQDNs` 就一直是空的。政策看起來寫對了，連線卻全部被擋。
+DNS proxy 擷取 DNS 回應中的 IP，供符合 `toFQDNs` 的政策放行。第一段 `rules.dns` 讓 DNS 查詢經過 proxy；缺少這段設定，proxy 就無法擷取解析結果，`toFQDNs` 也沒有對應的 IP 可供放行。
 
 快取裡還有 `ifconfig.me` 和 `www.google.com`，可是這兩個網域的連線剛剛被擋了，見[疑難排解：被擋掉的網域照樣查得到、進了快取](#mine-6)。
 
@@ -676,15 +689,38 @@ kubectl apply -f attacker.yaml
 要進入 `client` 的網路命名空間，得先知道 `client` 在節點上的 PID。`/proc/<pid>` 裡只有指令列，看不出屬於哪顆 pod，所以改用位址反查：逐一進入每個行程的網路命名空間讀 `eth0` 的位址，跟 `client` 的 pod IP 比對：
 
 ```bash
+ECHO7_IP=$(kubectl -n netlab get pod -l app=echo7 -o jsonpath='{.items[0].status.podIP}')
+MULTI_IP=$(kubectl -n netlab get pod -l app=multiport -o jsonpath='{.items[0].status.podIP}')
+PROBE_IP=$(kubectl -n netlab-b get pod probe -o jsonpath='{.status.podIP}')
 A() { kubectl -n attacker exec nsenter-box -- "$@"; }
 CLIENT_IP=$(kubectl -n netlab get pod client -o jsonpath='{.status.podIP}')
 pids=$(A sh -c 'for p in $(ls /proc | grep -E "^[0-9]+$"); do
   ip=$(nsenter -t $p -n ip -4 -o addr show dev eth0 2>/dev/null | awk "{print \$4}")
   [ -n "$ip" ] && echo "$p ${ip%%/*}"; done' | sort -u)
+echo "$pids"
 CLIENT_PID=$(echo "$pids" | awk -v ip="$CLIENT_IP" '$2==ip{print $1; exit}')
+PROBE_PID=$(echo "$pids"  | awk -v ip="$PROBE_IP"  '$2==ip{print $1; exit}')
 ```
 
-`probe` 的 PID 用同樣的方式查。此時 `echo7` 只准 `client` 送 GET，`multiport` 只准 `client` 打 8080。從這顆 pod 用三種方式打同樣的目標：第 0 組直接用它自己的網路；第 1 組用 `nsenter -t <client 的 PID> -n` 進入 `client` 的網路命名空間再打；第 2 組進入 `probe` 的網路命名空間再打：
+這段也查出 `probe` 的 PID，以及 `echo7`、`multiport` 的目標 IP。此時 `echo7` 只准 `client` 送 GET，`multiport` 只准 `client` 打 8080。從這顆 pod 用三種方式打同樣的目標：第 0 組直接用它自己的網路；第 1 組用 `nsenter -t <client 的 PID> -n` 進入 `client` 的網路命名空間再打；第 2 組進入 `probe` 的網路命名空間再打：
+
+```bash
+echo "=== 0) attacker 自己的 netns(hostNetwork → reserved:host) ==="
+echo -n "  GET  echo7 : "; A curl -s -o /dev/null -w '%{http_code}\n' -m 6 "http://$ECHO7_IP:8080/" || echo TIMEOUT
+echo -n "  POST echo7 : "; A curl -s -o /dev/null -w '%{http_code}\n' -m 6 -X POST -d x=1 "http://$ECHO7_IP:8080/" || echo TIMEOUT
+echo -n "  multiport:9090 : "; A curl -s -m 6 "http://$MULTI_IP:9090/" || echo TIMEOUT
+
+echo "=== 1) nsenter -t $CLIENT_PID -n(netlab/client 的 netns) ==="
+echo -n "  GET  echo7 : "; A nsenter -t "$CLIENT_PID" -n -- curl -s -o /dev/null -w '%{http_code}\n' -m 6 "http://$ECHO7_IP:8080/" || echo TIMEOUT
+echo -n "  POST echo7 : "; A nsenter -t "$CLIENT_PID" -n -- curl -s -w ' code=%{http_code}\n' -m 6 -X POST -d x=1 "http://$ECHO7_IP:8080/" || echo TIMEOUT
+echo -n "  multiport:9090 : "; A nsenter -t "$CLIENT_PID" -n -- curl -s -m 6 "http://$MULTI_IP:9090/" || echo TIMEOUT
+
+echo "=== 2) nsenter -t $PROBE_PID -n(netlab-b/probe 的 netns) ==="
+echo -n "  GET  echo7 : "; A nsenter -t "$PROBE_PID" -n -- curl -s -o /dev/null -w '%{http_code}\n' -m 6 "http://$ECHO7_IP:8080/" || echo TIMEOUT
+echo -n "  multiport:8080 : "; A nsenter -t "$PROBE_PID" -n -- curl -s -m 6 "http://$MULTI_IP:8080/" || echo TIMEOUT
+```
+
+三組請求的結果如下。第 1 組裡的 `multiport:8080` 那一行，是腳本以外另外發的一次請求，腳本裡沒有對應的指令：
 
 ```console
 === 0) 攻擊者用自己的網路命名空間（hostNetwork: true）===
@@ -727,11 +763,9 @@ Allow    Ingress     reserved:host      ANY      NONE      968     12
 
 從圖上看，決定結果的是封包從哪個網路命名空間出發。從 `client` 或 `probe` 的命名空間出發，帶的是那顆 pod 的 identity，套的是那顆 pod 的政策；從節點的命名空間出發，帶的是 `reserved:host`，碰到的是那一行無條件的允許。所以在預設設定下，能建立 hostNetwork pod 的人，從同一個節點發出的連線就不受任何網路政策限制，而這件事在 `kubectl get cnp` 上完全看不出來。要處理它，先限制誰能建立 hostNetwork pod，再區分本機 host 到 endpoint 的放行設定與主機流量政策，見[疑難排解：同節點的 hostNetwork pod 仍能連到受限服務](#mine-9)。
 
-## 疑難排解
+## 選做觀察：改了標籤，同一組副本的 identity 更新不同步 {#mine-1}
 
-### 改了標籤，同一組副本短暫套用不同政策 {#mine-1}
-
-**症狀**：給兩顆 `svc-backend` 加一個 `tier=extra` 標籤，之後一段時間內，兩顆副本的 identity 不一樣：
+想觀察標籤變更後的 identity 更新，可以給兩顆 `svc-backend` 加一個 `tier=extra` 標籤。下面的紀錄中，兩顆副本的 identity 曾短暫不同：
 
 ```console
 $ kubectl -n netlab label pod -l app=svc-backend tier=extra --overwrite
@@ -746,32 +780,11 @@ $ cilium-dbg endpoint list
 （再 10 秒）兩顆都是 3065
 ```
 
-**原因**：identity 由標籤組合決定（步驟 2），加了標籤就會換一個新號碼；政策又是綁在 identity 上，所以改標籤等於改這顆 pod 適用哪些政策。換號需要時間，而且同一個 Deployment 的副本不是同時換的：一顆已經是 3065，另一顆還停在 `waiting-for-identity`，約 10–20 秒後才一致。這段時間裡，兩顆副本套用的政策不同。
+identity 由參與計算的標籤組合決定。這次加上 `tier=extra` 後，一顆副本已換成 3065，另一顆仍是 53393、狀態為 `waiting-for-identity`；再過 10 秒，兩顆才都變成 3065。這段紀錄只顯示 identity 更新不同步，沒有比較規則或流量，不能據此判定兩顆副本適用的政策不同。
 
-**修法**：在 Cilium 叢集上，要把標籤當成網路身分的一部分。替 pod 加查詢用的標籤（`tier`、`owner` 之類）之前，先確認有沒有政策會因此選中它或不再選中它，並預期會有十幾秒的不一致。
+標籤變更是否改變適用規則，取決於政策的 selector 是否因此選中或不再選中這些 pod。替 pod 加查詢用的標籤（`tier`、`owner` 之類）之前，先確認相關 selector 的條件。
 
-### `enableDefaultDeny` 單獨寫，`kubectl apply` 被退件 {#mine-2}
-
-CRD 要求 `spec` 至少有一個規則區段，`enableDefaultDeny` 只是修飾，不能單獨成立。正確寫法見[步驟 3](#step-3)。
-
-### `ingress: []` 套上去成功，流量卻完全沒變 {#mine-3}
-
-空陣列不算一條規則，agent 沒有收下這條政策（`kubectl get cnp` 的 `VALID` 是 `False`），流量照常通過，完整輸出見[步驟 3](#step-3)。在 CI 裡要擋這種情況，檢查 `.status.conditions[?(@.type=="Valid")].status`，不要只看 `kubectl apply` 的結束碼。
-
-### `kubectl get cep` 的政策欄是空的 {#mine-4}
-
-**症狀**：想用 `kubectl` 確認哪些 endpoint 正在執行政策，政策欄卻全是 `<none>`，即使政策確實在擋流量：
-
-```console
-$ kubectl get cep -n netlab -o custom-columns=NAME:…,IN:.status.policy.ingress.enforcing
-NAME       IN
-client     <none>       ← 政策明明在執行
-multiport  <none>
-```
-
-**原因**：`CiliumEndpoint` 的 `.status.policy` 在這個部署裡沒有內容。Cilium 預設不把 endpoint 的政策狀態同步到這個物件上。
-
-**修法**：問節點上的 agent。`cilium-dbg endpoint list` 看每個 endpoint 正在檢查哪個方向，`cilium-dbg bpf policy get <endpoint 編號>` 看逐條規則與計數器。`kubectl get cnp` 的 `VALID` 欄只說明政策被 agent 收下了，不代表它正在某個 endpoint 上執行。這跟 Day 7 的情況類似：`kubectl` 看得到的物件狀態，和 BPF map 裡實際的狀態，要分開確認。
+## 疑難排解
 
 ### 加了一條更窄的規則，流量沒有變少 {#mine-5}
 
@@ -815,7 +828,7 @@ multiport  <none>
 
 ## 小結
 
-Cilium 的網路政策不看 IP，看的是 identity：一組標籤對應一個號碼，命名空間也是其中一個標籤，所以命名空間隔離擋得住直接打 pod IP，而改一個標籤就等於改了這顆 pod 適用的政策。政策是允許清單，同一個 endpoint 上的規則取聯集，加規則只會放寬；無效的政策則會讓流量照常通過，跟沒套一樣，`kubectl apply` 成功不代表它在執行，要看 `VALID` 欄並問 agent。L4 規則在 BPF 程式裡直接丟封包，呼叫端只看到逾時；L7 規則把連線交給 Envoy，呼叫端很快拿到 403，代價是每個請求多約 0.5 ms，而且應用本身完全不知道有這個請求。之後遇到「政策套了卻沒擋住」，先看政策有沒有被收下、有沒有更寬的規則，再看流量是不是從 hostNetwork pod 來的：在預設設定下，同節點的 hostNetwork pod 仍能連到受限服務。
+Cilium 的網路政策不看 IP，看的是 identity：一組標籤對應一個號碼，命名空間也是其中一個標籤，所以命名空間隔離擋得住直接打 pod IP，而標籤變更是否改變適用規則，要看政策的 selector。政策是允許清單，同一個 endpoint 上的規則取聯集，加規則只會放寬；無效的政策則會讓流量照常通過，跟沒套一樣，`kubectl apply` 成功不代表它在執行，要看 `VALID` 欄並問 agent。L4 規則在 BPF 程式裡直接丟封包，呼叫端只看到逾時；L7 規則把連線交給 Envoy，呼叫端很快拿到 403，代價是每個請求多約 0.5 ms，而且應用本身完全不知道有這個請求。之後遇到「政策套了卻沒擋住」，先看政策有沒有被收下、有沒有更寬的規則，再看流量是不是從 hostNetwork pod 來的：在預設設定下，同節點的 hostNetwork pod 仍能連到受限服務。
 
 ## 延伸閱讀
 
